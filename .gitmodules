@@ -1,0 +1,3 @@
+[submodule "ns-mirror"]
+	path = ns-mirror
+	url = git@github.com:AmbiqAI/ns-mirror.git
