@@ -35,14 +35,15 @@ modules      += ns-mirror/neuralspot/ns-rpc
 # External modules
 modules      += ns-mirror/extern/AmbiqSuite/$(AS_VERSION)
 modules      += ns-mirror/extern/CMSIS/CMSIS-DSP-1.15.0
-modules      += ns-mirror/extern/tensorflow/bb4fc83d_Mar_28_2024
+modules      += ns-mirror/extern/tensorflow/$(TF_VERSION)
 modules      += ns-mirror/extern/SEGGER_RTT/R7.70a
 modules      += ns-mirror/extern/erpc/R1.9.1
 
 # Add-on modules
-# modules += modules/ns-sensors
-# modules += modules/ns-physiokit
-# modules += modules/ns-tileio/tio-usb
+modules += modules/ns-as7058
+modules += modules/ns-physiokit
+modules += modules/ns-sensors
+modules += modules/ns-tileio/tio-usb
 
 TARGET = $(local_app_name)
 sources := $(wildcard src/*.c)
@@ -60,10 +61,16 @@ CFLAGS     += $(addprefix -D,$(DEFINES))
 CFLAGS     += $(addprefix -I ,$(includes_api))  # needed for modules
 
 
+ifeq ($(BOARD),apollo5b)
+LINKER_EXT := _sbl
+else ifeq ($(BOARD),apollo4p)
+LINKER_EXT :=
+endif
+
 ifeq ($(TOOLCHAIN),arm)
-LINKER_FILE := ns-mirror/neuralspot/ns-core/src/$(BOARD)/$(COMPDIR)/linker_script_sbl.sct
+LINKER_FILE := ns-mirror/neuralspot/ns-core/src/$(BOARD)/$(COMPDIR)/linker_script$(LINKER_EXT).sct
 else ifeq ($(TOOLCHAIN),arm-none-eabi)
-LINKER_FILE := ns-mirror/neuralspot/ns-core/src/$(BOARD)/$(COMPDIR)/linker_script_sbl.ld
+LINKER_FILE := ns-mirror/neuralspot/ns-core/src/$(BOARD)/$(COMPDIR)/linker_script$(LINKER_EXT).ld
 endif
 
 
