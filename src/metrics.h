@@ -37,6 +37,9 @@ typedef struct {
     float32_t segmentIps;
     float32_t arrhythmiaIps;
     float32_t qos;
+    float32_t denoiseuIpspw;
+    float32_t segmentuIpspw;
+    float32_t arrhythmiaIpspw;
 } metrics_ecg_results_t;
 
 

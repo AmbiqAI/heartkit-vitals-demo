@@ -29,7 +29,6 @@
 #include "constants.h"
 #include "store.h"
 #include "pmic.h"
-
 #include "sensor.h"
 #include "nstdb_noise.h"
 #include "tflm.h"
@@ -39,7 +38,7 @@
 #include "metrics.h"
 #include "ringbuffer.h"
 
-#if APOLLO_SOC_TYPE == APOLLO5_SOC
+#ifdef AM_PART_APOLLO5B
 #include <arm_mve.h>
 #endif
 
@@ -101,7 +100,6 @@ uint32_t RTOS_AppGetRuntimeCounterValueFromISR(void) {
 static TaskHandle_t ecgTaskHandle;
 static TaskHandle_t ppgTaskHandle;
 static TaskHandle_t cpuTaskHandle;
-static TaskHandle_t appSetupTask;
 static TaskStatus_t xTaskDetails[5];
 static
 tio_usb_context_t tioUsbCtx = {
@@ -200,7 +198,7 @@ set_speed_mode(uint8_t mode) {
     mode = MIN(mode, 1);
     if (appState.speedMode != mode) {
         appState.speedMode = mode;
-        ns_set_performance_mode(mode ? NS_MAXIMUM_PERF : NS_MINIMUM_PERF);
+        ns_set_performance_mode((ns_power_mode_e)(appState.segMode ? HP_CPU_MODE : LP_CPU_MODE));
         ns_lp_printf("CPU Speed Mode: %d\n", appState.speedMode);
     }
 }
@@ -261,7 +259,10 @@ send_ecg_metrics() {
     buffer[5] = ecgMetResults.segmentIps;
     buffer[6] = ecgMetResults.arrhythmiaIps;
     buffer[7] = ecgMetResults.qos;
-    tio_usb_send_slot_data(0, 1, (uint8_t *)buffer, 8*sizeof(float32_t));
+    buffer[8] = ecgMetResults.denoiseuIpspw;
+    buffer[9] = ecgMetResults.segmentuIpspw;
+    buffer[10] = ecgMetResults.arrhythmiaIpspw;
+    tio_usb_send_slot_data(0, 1, (uint8_t *)buffer, 11*sizeof(float32_t));
 }
 
 
@@ -353,8 +354,9 @@ void
 send_cpu_metrics() {
     float32_t buffer[60];
     buffer[0] = appMetResults.cpuPercUtil;
-    buffer[1] = appMetResults.batteryHours;
-    tio_usb_send_slot_data(2, 1, (uint8_t *)buffer, 2*sizeof(float32_t));
+    buffer[1] = appMetResults.batteryDays;
+    buffer[2] = appMetResults.avgAiIps;
+    tio_usb_send_slot_data(2, 1, (uint8_t *)buffer, 3*sizeof(float32_t));
 }
 
 void
@@ -427,9 +429,9 @@ CpuProcessTask(void *pvParameters)
         // pmic_display_values(&g_pmicMetrics);
         totalTaskPerc = ecgTaskPerc + ppgTaskPerc;
         appMetResults.cpuPercUtil = 100 - cpuIdlePerc;
-        float32_t avgPower = ((100 - cpuIdlePerc)*8.90 + cpuIdlePerc*1.50)/100.0;
-        // CR2032 225 mah battery x 3.3V = 742.5 mWh
-        appMetResults.batteryHours = (225*3.3)/avgPower;
+        float32_t avgPower = ((100.0 - cpuIdlePerc)*AVG_INFERENCE_POWER + (float32_t)cpuIdlePerc*AVG_SLEEP_POWER)/100.0;
+        appMetResults.batteryDays = BATT_POWER_CAP/avgPower/24.0;
+        appMetResults.avgAiIps = (ecgMetResults.denoiseIps + ecgMetResults.segmentIps + ecgMetResults.arrhythmiaIps)/3.0;
 
         ringbuffer_push(&rbEcgCpuTx, &ecgTaskPerc, 1);
         ringbuffer_push(&rbPpgCpuTx, &ppgTaskPerc, 1);
@@ -465,6 +467,12 @@ EcgProcessTask(void *pvParameters) {
         ns_timer_clear(&ecgTimerCfg);
         check_webusb_state();
 
+        // // Add 20 random values to ringbuffer
+        // for (size_t i = 0; i < 20; i++) {
+        //     float32_t val = 0.1f*(float32_t)i;
+        //     ringbuffer_push(&rbEcgSensor, &val, 1);
+        // }
+
         ///////////////////////////////////////////////////////////////////////
         // ECG PREPROCESSING BLOCK
         ///////////////////////////////////////////////////////////////////////
@@ -478,6 +486,7 @@ EcgProcessTask(void *pvParameters) {
         // ECG DENOSING BLOCK
         ///////////////////////////////////////////////////////////////////////
         if (ringbuffer_len(&rbEcgDen) >= ECG_DEN_WINDOW_LEN) {
+            ns_set_performance_mode(NS_MAXIMUM_PERF);
             tickUs = ns_us_ticker_read(&ecgTimerCfg);
 
             // Grab data from ringbuffer
@@ -500,11 +509,11 @@ EcgProcessTask(void *pvParameters) {
             ringbuffer_push(&rbEcgRawSeg, &ecgDenInout[ECG_DEN_PAD_LEN], ECG_DEN_VALID_LEN);
 
             // Apply biquad filter for DSP and AI modes
-            if (appState.denoiseMode == DenoiseModeDsp) {
+            if (appState.denoiseMode == DenoiseModeDsp || appState.denoiseMode == DenoiseModeAi) {
                 err = pk_apply_biquad_filtfilt_f32(&ecgFilterCtx, ecgDenInout, ecgDenInout, ECG_DEN_WINDOW_LEN, ecgDenScratch);
             }
             // Denoise using AI model
-            else if (appState.denoiseMode == DenoiseModeAi) {
+            if (appState.denoiseMode == DenoiseModeAi) {
                 err = ecg_denoise_inference(ecgDenInout, ecgDenInout, 0, ECG_DEN_THRESHOLD);
             } else {
                 err = 0;
@@ -531,13 +540,17 @@ EcgProcessTask(void *pvParameters) {
             ringbuffer_seek(&rbEcgDen, ECG_DEN_VALID_LEN);
             deltaUs = ns_us_ticker_read(&ecgTimerCfg) - tickUs;
             ecgMetResults.denoiseIps = 1000000.0/deltaUs;
+            // Inferences per second per watt
+            ecgMetResults.denoiseuIpspw = 1e3 * ecgMetResults.denoiseIps / AVG_INFERENCE_POWER;
             ns_lp_printf("<ECG DENOISE Time: %d ms (err=%d) >\n", deltaUs/1000, err);
+            ns_set_performance_mode((ns_power_mode_e)(appState.segMode ? HP_CPU_MODE : LP_CPU_MODE));
         }
 
         ///////////////////////////////////////////////////////////////////////
         // ECG SEGMENTATION BLOCK
         ///////////////////////////////////////////////////////////////////////
         else if (ringbuffer_len(&rbEcgSeg) >= ECG_SEG_WINDOW_LEN) {
+            ns_set_performance_mode(NS_MAXIMUM_PERF);
             tickUs = ns_us_ticker_read(&ecgTimerCfg);
             ringbuffer_peek(&rbEcgSeg, ecgSegInout, ECG_SEG_WINDOW_LEN);
 
@@ -566,13 +579,16 @@ EcgProcessTask(void *pvParameters) {
             ringbuffer_seek(&rbEcgSeg, ECG_SEG_VALID_LEN);
             deltaUs = ns_us_ticker_read(&ecgTimerCfg) - tickUs;
             ecgMetResults.segmentIps = 1000000.0/deltaUs;
-            ns_lp_printf("<ECG SEGMENT Time: %d (err=%d) >\n", deltaUs/1000, err);
+            ecgMetResults.segmentuIpspw = 1e3 * ecgMetResults.segmentIps / AVG_INFERENCE_POWER;
+            ns_lp_printf("<ECG SEGMENT Time: %d ms (err=%d) >\n", deltaUs/1000, err);
+            ns_set_performance_mode((ns_power_mode_e)(appState.segMode ? HP_CPU_MODE : LP_CPU_MODE));
         }
 
         ///////////////////////////////////////////////////////////////////////
         // ECG ARRHYTHMIA/METRICS BLOCK
         ///////////////////////////////////////////////////////////////////////
         else if (MIN(ringbuffer_len(&rbEcgMet), ringbuffer_len(&rbEcgMaskMet)) >= ECG_MET_WINDOW_LEN) {
+            ns_set_performance_mode(NS_MAXIMUM_PERF);
             tickUs = ns_us_ticker_read(&ecgTimerCfg);
 
             // Grab data from ringbuffers
@@ -597,13 +613,16 @@ EcgProcessTask(void *pvParameters) {
             deltaUs = ns_us_ticker_read(&ecgTimerCfg) - tickUs;
             ecgMetResults.arrhythmiaIps = 1000000.0/deltaUs;
 
+            ecgMetResults.arrhythmiaIpspw = 1e3 * ecgMetResults.arrhythmiaIps / AVG_INFERENCE_POWER;
+
             // Store metrics
             ringbuffer_seek(&rbEcgMet, ECG_MET_VALID_LEN);
             ringbuffer_seek(&rbEcgMaskMet, ECG_MET_VALID_LEN);
 
             // Broadcast metrics
             send_ecg_metrics();
-            ns_lp_printf("<ECG METRICS Time: %d (err=%d) >\n", deltaUs/1000, err);
+            ns_lp_printf("<ECG METRICS Time: %d ms (err=%d) >\n", deltaUs/1000, err);
+            ns_set_performance_mode((ns_power_mode_e)(appState.segMode ? HP_CPU_MODE : LP_CPU_MODE));
         }
 
         ///////////////////////////////////////////////////////////////////////
@@ -725,22 +744,12 @@ PpgProcessTask(void *pvParameters) {
 }
 
 
-void
-SetupTask(void *pvParameters)
-{
-    xTaskCreate(EcgProcessTask, "EcgProcessTask", 1024, 0, 1, &ecgTaskHandle);
-    xTaskCreate(PpgProcessTask, "PpgProcessTask", 2048, 0, 1, &ppgTaskHandle);
-    vTaskSuspend(NULL);
-    while (1) { };
-}
-
-
 int
 main(void)
 {
     uint32_t value;
     sensorCtx.inputSource = appState.inputSource;
-    nsPwrCfg.eAIPowerMode = appState.speedMode ? NS_MAXIMUM_PERF : NS_MINIMUM_PERF;
+    nsPwrCfg.eAIPowerMode = (ns_power_mode_e)(appState.speedMode ? HP_CPU_MODE : LP_CPU_MODE);
 
     tioUsbCtx.slot_update_cb = &received_slot_data;
     tioUsbCtx.uio_update_cb = &received_uio_state;
@@ -755,21 +764,22 @@ main(void)
     NS_TRY(ns_timer_init(&ecgTimerCfg), "Timer Init failed.\n");
     NS_TRY(ns_timer_init(&ppgTimerCfg), "Timer 2 Init failed.\n");
     // NS_TRY(pmic_init(), "PMIC Setup failed.\n");
+    ns_lp_printf("PMIC Setup Success\n");
     NS_TRY(sensor_init(&sensorCtx), "Sensor Init failed.\n");
     NS_TRY(tflm_init(), "TFLM Init Failed\n");
+    ns_delay_us(200000);
+    // pmic_start(0);
+    ns_itm_printf_enable();
+    ns_interrupt_master_enable();
+
     NS_TRY(ecg_denoise_init(), "ECG Segmentation Init Failed\n");
     NS_TRY(ecg_segmentation_init(), "ECG Segmentation Init Failed\n");
     NS_TRY(ecg_arrhythmia_init(), "ECG Arrhythmia Init Failed\n");
     NS_TRY(metrics_init(&metricsCfg), "Metrics Init Failed\n");
     NS_TRY(tio_usb_init(&tioUsbCtx), "TIO Init Failed\n");
     ns_delay_us(200000);
-    // pmic_start(0);
-    ns_itm_printf_enable();
-    ns_interrupt_master_enable();
-    ns_delay_us(200000);
     NS_TRY(sensor_configure(), "Sensor Configure failed.\n");
     NS_TRY(sensor_start(), "Sensor Start failed.\n");
-    // xTaskCreate(SetupTask, "Setup", 512, 0, 3, &appSetupTask);
     xTaskCreate(EcgProcessTask, "EcgProcessTask", 1024, 0, 1, &ecgTaskHandle);
     xTaskCreate(PpgProcessTask, "PpgProcessTask", 1024, 0, 1, &ppgTaskHandle);
     xTaskCreate(CpuProcessTask, "CpuProcessTask",  512, 0, 1, &cpuTaskHandle);

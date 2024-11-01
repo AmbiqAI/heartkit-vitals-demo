@@ -18,7 +18,7 @@
 
 ns_power_config_t nsPwrCfg = {
     .api = &ns_power_V1_0_0,
-    .eAIPowerMode = NS_MAXIMUM_PERF,
+    .eAIPowerMode = NS_MINIMUM_PERF,
     .bNeedAudAdc = false,
     .bNeedSharedSRAM = true,
     .bNeedCrypto = true,
@@ -32,17 +32,6 @@ ns_power_config_t nsPwrCfg = {
     // .bNeedXtal = true
 };
 
-
-// static int volatile btn0Pressed = false;
-// static int volatile btn1Pressed = false;
-// ns_button_config_t nsBtnCfg = {
-//     .api = &ns_button_V1_0_0,
-//     .button_0_enable = true,
-//     .button_1_enable = true,
-//     .button_0_flag = &btn0Pressed,
-//     .button_1_flag = &btn1Pressed
-// };
-
 ns_core_config_t nsCoreCfg = {
     .api = &ns_core_V1_0_0
 };
@@ -52,9 +41,11 @@ ns_i2c_config_t nsI2cCfg = {
     .iom = I2C_IOM
 };
 
+
 ns_spi_config_t nsSpiCfg = {
-    .iom = 1
+    .iom = SPI_IOM
 };
+
 
 ns_timer_config_t ecgTimerCfg = {
     .api = &ns_timer_V1_0_0,
@@ -113,18 +104,9 @@ rb_config_t rbPpg2Sensor = {
 static float32_t ecgSosState[4 * ECG_SOS_LEN] = {0};
 // {b0, b1, b2, a1, a2}
 static float32_t ecgSos[5 * ECG_SOS_LEN] = {
-//    0.2467691808982006, 0.4935383617964012, 0.2467691808982006, -0.4141296048598937, -0.36229096617676754,
-//    1.0, 0.0, -1.0, 0.8213745394235588, 0.14232107570294283,
-//    1.0, -2.0, 1.0, 1.9684516644108876, -0.9694342914476478
-   0.016752146191797653, 0.033504292383595306, 0.016752146191797653, -0.30622194637462763, -0.05449269463537451,
-   1.0, 2.0, 1.0, -0.344393306862485, -0.15985880409401879,
-   1.0, 2.0, 1.0, -0.41412960485989386, -0.3622909661767674,
-   1.0, 2.0, 1.0, -0.5310464459467606, -0.7218241622476405,
-   1.0, 0.0, -1.0, 0.8213745394235586, 0.14232107570294292,
-   1.0, -2.0, 1.0, 1.9406726557765677, -0.9416707574272809,
-   1.0, -2.0, 1.0, 1.9518568600455033, -0.9528464655870746,
-   1.0, -2.0, 1.0, 1.9684516644108876, -0.9694342914476478,
-   1.0, -2.0, 1.0, 1.9883972215155044, -0.98938015479297
+   0.2467691808982006, 0.4935383617964012, 0.2467691808982006, -0.4141296048598937, -0.36229096617676754,
+   1.0, 0.0, -1.0, 0.8213745394235588, 0.14232107570294283,
+   1.0, -2.0, 1.0, 1.9684516644108876, -0.9694342914476478
 };
 arm_biquad_casd_df1_inst_f32 ecgFilterCtx = {.numStages = ECG_SOS_LEN, .pState = ecgSosState, .pCoeffs = ecgSos};
 
@@ -282,7 +264,8 @@ uint16_t ecgMaskMetData[ECG_MET_WINDOW_LEN];
 
 metrics_app_results_t appMetResults = {
     .cpuPercUtil = 0,
-    .batteryHours = 0
+    .batteryDays = 0,
+    .avgAiIps = 0,
 };
 
 hrv_td_metrics_t ecgHrvMetrics;
@@ -294,7 +277,10 @@ metrics_ecg_results_t ecgMetResults = {
     .denoiseIps = 1,
     .segmentIps = 1,
     .arrhythmiaIps = 1,
-    .qos = 0
+    .qos = 0,
+    .denoiseuIpspw = 1,
+    .segmentuIpspw = 1,
+    .arrhythmiaIpspw = 1
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -410,7 +396,7 @@ app_state_t appState = {
     .bwNoiseLevel = 0,
     .maNoiseLevel = 0,
     .emNoiseLevel = 0,
-    .speedMode = 1,
+    .speedMode = 0,
     .denoiseMode = DenoiseModeAi,
     .segMode = SegmentationModeAi,
     .arrMode = ArrhythmiaModeAi,

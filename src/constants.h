@@ -16,14 +16,29 @@
 extern "C" {
 #endif
 
-#define APOLLO4_SOC (1)
-#define APOLLO5_SOC (2)
-#define APOLLO_SOC_TYPE APOLLO5_SOC
+// #define APOLLO4_SOC (1)
+// #define APOLLO5_SOC (2)
+// #define APOLLO_SOC_TYPE APOLLO5_SOC
 
 
 ///////////////////////////////////////////////////////////////////////////////
 // Sensor Configuration
 ///////////////////////////////////////////////////////////////////////////////
+
+#ifdef AM_PART_APOLLO5B
+#define LP_CPU_MODE (0)
+#define HP_CPU_MODE (2)
+#define SPI_IOM (2)
+#define AVG_SLEEP_POWER (1.15) // 1.50 mW prod is 77% of this so 1.15 mW
+#define AVG_INFERENCE_POWER (7.87) // 10.215 mW prod is 77% of this so 7.87 mW
+#else
+#define LP_CPU_MODE (0)
+#define HP_CPU_MODE (2)
+#define SPI_IOM (1)
+#define AVG_SLEEP_POWER (2.12) // mW
+#define AVG_INFERENCE_POWER (13.65)  // mW
+#endif
+#define BATT_POWER_CAP (743.0) // 225*3.3
 
 #define I2C_IOM (1)
 #define I2C_SPEED_HZ (100000)
@@ -46,7 +61,7 @@ extern "C" {
 
 #define NORM_STD_EPS (0.001)
 
-#define ECG_SOS_LEN (9)
+#define ECG_SOS_LEN (3)
 #define ECG_SAMPLE_RATE (200)
 #define ECG_TARGET_RATE (100)
 #define ECG_DS_RATE (ECG_SAMPLE_RATE / ECG_TARGET_RATE)
@@ -61,7 +76,7 @@ extern "C" {
 // ECG Denoise Configuration
 ///////////////////////////////////////////////////////////////////////////////
 
-#define ECG_DEN_MODEL_SIZE_KB (63)
+#define ECG_DEN_MODEL_SIZE_KB (140)
 #define ECG_DEN_THRESHOLD (0.5)
 #define ECG_DEN_WINDOW_LEN (250)
 #define ECG_DEN_PAD_LEN (25)
@@ -72,7 +87,7 @@ extern "C" {
 // ECG Segmentation Configuration
 ///////////////////////////////////////////////////////////////////////////////
 
-#define ECG_SEG_MODEL_SIZE_KB (27)
+#define ECG_SEG_MODEL_SIZE_KB (145)
 #define ECG_SEG_THRESHOLD (0.5)
 #define ECG_SEG_NUM_CLASS (4) // 2
 #define ECG_SEG_WINDOW_LEN (250)
@@ -91,7 +106,7 @@ extern "C" {
 // ECG Arrhythmia Configuration
 ///////////////////////////////////////////////////////////////////////////////
 
-#define ECG_ARR_MODEL_SIZE_KB (22)
+#define ECG_ARR_MODEL_SIZE_KB (40)
 #define ECG_ARR_THRESHOLD (0.4)
 #define ECG_ARR_WINDOW_LEN (500)
 #define ECG_ARR_PAD_LEN (0)

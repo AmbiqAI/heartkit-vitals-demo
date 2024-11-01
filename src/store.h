@@ -59,7 +59,8 @@ typedef enum ArrhythmiaMode ArrhythmiaMode;
 
 typedef struct {
     float32_t cpuPercUtil;
-    float32_t batteryHours;
+    float32_t batteryDays;
+    float32_t avgAiIps;
 } metrics_app_results_t;
 
 
