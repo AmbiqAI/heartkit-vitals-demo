@@ -38,7 +38,7 @@ extern "C" {
 #define AVG_SLEEP_POWER (2.12) // mW
 #define AVG_INFERENCE_POWER (13.65)  // mW
 #endif
-#define BATT_POWER_CAP (743.0) // 225*3.3
+#define BATT_POWER_CAP (1485) // 2*225*3.3
 
 #define I2C_IOM (1)
 #define I2C_SPEED_HZ (100000)

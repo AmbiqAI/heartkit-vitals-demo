@@ -60,7 +60,7 @@ rtos_time_init() {
     g_rtos_stat_timer_cnt = 0;
     am_hal_timer_config_t rtosTimerConfig;
     am_hal_timer_default_config_set(&rtosTimerConfig);
-    // 4096/(96 megahertz)*6 = 256us
+    // 4096/(96 megahertz)*6 = 256us precision
     rtosTimerConfig.eInputClock = AM_HAL_TIMER_CLOCK_HFRC_DIV4K;
     rtosTimerConfig.eTriggerSource = AM_HAL_TIMER_TRIGGER_TMR4_OUT1;
     ui32Status = am_hal_timer_config(timerNum, &rtosTimerConfig);
@@ -100,9 +100,9 @@ uint32_t RTOS_AppGetRuntimeCounterValueFromISR(void) {
 static TaskHandle_t ecgTaskHandle;
 static TaskHandle_t ppgTaskHandle;
 static TaskHandle_t cpuTaskHandle;
-static TaskStatus_t xTaskDetails[5];
-static
-tio_usb_context_t tioUsbCtx = {
+static TaskHandle_t tioTaskHandle;
+static TaskStatus_t xTaskDetails[10];
+static tio_usb_context_t tioUsbCtx = {
     .uio_update_cb = NULL,
     .slot_update_cb = NULL
 };
@@ -133,15 +133,18 @@ void flush_pipeline() {
     ringbuffer_flush(&rbPpg2Met);
     ringbuffer_flush(&rbPpg1Tx);
     ringbuffer_flush(&rbPpg2Tx);
+    ringbuffer_flush(&rbTioUsbTx);
 }
 
-static uint32_t g_webusb_available = false;
+volatile static uint32_t g_webusb_available = false;
 void
 check_webusb_state() {
     uint32_t webusb_available = webusb_is_connected();
     if (webusb_available != g_webusb_available) {
         g_webusb_available = webusb_available;
         if (g_webusb_available) {
+            ns_lp_printf("WebUSB Connected\n");
+            flush_pipeline();
             send_uio_state();
         }
     }
@@ -216,6 +219,7 @@ set_speed_mode(uint8_t mode) {
 void
 send_ecg_signals() {
     uint8_t buffer[240];
+    uint8_t tioBuffer[TIO_USB_PACKET_LEN];
     float32_t val_f32;
     uint16_t val_u16;
     int16_t val_i16;
@@ -241,7 +245,9 @@ send_ecg_signals() {
         memcpy(&buffer[length], &val_i16, sizeof(int16_t));
         length += sizeof(int16_t);
     }
-    tio_usb_send_slot_data(0, 0, (uint8_t *)buffer, length);
+    tio_usb_pack_slot_data(0, 0, (uint8_t *)buffer, length, tioBuffer);
+    ringbuffer_push(&rbTioUsbTx, tioBuffer, 1);
+
 }
 
 /**
@@ -251,6 +257,7 @@ send_ecg_signals() {
 void
 send_ecg_metrics() {
     float32_t buffer[60];
+    uint8_t tioBuffer[TIO_USB_PACKET_LEN];
     buffer[0] = ecgMetResults.hr;
     buffer[1] = ecgMetResults.hrv;
     buffer[2] = ecgMetResults.denoiseCossim;
@@ -262,7 +269,8 @@ send_ecg_metrics() {
     buffer[8] = ecgMetResults.denoiseuIpspw;
     buffer[9] = ecgMetResults.segmentuIpspw;
     buffer[10] = ecgMetResults.arrhythmiaIpspw;
-    tio_usb_send_slot_data(0, 1, (uint8_t *)buffer, 11*sizeof(float32_t));
+    tio_usb_pack_slot_data(0, 1, (uint8_t *)buffer, 11*sizeof(float32_t), tioBuffer);
+    ringbuffer_push(&rbTioUsbTx, tioBuffer, 1);
 }
 
 
@@ -273,6 +281,7 @@ send_ecg_metrics() {
 void
 send_ppg_signals() {
     uint8_t buffer[240];
+    uint8_t tioBuffer[TIO_USB_PACKET_LEN];
     float32_t val_f32;
     int16_t val_i16;
     uint32_t length;
@@ -282,24 +291,24 @@ send_ppg_signals() {
         ringbuffer_len(&rbPpg1Tx),
         ringbuffer_len(&rbPpg2Tx)
     );
-    numSamples = MIN(numSamples, 240/(1*sizeof(int16_t) + 2*sizeof(int16_t)));
     if (numSamples == 0) { return; }
+    numSamples = MIN(numSamples, 240/(1*sizeof(int16_t) + 2*sizeof(int16_t)));
     length = 0;
     for (size_t i = 0; i < numSamples; i++) {
         memcpy(&buffer[length], &mask, sizeof(uint16_t));
         length += sizeof(uint16_t);
         ringbuffer_pop(&rbPpg1Tx, &val_f32, 1);
-        // val_i16 = (int16_t)CLIP(TIO_SLOT0_SCALE*val_f32, -32768, 32767);
         val_i16 = val_f32;
         memcpy(&buffer[length], &val_i16, sizeof(int16_t));
         length += sizeof(int16_t);
         ringbuffer_pop(&rbPpg2Tx, &val_f32, 1);
-        // val_i16 = (int16_t)CLIP(TIO_SLOT0_SCALE*val_f32, -32768, 32767);
         val_i16 = val_f32;
         memcpy(&buffer[length], &val_i16, sizeof(int16_t));
         length += sizeof(int16_t);
     }
-    tio_usb_send_slot_data(1, 0, (uint8_t *)buffer, length);
+    tio_usb_pack_slot_data(1, 0, (uint8_t *)buffer, length, tioBuffer);
+    ringbuffer_push(&rbTioUsbTx, tioBuffer, 1);
+
 }
 
 /**
@@ -309,15 +318,18 @@ send_ppg_signals() {
 void
 send_ppg_metrics() {
     float32_t buffer[60];
+    uint8_t tioBuffer[TIO_USB_PACKET_LEN];
     buffer[0] = ppgMetResults.pr;
     buffer[1] = ppgMetResults.spo2;
     buffer[2] = ppgMetResults.qos;
-    tio_usb_send_slot_data(1, 1, (uint8_t *)buffer, 3*sizeof(float32_t));
+    tio_usb_pack_slot_data(1, 1, (uint8_t *)buffer, 3*sizeof(float32_t), tioBuffer);
+    ringbuffer_push(&rbTioUsbTx, tioBuffer, 1);
 }
 
 void
 send_cpu_signals() {
     uint8_t buffer[240];
+    uint8_t tioBuffer[TIO_USB_PACKET_LEN];
     float32_t val_f32;
     uint32_t length;
     uint8_t qos = SIG_QOS_GOOD;
@@ -343,7 +355,9 @@ send_cpu_signals() {
         memcpy(&buffer[length], &val_f32, sizeof(float32_t));
         length += sizeof(float32_t);
     }
-    tio_usb_send_slot_data(2, 0, (uint8_t *)buffer, length);
+    tio_usb_pack_slot_data(2, 0, (uint8_t *)buffer, length, tioBuffer);
+    ringbuffer_push(&rbTioUsbTx, tioBuffer, 1);
+
 }
 
 /**
@@ -353,15 +367,18 @@ send_cpu_signals() {
 void
 send_cpu_metrics() {
     float32_t buffer[60];
+    uint8_t tioBuffer[TIO_USB_PACKET_LEN];
     buffer[0] = appMetResults.cpuPercUtil;
     buffer[1] = appMetResults.batteryDays;
     buffer[2] = appMetResults.avgAiIps;
-    tio_usb_send_slot_data(2, 1, (uint8_t *)buffer, 3*sizeof(float32_t));
+    tio_usb_pack_slot_data(2, 1, (uint8_t *)buffer, 3*sizeof(float32_t), tioBuffer);
+    ringbuffer_push(&rbTioUsbTx, tioBuffer, 1);
 }
 
 void
 send_uio_state() {
     uint8_t uioBuffer[8];
+    uint8_t tioBuffer[TIO_USB_PACKET_LEN];
     uioBuffer[TIO_UIO_INPUT_SEL_IDX] = appState.inputSource;
     uioBuffer[TIO_UIO_BW_NOISE_IDX] = appState.bwNoiseLevel;
     uioBuffer[TIO_UIO_MA_NOISE_IDX] = appState.maNoiseLevel;
@@ -370,7 +387,9 @@ send_uio_state() {
     uioBuffer[TIO_UIO_DEN_MODE_IDX] = appState.denoiseMode;
     uioBuffer[TIO_UIO_SEG_MODE_IDX] = appState.segMode;
     uioBuffer[TIO_UIO_ARR_MODE_IDX] = appState.arrMode;
-    tio_usb_send_uio_state(uioBuffer, 8);
+    // tio_usb_send_uio_state(uioBuffer, 8);
+    tio_usb_pack_slot_data(0, 2, uioBuffer, 8, tioBuffer);
+    ringbuffer_push(&rbTioUsbTx, tioBuffer, 1);
 }
 
 void
@@ -393,43 +412,71 @@ received_uio_state(const uint8_t *data, uint32_t length) {
     send_uio_state();
 }
 
+void
+TioProcessTask(void *pvParameters)
+{
+    uint8_t packet[TIO_USB_PACKET_LEN];
+    while (true) {
+        check_webusb_state();
+        if (ringbuffer_len(&rbTioUsbTx) > 0 && g_webusb_available && tio_usb_tx_available()) {
+            ringbuffer_pop(&rbTioUsbTx, packet, 1);
+            taskENTER_CRITICAL();
+            tio_usb_send_slot_packet(packet, TIO_USB_PACKET_LEN);
+            taskEXIT_CRITICAL();
+        }
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
+}
 
 void
 CpuProcessTask(void *pvParameters)
 {
     uint32_t cpuIdlePerc = 0;
     uint32_t runTimeTicks = 0;
-    float32_t ecgTaskPerc = 0, ppgTaskPerc = 0, totalTaskPerc = 0;
-    uint32_t prevRun = 0, prevEcg = 0, prevPpg = 0;
-    uint32_t runDelta, ecgDelta, ppgDelta;
+    float32_t ecgTaskPerc = 0, ppgTaskPerc = 0, totalTaskPerc = 0, cpuTaskPerc, tioTaskPerc = 0;
+    uint32_t prevRun = 0, prevEcg = 0, prevPpg = 0, prevCpu, prevTio;
+    uint32_t runDelta, ecgDelta, ppgDelta, cpuDelta, tioDelta;
     size_t numTasks = 0, counter = 0;
     while (true) {
-        cpuIdlePerc = ulTaskGetIdleRunTimePercent();
-        numTasks = uxTaskGetSystemState(xTaskDetails, 5, &runTimeTicks);
+        // cpuIdlePerc = ulTaskGetIdleRunTimePercent();
+        numTasks = uxTaskGetSystemState(xTaskDetails, 10, &runTimeTicks);
         runDelta = runTimeTicks - prevRun;
         prevRun = runTimeTicks;
         for (size_t i = 0; i < numTasks; i++) {
             // Get utilization for ECG task
             if (xTaskDetails[i].xTaskNumber == 1)
             {
-                ecgDelta = xTaskDetails[i].ulRunTimeCounter - prevEcg;
+                ecgDelta = (xTaskDetails[i].ulRunTimeCounter - prevEcg) >> 0;
                 prevEcg = xTaskDetails[i].ulRunTimeCounter;
                 ecgTaskPerc = 100.0f*(float32_t)ecgDelta/(float32_t)runDelta;
             }
+            // Get utilization for PPG task
             else if (xTaskDetails[i].xTaskNumber == 2)
             {
-                ppgDelta = xTaskDetails[i].ulRunTimeCounter - prevPpg;
+                ppgDelta = (xTaskDetails[i].ulRunTimeCounter - prevPpg) >> 0;
                 prevPpg = xTaskDetails[i].ulRunTimeCounter;
                 ppgTaskPerc = 100.0f*(float32_t)ppgDelta/(float32_t)runDelta;
             }
+            // Get utilization for CPU task
+            else if (xTaskDetails[i].xTaskNumber == 3)
+            {
+                cpuDelta = (xTaskDetails[i].ulRunTimeCounter - prevCpu) >> 0;
+                prevCpu = xTaskDetails[i].ulRunTimeCounter;
+                cpuTaskPerc = 100.0f*(float32_t)cpuDelta/(float32_t)runDelta;
+            }
+            // Get utilization for TIO task
+            else if (xTaskDetails[i].xTaskNumber == 4)
+            {
+                tioDelta = (xTaskDetails[i].ulRunTimeCounter - prevTio) >> 0;
+                prevTio = xTaskDetails[i].ulRunTimeCounter;
+                tioTaskPerc = 100.0f*(float32_t)tioDelta/(float32_t)runDelta;
+            }
         }
 
-        // NOTE: Cant read live PMIC since sensor I/O leaks current to MCU voltage rail
-        // pmic_read_values(&g_pmicMetrics);
-        // pmic_display_values(&g_pmicMetrics);
+        cpuIdlePerc = 100 - 100*(prevEcg/2 + prevPpg/2)/runTimeTicks;
         totalTaskPerc = ecgTaskPerc + ppgTaskPerc;
         appMetResults.cpuPercUtil = 100 - cpuIdlePerc;
-        float32_t avgPower = ((100.0 - cpuIdlePerc)*AVG_INFERENCE_POWER + (float32_t)cpuIdlePerc*AVG_SLEEP_POWER)/100.0;
+        float32_t avgPower = (appMetResults.cpuPercUtil*AVG_INFERENCE_POWER + (100 - appMetResults.cpuPercUtil)*AVG_SLEEP_POWER)/100.0;
         appMetResults.batteryDays = BATT_POWER_CAP/avgPower/24.0;
         appMetResults.avgAiIps = (ecgMetResults.denoiseIps + ecgMetResults.segmentIps + ecgMetResults.arrhythmiaIps)/3.0;
 
@@ -444,7 +491,6 @@ CpuProcessTask(void *pvParameters)
             send_cpu_metrics();
         }
         counter += 1;
-
         // Delay 100 ms (10 Hz)
         vTaskDelay(pdMS_TO_TICKS(100));
     }
@@ -465,10 +511,9 @@ EcgProcessTask(void *pvParameters) {
     while (true) {
         err = 0;
         ns_timer_clear(&ecgTimerCfg);
-        check_webusb_state();
 
-        // // Add 20 random values to ringbuffer
-        // for (size_t i = 0; i < 20; i++) {
+        // // Add 100 random values to ringbuffer
+        // for (size_t i = 0; i < 100; i++) {
         //     float32_t val = 0.1f*(float32_t)i;
         //     ringbuffer_push(&rbEcgSensor, &val, 1);
         // }
@@ -486,7 +531,6 @@ EcgProcessTask(void *pvParameters) {
         // ECG DENOSING BLOCK
         ///////////////////////////////////////////////////////////////////////
         if (ringbuffer_len(&rbEcgDen) >= ECG_DEN_WINDOW_LEN) {
-            ns_set_performance_mode(NS_MAXIMUM_PERF);
             tickUs = ns_us_ticker_read(&ecgTimerCfg);
 
             // Grab data from ringbuffer
@@ -543,14 +587,12 @@ EcgProcessTask(void *pvParameters) {
             // Inferences per second per watt
             ecgMetResults.denoiseuIpspw = 1e3 * ecgMetResults.denoiseIps / AVG_INFERENCE_POWER;
             ns_lp_printf("<ECG DENOISE Time: %d ms (err=%d) >\n", deltaUs/1000, err);
-            ns_set_performance_mode((ns_power_mode_e)(appState.segMode ? HP_CPU_MODE : LP_CPU_MODE));
         }
 
         ///////////////////////////////////////////////////////////////////////
         // ECG SEGMENTATION BLOCK
         ///////////////////////////////////////////////////////////////////////
         else if (ringbuffer_len(&rbEcgSeg) >= ECG_SEG_WINDOW_LEN) {
-            ns_set_performance_mode(NS_MAXIMUM_PERF);
             tickUs = ns_us_ticker_read(&ecgTimerCfg);
             ringbuffer_peek(&rbEcgSeg, ecgSegInout, ECG_SEG_WINDOW_LEN);
 
@@ -581,14 +623,12 @@ EcgProcessTask(void *pvParameters) {
             ecgMetResults.segmentIps = 1000000.0/deltaUs;
             ecgMetResults.segmentuIpspw = 1e3 * ecgMetResults.segmentIps / AVG_INFERENCE_POWER;
             ns_lp_printf("<ECG SEGMENT Time: %d ms (err=%d) >\n", deltaUs/1000, err);
-            ns_set_performance_mode((ns_power_mode_e)(appState.segMode ? HP_CPU_MODE : LP_CPU_MODE));
         }
 
         ///////////////////////////////////////////////////////////////////////
         // ECG ARRHYTHMIA/METRICS BLOCK
         ///////////////////////////////////////////////////////////////////////
         else if (MIN(ringbuffer_len(&rbEcgMet), ringbuffer_len(&rbEcgMaskMet)) >= ECG_MET_WINDOW_LEN) {
-            ns_set_performance_mode(NS_MAXIMUM_PERF);
             tickUs = ns_us_ticker_read(&ecgTimerCfg);
 
             // Grab data from ringbuffers
@@ -604,7 +644,6 @@ EcgProcessTask(void *pvParameters) {
 
             if (appState.arrMode == ArrhythmiaModeDsp) {
                 ecgMetResults.arrhythmiaLabel = ecgMetResults.hr < 40 ? ECG_ARR_SB : ecgMetResults.hr > 100 ? ECG_ARR_GSVT : ECG_ARR_SR;
-                ns_lp_printf("HR: %f\n", ecgMetResults.hr);
             } else if (appState.arrMode == ArrhythmiaModeAi) {
                 ecgMetResults.arrhythmiaLabel = ecg_arrhythmia_inference(ecgMetData, ECG_ARR_THRESHOLD);
             } else {
@@ -622,7 +661,6 @@ EcgProcessTask(void *pvParameters) {
             // Broadcast metrics
             send_ecg_metrics();
             ns_lp_printf("<ECG METRICS Time: %d ms (err=%d) >\n", deltaUs/1000, err);
-            ns_set_performance_mode((ns_power_mode_e)(appState.segMode ? HP_CPU_MODE : LP_CPU_MODE));
         }
 
         ///////////////////////////////////////////////////////////////////////
@@ -649,6 +687,13 @@ PpgProcessTask(void *pvParameters) {
     while (true) {
         err = 0;
         ns_timer_clear(&ppgTimerCfg);
+
+        // // Add 10 random values to ringbuffer
+        // for (size_t i = 0; i < 10; i++) {
+        //     float32_t val = 0.1f*(float32_t)i;
+        //     ringbuffer_push(&rbPpg1Sensor, &val, 1);
+        //     ringbuffer_push(&rbPpg2Sensor, &val, 1);
+        // }
 
         ///////////////////////////////////////////////////////////////////////
         // PPG PREPROCESSING BLOCK
@@ -757,18 +802,15 @@ main(void)
     NS_TRY(ns_core_init(&nsCoreCfg), "Core Init failed.\b");
     NS_TRY(ns_power_config(&nsPwrCfg), "Power Init Failed\n");
     ns_delay_us(200000); // 200ms
-    // NS_TRY(ns_i2c_interface_init(&nsI2cCfg, I2C_SPEED_HZ), "I2C Init Failed\n");
     NS_TRY(ns_spi_interface_init(&nsSpiCfg, AM_HAL_IOM_2MHZ, AM_HAL_IOM_SPI_MODE_2), "SPI Init Failed\n");
 
     NS_TRY(rtos_time_init(), "RTOS Timer Init failed.\n");
     NS_TRY(ns_timer_init(&ecgTimerCfg), "Timer Init failed.\n");
     NS_TRY(ns_timer_init(&ppgTimerCfg), "Timer 2 Init failed.\n");
-    // NS_TRY(pmic_init(), "PMIC Setup failed.\n");
     ns_lp_printf("PMIC Setup Success\n");
     NS_TRY(sensor_init(&sensorCtx), "Sensor Init failed.\n");
     NS_TRY(tflm_init(), "TFLM Init Failed\n");
     ns_delay_us(200000);
-    // pmic_start(0);
     ns_itm_printf_enable();
     ns_interrupt_master_enable();
 
@@ -783,6 +825,7 @@ main(void)
     xTaskCreate(EcgProcessTask, "EcgProcessTask", 1024, 0, 1, &ecgTaskHandle);
     xTaskCreate(PpgProcessTask, "PpgProcessTask", 1024, 0, 1, &ppgTaskHandle);
     xTaskCreate(CpuProcessTask, "CpuProcessTask",  512, 0, 1, &cpuTaskHandle);
+    xTaskCreate(TioProcessTask, "TioProcessTask",  512, 0, 1, &tioTaskHandle);
     vTaskStartScheduler();
     while (1) {};
 }

@@ -392,7 +392,7 @@ rb_config_t rbPpg2Tx = {
 };
 
 app_state_t appState = {
-    .inputSource = 0,
+    .inputSource = 1,
     .bwNoiseLevel = 0,
     .maNoiseLevel = 0,
     .emNoiseLevel = 0,
@@ -439,4 +439,14 @@ ina228_context_t g_ina228Ctx = {
     .i2c_write_read = &ina228_write_read,
     .i2c_read = &ina228_read,
     .i2c_write = &ina228_write
+};
+
+
+static uint8_t tioUsbTxBuffer[512*TIO_USB_PACKET_LEN];
+rb_config_t rbTioUsbTx = {
+    .buffer = (void *)tioUsbTxBuffer,
+    .dlen = TIO_USB_PACKET_LEN,
+    .size = 512,
+    .head = 0,
+    .tail = 0,
 };

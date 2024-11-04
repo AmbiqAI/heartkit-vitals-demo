@@ -202,6 +202,8 @@ extern app_state_t appState;
 extern pmic_metrics_results_t g_pmicMetrics;
 extern ina228_context_t g_ina228Ctx;
 
+extern rb_config_t rbTioUsbTx;
+
 #ifdef __cplusplus
 }
 #endif

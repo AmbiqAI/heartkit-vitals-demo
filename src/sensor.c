@@ -245,7 +245,6 @@ sensor_as7058_callback(
     if (result != ERR_SUCCESS)
     {
         // ns_lp_printf("as7058a_spo2_a0_set_input returned error %d.\n", result);
-        ns_lp_printf("x");
     }
     if (ready_for_execution)
     {
@@ -299,7 +298,7 @@ sensor_as7058_callback(
         // RED LED
         if (sub_sample_idx == AS7058_SUB_SAMPLE_ID_PPG1_SUB1)
         {
-            if (g_sensorCtx->inputSource == LIVE_INPUT_MODE)
+            if (true || (g_sensorCtx->inputSource == LIVE_INPUT_MODE))
             {
                 // arm_biquad_cascade_df1_f32(&ppg1FilterCtx, samples_f32, samples_f32, sample_cnt);
                 ringbuffer_push(&rbPpg1Sensor, samples_f32, sample_cnt);
@@ -313,7 +312,7 @@ sensor_as7058_callback(
         else if (sub_sample_idx == AS7058_SUB_SAMPLE_ID_PPG1_SUB2)
         {
             // arm_biquad_cascade_df1_f32(&ppg2FilterCtx, samples_f32, samples_f32, sample_cnt);
-            if (g_sensorCtx->inputSource == LIVE_INPUT_MODE)
+            if (true || g_sensorCtx->inputSource == LIVE_INPUT_MODE)
             {
                 ringbuffer_push(&rbPpg2Sensor, samples_f32, sample_cnt);
             }
