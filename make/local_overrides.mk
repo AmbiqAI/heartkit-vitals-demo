@@ -1,6 +1,6 @@
 PLATFORM := apollo510_evb
-AS_VERSION := ambiqsuite_b36aab438d0f
-TF_VERSION := Oct_08_2024_e86d97b6
+AS_VERSION := R5.2.0
+TF_VERSION := ns_tflm_2024_11_25
 
 # PLATFORM := apollo4p_blue_kxr_evb
 # AS_VERSION := R4.4.1

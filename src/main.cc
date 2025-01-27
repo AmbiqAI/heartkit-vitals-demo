@@ -139,7 +139,7 @@ void flush_pipeline() {
 volatile static uint32_t g_webusb_available = false;
 void
 check_webusb_state() {
-    uint32_t webusb_available = webusb_is_connected();
+    uint32_t webusb_available = true; // webusb_is_connected();
     if (webusb_available != g_webusb_available) {
         g_webusb_available = webusb_available;
         if (g_webusb_available) {
@@ -583,7 +583,7 @@ EcgProcessTask(void *pvParameters) {
             // Seek ringbuffers
             ringbuffer_seek(&rbEcgDen, ECG_DEN_VALID_LEN);
             deltaUs = ns_us_ticker_read(&ecgTimerCfg) - tickUs;
-            ecgMetResults.denoiseIps = 1000000.0/deltaUs;
+            ecgMetResults.denoiseIps = 2000000.0/deltaUs;
             // Inferences per second per watt
             ecgMetResults.denoiseuIpspw = 1e3 * ecgMetResults.denoiseIps / AVG_INFERENCE_POWER;
             ns_lp_printf("<ECG DENOISE Time: %d ms (err=%d) >\n", deltaUs/1000, err);
@@ -620,7 +620,7 @@ EcgProcessTask(void *pvParameters) {
 
             ringbuffer_seek(&rbEcgSeg, ECG_SEG_VALID_LEN);
             deltaUs = ns_us_ticker_read(&ecgTimerCfg) - tickUs;
-            ecgMetResults.segmentIps = 1000000.0/deltaUs;
+            ecgMetResults.segmentIps = 2000000.0/deltaUs;
             ecgMetResults.segmentuIpspw = 1e3 * ecgMetResults.segmentIps / AVG_INFERENCE_POWER;
             ns_lp_printf("<ECG SEGMENT Time: %d ms (err=%d) >\n", deltaUs/1000, err);
         }
@@ -650,7 +650,7 @@ EcgProcessTask(void *pvParameters) {
                 ecgMetResults.arrhythmiaLabel = 0;
             }
             deltaUs = ns_us_ticker_read(&ecgTimerCfg) - tickUs;
-            ecgMetResults.arrhythmiaIps = 1000000.0/deltaUs;
+            ecgMetResults.arrhythmiaIps = 2000000.0/deltaUs;
 
             ecgMetResults.arrhythmiaIpspw = 1e3 * ecgMetResults.arrhythmiaIps / AVG_INFERENCE_POWER;
 
@@ -805,8 +805,8 @@ main(void)
     NS_TRY(ns_spi_interface_init(&nsSpiCfg, AM_HAL_IOM_2MHZ, AM_HAL_IOM_SPI_MODE_2), "SPI Init Failed\n");
 
     NS_TRY(rtos_time_init(), "RTOS Timer Init failed.\n");
-    NS_TRY(ns_timer_init(&ecgTimerCfg), "Timer Init failed.\n");
-    NS_TRY(ns_timer_init(&ppgTimerCfg), "Timer 2 Init failed.\n");
+    NS_TRY(ns_timer_init(&ecgTimerCfg), "ECG Timer Init failed.\n");
+    NS_TRY(ns_timer_init(&ppgTimerCfg), "ECG Timer Init failed.\n");
     ns_lp_printf("PMIC Setup Success\n");
     NS_TRY(sensor_init(&sensorCtx), "Sensor Init failed.\n");
     NS_TRY(tflm_init(), "TFLM Init Failed\n");

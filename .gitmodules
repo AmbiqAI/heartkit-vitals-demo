@@ -1,6 +1,7 @@
 [submodule "ns-mirror"]
 	path = ns-mirror
 	url = git@github.com:AmbiqAI/ns-mirror.git
+	branch = freertos-stats
 [submodule "modules/ns-sensors"]
 	path = modules/ns-sensors
 	url = git@github.com:AmbiqAI/ns-sensors.git
