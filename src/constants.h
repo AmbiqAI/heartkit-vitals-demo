@@ -28,7 +28,7 @@ extern "C" {
 #ifdef AM_PART_APOLLO5B
 #define LP_CPU_MODE (0)
 #define HP_CPU_MODE (2)
-#define SPI_IOM (2)
+#define SPI_IOM (5)
 #define AVG_SLEEP_POWER (1.15) // 1.50 mW prod is 77% of this so 1.15 mW
 #define AVG_INFERENCE_POWER (7.87) // 10.215 mW prod is 77% of this so 7.87 mW
 #else
