@@ -31,6 +31,7 @@ static am_hal_gpio_pincfg_t g_osalGpioPincfg = {
 static volatile uint8_t g_spo2_ready_for_execution = 0;
 static volatile uint8_t g_rrm_ready_for_execution = 0;
 static volatile as7058_extract_metadata_t g_extract_metadata;
+static volatile uint32_t g_as7058_int_isr_count = 0;
 static sensor_context_t *g_sensorCtx;
 static uint8_t g_led_current = 0;
 static uint8_t g_pd_offset_current = 0;
@@ -39,14 +40,51 @@ static uint8_t g_pd_offset_current = 0;
 // OSAL Functions
 ///////////////////////////////////////////////////////////////////////////////
 
+static uint32_t
+as7058_osal_int_irqn_get(uint32_t gpio_num)
+{
+    if (gpio_num <= 31) {
+        return GPIO0_001F_IRQn;
+    } else if (gpio_num <= 63) {
+        return GPIO0_203F_IRQn;
+    } else if (gpio_num <= 95) {
+        return GPIO0_405F_IRQn;
+    } else if (gpio_num <= 127) {
+        return GPIO0_607F_IRQn;
+    } else if (gpio_num <= 159) {
+        return GPIO0_809F_IRQn;
+    } else if (gpio_num <= 191) {
+        return GPIO0_A0BF_IRQn;
+    } else if (gpio_num <= 223) {
+        return GPIO0_C0DF_IRQn;
+    }
+    return GPIO0_E0FF_IRQn;
+}
+
+static uint32_t
+as7058_osal_int_pin_funcsel_get(uint32_t gpio_num)
+{
+    if (gpio_num == 2) {
+        return AM_HAL_PIN_2_GPIO;
+    }
+#ifdef AM_HAL_PIN_50_GPIO
+    if (gpio_num == 50) {
+        return AM_HAL_PIN_50_GPIO;
+    }
+#endif
+    return AM_HAL_PIN_2_GPIO;
+}
+
 err_code_t
 as7058_osal_int_pin_clear(void)
 {
     uint32_t ui32IntStatus;
+    uint32_t ui32GpioNum = AS7058_OSAL_INT_PIN;
+    uint32_t ui32IrqNum = as7058_osal_int_irqn_get(ui32GpioNum);
 
     AM_CRITICAL_BEGIN
-    am_hal_gpio_interrupt_irq_status_get(GPIO0_001F_IRQn, false, &ui32IntStatus);
-    am_hal_gpio_interrupt_irq_clear(GPIO0_001F_IRQn, ui32IntStatus);
+    am_hal_gpio_interrupt_irq_status_get(ui32IrqNum, false, &ui32IntStatus);
+    am_hal_gpio_interrupt_irq_clear(ui32IrqNum, ui32IntStatus);
     AM_CRITICAL_END
 
     return ERR_SUCCESS;
@@ -71,13 +109,30 @@ err_code_t
 as7058_osal_int_pin_init(void)
 {
     uint32_t ui32GpioNum = AS7058_OSAL_INT_PIN;
+    uint32_t ui32IrqNum = as7058_osal_int_irqn_get(ui32GpioNum);
+    uint32_t ui32Status;
+    g_osalGpioPincfg.GP.cfg_b.uFuncSel = as7058_osal_int_pin_funcsel_get(ui32GpioNum);
     // Configure the GPIO pin.
-    am_hal_gpio_pinconfig(ui32GpioNum, g_osalGpioPincfg);
+    ui32Status = am_hal_gpio_pinconfig(ui32GpioNum, g_osalGpioPincfg);
+    if (ui32Status != AM_HAL_STATUS_SUCCESS)
+    {
+        ns_lp_printf("AS7058 INT pin config failed: pin=%u status=%u\n", ui32GpioNum, ui32Status);
+        return ERR_SYSTEM_CONFIG;
+    }
+
     as7058_osal_int_pin_clear();
     // Enable the GPIO interrupt.
-    am_hal_gpio_interrupt_control(AM_HAL_GPIO_INT_CHANNEL_0, AM_HAL_GPIO_INT_CTRL_INDV_ENABLE, (void *)&ui32GpioNum);
-    NVIC_SetPriority(GPIO0_001F_IRQn, AM_IRQ_PRIORITY_DEFAULT);
-    NVIC_EnableIRQ(GPIO0_001F_IRQn);
+    ui32Status = am_hal_gpio_interrupt_control(AM_HAL_GPIO_INT_CHANNEL_0, AM_HAL_GPIO_INT_CTRL_INDV_ENABLE,
+                                               (void *)&ui32GpioNum);
+    if (ui32Status != AM_HAL_STATUS_SUCCESS)
+    {
+        ns_lp_printf("AS7058 INT enable failed: pin=%u irq=%u status=%u\n", ui32GpioNum, ui32IrqNum, ui32Status);
+        return ERR_SYSTEM_CONFIG;
+    }
+
+    NVIC_SetPriority(ui32IrqNum, AM_IRQ_PRIORITY_DEFAULT);
+    NVIC_EnableIRQ(ui32IrqNum);
+    ns_lp_printf("AS7058 INT configured: pin=%u irq=%u trigger=LO2HI\n", ui32GpioNum, ui32IrqNum);
     return ERR_SUCCESS;
 }
 
@@ -85,7 +140,8 @@ err_code_t
 as7058_osal_int_pin_deinit(void)
 {
     uint32_t ui32GpioNum = AS7058_OSAL_INT_PIN;
-    NVIC_DisableIRQ(GPIO0_001F_IRQn);
+    uint32_t ui32IrqNum = as7058_osal_int_irqn_get(ui32GpioNum);
+    NVIC_DisableIRQ(ui32IrqNum);
     as7058_osal_int_pin_clear();
     am_hal_gpio_interrupt_control(AM_HAL_GPIO_INT_CHANNEL_0, AM_HAL_GPIO_INT_CTRL_INDV_DISABLE, (void *)&ui32GpioNum);
     return ERR_SUCCESS;
@@ -94,6 +150,15 @@ as7058_osal_int_pin_deinit(void)
 void
 am_gpio0_001f_isr(void)
 {
+    g_as7058_int_isr_count++;
+    as7058_osal_int_pin_clear();
+    as7058_osal_interrupt_callback();
+}
+
+void
+am_gpio0_203f_isr(void)
+{
+    g_as7058_int_isr_count++;
     as7058_osal_int_pin_clear();
     as7058_osal_interrupt_callback();
 }
@@ -355,6 +420,7 @@ err_code_t sensor_init(sensor_context_t *ctx)
 {
     char *p_interface = NULL;
     err_code_t result = ERR_SUCCESS;
+    as7058_osal_config_t osal_cfg = {0};
     uint8_t id;
     g_sensorCtx = ctx;
 
@@ -369,8 +435,17 @@ err_code_t sensor_init(sensor_context_t *ctx)
         return result;
     }
 
-    /* Configure the OS abstraction layer w/ SPI and interrupt pin */
-    result = as7058_osal_configure(nsSpiCfg, as7058_osal_int_pin_read);
+    /* Configure the OS abstraction layer w/ transport and interrupt pin */
+#if AS7058_USE_SPI
+    osal_cfg.bus = AS7058_OSAL_BUS_SPI;
+    osal_cfg.p_spi_cfg = &nsSpiCfg;
+#else
+    osal_cfg.bus = AS7058_OSAL_BUS_I2C;
+    osal_cfg.p_i2c_cfg = &nsI2cCfg;
+    osal_cfg.i2c_addr = AS7058_I2C_ADDR;
+#endif
+    osal_cfg.read_pin_state = as7058_osal_int_pin_read;
+    result = as7058_osal_configure(&osal_cfg);
     if (result != ERR_SUCCESS)
     {
         ns_lp_printf("as7058_osal_configure returned error code %d.\n", result);
@@ -497,7 +572,7 @@ sensor_configure()
 
     /* Configure register group CONTROL. */
     const as7058_reg_group_control_t control_config = {{
-        .i2c_mode = 0,
+        .i2c_mode = AS7058_USE_I2C ? 1 : 0,
         .int_cfg = 0,
         .if_cfg = 72,
         .gpio_cfg1 = 0,
@@ -530,8 +605,8 @@ sensor_configure()
         .led8_ictrl = 0,
         .led_irng1 = 255,
         .led_irng2 = 255,
-        .led_sub1 = 34,
-        .led_sub2 = 51,
+        .led_sub1 = AS7058_LED_SUB1_CFG,
+        .led_sub2 = AS7058_LED_SUB2_CFG,
         .led_sub3 = 0,
         .led_sub4 = 0,
         .led_sub5 = 0,
@@ -947,4 +1022,10 @@ sensor_stop()
         return result;
     }
     return result;
+}
+
+uint32_t
+sensor_get_as7058_int_isr_count(void)
+{
+    return g_as7058_int_isr_count;
 }

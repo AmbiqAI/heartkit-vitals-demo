@@ -788,11 +788,9 @@ PpgProcessTask(void *pvParameters) {
     }
 }
 
-
 int
 main(void)
 {
-    uint32_t value;
     sensorCtx.inputSource = appState.inputSource;
     nsPwrCfg.eAIPowerMode = (ns_power_mode_e)(appState.speedMode ? HP_CPU_MODE : LP_CPU_MODE);
 
@@ -802,7 +800,49 @@ main(void)
     NS_TRY(ns_core_init(&nsCoreCfg), "Core Init failed.\b");
     NS_TRY(ns_power_config(&nsPwrCfg), "Power Init Failed\n");
     ns_delay_us(200000); // 200ms
+
+#if AS7058_BOARD_PROFILE == AS7058_PROFILE_CLICK_I2C
+    ns_lp_printf("AS7058 profile: CLICK_I2C\n");
+#else
+    ns_lp_printf("AS7058 profile: EVK_SPI\n");
+#endif
+
+#if AS7058_USE_SPI
     NS_TRY(ns_spi_interface_init(&nsSpiCfg, AM_HAL_IOM_2MHZ, AM_HAL_IOM_SPI_MODE_2), "SPI Init Failed\n");
+    ns_lp_printf("AS7058 transport: SPI\n");
+#else
+    NS_TRY(ns_i2c_interface_init(&nsI2cCfg, AS7058_I2C_SPEED_HZ), "I2C Init Failed\n");
+    ns_lp_printf("AS7058 transport: I2C addr=0x%02X speed=%d\n", AS7058_I2C_ADDR, AS7058_I2C_SPEED_HZ);
+#endif
+
+    ns_itm_printf_enable();
+    ns_interrupt_master_enable();
+
+#if AS7058_BRINGUP_MODE
+    err_code_t sensor_init_result;
+    err_code_t sensor_config_result;
+    err_code_t sensor_start_result;
+    uint32_t int_count = 0;
+    uint32_t int_count_last = 0;
+    ns_lp_printf("AS7058 bring-up mode enabled\n");
+    sensor_init_result = sensor_init(&sensorCtx);
+    ns_lp_printf("sensor_init returned %d\n", sensor_init_result);
+    NS_TRY(sensor_init_result, "Sensor Init failed.\n");
+    sensor_config_result = sensor_configure();
+    ns_lp_printf("sensor_configure returned %d\n", sensor_config_result);
+    NS_TRY(sensor_config_result, "Sensor Configure failed.\n");
+    sensor_start_result = sensor_start();
+    ns_lp_printf("sensor_start returned %d\n", sensor_start_result);
+    NS_TRY(sensor_start_result, "Sensor Start failed.\n");
+    while (1) {
+        int_count = sensor_get_as7058_int_isr_count();
+        if (int_count != int_count_last) {
+            ns_lp_printf("AS7058 INT count=%lu (+%lu)\n", int_count, int_count - int_count_last);
+            int_count_last = int_count;
+        }
+        ns_delay_us(500000);
+    }
+#endif
 
     NS_TRY(rtos_time_init(), "RTOS Timer Init failed.\n");
     NS_TRY(ns_timer_init(&ecgTimerCfg), "ECG Timer Init failed.\n");
@@ -811,8 +851,6 @@ main(void)
     NS_TRY(sensor_init(&sensorCtx), "Sensor Init failed.\n");
     NS_TRY(tflm_init(), "TFLM Init Failed\n");
     ns_delay_us(200000);
-    ns_itm_printf_enable();
-    ns_interrupt_master_enable();
 
     NS_TRY(ecg_denoise_init(), "ECG Segmentation Init Failed\n");
     NS_TRY(ecg_segmentation_init(), "ECG Segmentation Init Failed\n");

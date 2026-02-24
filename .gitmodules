@@ -1,7 +1,3 @@
-[submodule "ns-mirror"]
-	path = ns-mirror
-	url = git@github.com:AmbiqAI/ns-mirror.git
-	branch = freertos-stats
 [submodule "modules/ns-sensors"]
 	path = modules/ns-sensors
 	url = git@github.com:AmbiqAI/ns-sensors.git
@@ -14,3 +10,7 @@
 [submodule "modules/ns-as7058"]
 	path = modules/ns-as7058
 	url = git@github.com:AmbiqAI/ns-as7058.git
+[submodule "neuralspot"]
+	path = neuralspot
+	url = git@github.com:AmbiqAI/neuralSPOT.git
+	branch = hk-rtos-fix

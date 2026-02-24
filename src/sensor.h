@@ -16,6 +16,7 @@ err_code_t sensor_init(sensor_context_t *ctx);
 err_code_t sensor_configure(void);
 err_code_t sensor_start(void);
 err_code_t sensor_stop(void);
+uint32_t sensor_get_as7058_int_isr_count(void);
 
 err_code_t
 sensor_read_spo2(float32_t *spo2, float32_t *heart_rate, float32_t *quality);

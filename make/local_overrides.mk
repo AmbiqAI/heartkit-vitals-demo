@@ -1,6 +1,6 @@
 PLATFORM := apollo510_evb
 AS_VERSION := R5.2.0
-TF_VERSION := ns_tflm_2024_11_25
+TF_VERSION := ns_tflm_2025_03_06
 
 # PLATFORM := apollo4p_blue_kxr_evb
 # AS_VERSION := R4.4.1

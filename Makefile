@@ -19,25 +19,26 @@ includes_api :=
 local_app_name := main
 
 # neuralSPOT modules
-modules      := ns-mirror/neuralspot/ns-core
-modules      += ns-mirror/neuralspot/ns-harness
-modules      += ns-mirror/neuralspot/ns-peripherals
-modules      += ns-mirror/neuralspot/ns-ipc
-modules      += ns-mirror/neuralspot/ns-audio
-modules      += ns-mirror/neuralspot/ns-utils
-modules      += ns-mirror/neuralspot/ns-features
-modules      += ns-mirror/neuralspot/ns-i2c
-modules      += ns-mirror/neuralspot/ns-spi
-modules      += ns-mirror/neuralspot/ns-usb
-modules      += ns-mirror/neuralspot/ns-rpc
+modules      := neuralspot/neuralspot/ns-core
+modules      += neuralspot/neuralspot/ns-harness
+modules      += neuralspot/neuralspot/ns-peripherals
+modules      += neuralspot/neuralspot/ns-ipc
+modules      += neuralspot/neuralspot/ns-audio
+modules      += neuralspot/neuralspot/ns-utils
+modules      += neuralspot/neuralspot/ns-features
+modules      += neuralspot/neuralspot/ns-i2c
+modules      += neuralspot/neuralspot/ns-spi
+modules      += neuralspot/neuralspot/ns-uart
+modules      += neuralspot/neuralspot/ns-usb
+modules      += neuralspot/neuralspot/ns-rpc
 
 
 # External modules
-modules      += ns-mirror/extern/AmbiqSuite/$(AS_VERSION)
-modules      += ns-mirror/extern/CMSIS/CMSIS-DSP-1.15.0
-modules      += ns-mirror/extern/tensorflow/$(TF_VERSION)
-modules      += ns-mirror/extern/SEGGER_RTT/R7.70a
-modules      += ns-mirror/extern/erpc/R1.9.1
+modules      += neuralspot/extern/AmbiqSuite/$(AS_VERSION)
+modules      += neuralspot/extern/CMSIS/CMSIS-DSP-1.15.0
+modules      += neuralspot/extern/tensorflow/$(TF_VERSION)
+# modules      += neuralspot/extern/SEGGER_RTT/R7.70a
+modules      += neuralspot/extern/erpc/R1.9.1
 
 # Add-on modules
 modules += modules/ns-as7058
@@ -68,9 +69,9 @@ LINKER_EXT :=
 endif
 
 ifeq ($(TOOLCHAIN),arm)
-LINKER_FILE := ns-mirror/neuralspot/ns-core/src/$(BOARD)/$(COMPDIR)/linker_script$(LINKER_EXT).sct
+LINKER_FILE := neuralspot/neuralspot/ns-core/src/$(BOARD)/$(COMPDIR)/linker_script$(LINKER_EXT).sct
 else ifeq ($(TOOLCHAIN),arm-none-eabi)
-LINKER_FILE := ns-mirror/neuralspot/ns-core/src/$(BOARD)/$(COMPDIR)/linker_script$(LINKER_EXT).ld
+LINKER_FILE := neuralspot/neuralspot/ns-core/src/$(BOARD)/$(COMPDIR)/linker_script$(LINKER_EXT).ld
 endif
 
 
@@ -135,6 +136,8 @@ $(JLINK_CF):
 	$(Q) echo "ExitOnError 1" > $@
 	$(Q) echo "Reset" >> $@
 	$(Q) echo "LoadFile $(BINDIR)/$(TARGET).bin, $(JLINK_PF_ADDR)" >> $@
+	$(Q) echo "Reset" >> $@
+	$(Q) echo "Go" >> $@
 	$(Q) echo "Exit" >> $@
 
 .PHONY: deploy

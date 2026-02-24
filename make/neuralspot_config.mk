@@ -3,6 +3,16 @@
 TOOLCHAIN ?= arm-none-eabi
 ifeq ($(TOOLCHAIN),arm-none-eabi)
 COMPILERNAME := gcc
+
+# Detect GCC version and set flags accordingly
+GCC_VER := $(shell arm-none-eabi-gcc --version | grep -E -o '[0-9]+\.[0-9]+\.[0-9]+')
+# GCC_VER := $(shell arm-none-eabi-gcc --version 2>&1 | sed -n 's/.* \([0-9]\+\.[0-9]\+\.[0-9]\+\).*/\1/p')
+# $(info GCC_VERSION: $(GCC_VER))
+ifeq ($(shell expr $(GCC_VER) \>= 14),1)
+GCC14 := 1
+else
+GCC14 := 0
+endif
 else ifeq ($(TOOLCHAIN),arm)
 COMPILERNAME := clang
 else ifeq ($(TOOLCHAIN),llvm)
@@ -13,7 +23,7 @@ NESTDIR := nest
 SHELL  :=/bin/bash
 
 ifndef PLATFORM
-PLATFORM := apollo5b_eb_revb
+PLATFORM := apollo510_evb
 endif
 
 ##### Target Hardware Defaults #####
@@ -28,14 +38,14 @@ ifeq ($(findstring apollo510,$(PLATFORM)),apollo510)
 BOARD := apollo5b
 endif
 
-$(info BOARD: $(BOARD))
+# $(info BOARD: $(BOARD))
 # EVB is the rest of the PLATFORM, which is the EVB
 EVB := $(wordlist 2,$(words $(subst _, ,$(PLATFORM))),$(subst _, ,$(PLATFORM)))
 
 # Replace spaces with underscores
 space := $(null) #
 EVB := $(subst $(space),_,$(EVB))
-$(info EVB: $(EVB))
+# $(info EVB: $(EVB))
 
 # Set the ARCH to apollo3, apollo4, or apollo5
 ifeq ($(findstring apollo3,$(BOARD)),apollo3)
@@ -95,10 +105,10 @@ BINDIR := $(BINDIRROOT)/$(BOARDROOT)_$(EVB)/$(TOOLCHAIN)
 
 ##### Extern Library Defaults #####
 ifndef AS_VERSION
-AS_VERSION := Apollo5B_SDK2_2024_07_02
+AS_VERSION := R5.2.0
 endif
 ifndef TF_VERSION
-TF_VERSION := Aug_23_2024_c01ca97f
+TF_VERSION := ns_tflm_2025_03_06
 endif
 SR_VERSION := R7.70a
 ERPC_VERSION := R1.9.1
@@ -139,15 +149,17 @@ endif
 
 # $(info BLE_PRESENT: $(BLE_PRESENT))
 
-ifeq ($(BLE_PRESENT),1)
-	ifeq ($(AS_VERSION),R4.3.0)
-		DEFINES+= NS_BLE_SUPPORTED
-	else ifeq ($(AS_VERSION),R4.4.1)
-		DEFINES+= NS_BLE_SUPPORTED
-	else ifeq ($(AS_VERSION),R3.1.1)
-		DEFINES+= NS_BLE_SUPPORTED
-	endif
-endif
+# ifeq ($(BLE_PRESENT),1)
+# 	ifeq ($(AS_VERSION),R4.3.0)
+# 		DEFINES+= NS_BLE_SUPPORTED
+# 	else ifeq ($(AS_VERSION),R4.4.1)
+# 		DEFINES+= NS_BLE_SUPPORTED
+# 	else ifeq ($(AS_VERSION),R3.1.1)
+# 		DEFINES+= NS_BLE_SUPPORTED
+# 	else ifeq ($(AS_VERSION),R4.5.0)
+# 		DEFINES+= NS_BLE_SUPPORTED
+# 	endif
+# endif
 
 # Set USB
 ifeq ($(PART),apollo4p)
@@ -218,7 +230,34 @@ DEFINES+= CFG_TUSB_MCU=OPT_MCU_APOLLO4
 endif
 # DEFINES+= BOARD_DEVICE_RHPORT_SPEED=OPT_MODE_HIGH_SPEED
 
+##### BLE Defines
+## BLE is only supported by neuralSPOT for AmbiqSuite R4.3.0 and later
+ifeq ($(AS_VERSION),R4.3.0)
+	BLE_SUPPORTED := $(BLE_PRESENT)
+	ifeq ($(BLE_SUPPORTED),1)
+		DEFINES+= NS_BLE_SUPPORTED
+	endif
+else ifeq ($(AS_VERSION),R4.4.1)
+	BLE_SUPPORTED := $(BLE_PRESENT)
+	ifeq ($(BLE_SUPPORTED),1)
+		DEFINES+= NS_BLE_SUPPORTED
+	endif
+else ifeq ($(AS_VERSION),R4.5.0)
+	BLE_SUPPORTED := $(BLE_PRESENT)
+	ifeq ($(BLE_SUPPORTED),1)
+		DEFINES+= NS_BLE_SUPPORTED
+	endif
+else ifeq ($(AS_VERSION),R3.1.1)
+	BLE_SUPPORTED := $(BLE_PRESENT)
+	ifeq ($(BLE_SUPPORTED),1)
+		DEFINES+= NS_BLE_SUPPORTED
+	endif
+else
+	BLE_SUPPORTED := 0
+endif
 
+# $(info BLE_SUPPORTED: $(BLE_SUPPORTED))
+# $(info DEFINES: $(DEFINES))
 
 DEFINES+= SEC_ECC_CFG=SEC_ECC_CFG_HCI
 # DEFINES+= WSF_TRACE_ENABLED
