@@ -512,12 +512,6 @@ EcgProcessTask(void *pvParameters) {
         err = 0;
         ns_timer_clear(&ecgTimerCfg);
 
-        // // Add 100 random values to ringbuffer
-        // for (size_t i = 0; i < 100; i++) {
-        //     float32_t val = 0.1f*(float32_t)i;
-        //     ringbuffer_push(&rbEcgSensor, &val, 1);
-        // }
-
         ///////////////////////////////////////////////////////////////////////
         // ECG PREPROCESSING BLOCK
         ///////////////////////////////////////////////////////////////////////
@@ -688,13 +682,6 @@ PpgProcessTask(void *pvParameters) {
         err = 0;
         ns_timer_clear(&ppgTimerCfg);
 
-        // // Add 10 random values to ringbuffer
-        // for (size_t i = 0; i < 10; i++) {
-        //     float32_t val = 0.1f*(float32_t)i;
-        //     ringbuffer_push(&rbPpg1Sensor, &val, 1);
-        //     ringbuffer_push(&rbPpg2Sensor, &val, 1);
-        // }
-
         ///////////////////////////////////////////////////////////////////////
         // PPG PREPROCESSING BLOCK
         ///////////////////////////////////////////////////////////////////////
@@ -846,7 +833,7 @@ main(void)
 
     NS_TRY(rtos_time_init(), "RTOS Timer Init failed.\n");
     NS_TRY(ns_timer_init(&ecgTimerCfg), "ECG Timer Init failed.\n");
-    NS_TRY(ns_timer_init(&ppgTimerCfg), "ECG Timer Init failed.\n");
+    NS_TRY(ns_timer_init(&ppgTimerCfg), "PPG Timer Init failed.\n");
     ns_lp_printf("PMIC Setup Success\n");
     NS_TRY(sensor_init(&sensorCtx), "Sensor Init failed.\n");
     NS_TRY(tflm_init(), "TFLM Init Failed\n");

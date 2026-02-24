@@ -126,6 +126,27 @@ The fourth row focuses on the PPG signal processing pipeline. The first tile dis
 
 The fifth and final row primarily contains all of the I/O controls. The I/O controls tile allows the user to select the input source, adjust noise levels, and select the AI modes. The input source consists of 5 subjects' pre-recorded data containing different arrhythmia conditions. In addition, the user can select live sensor data from the connected AS7058 sensor. There are three noise levels that can be adjusted: baseline wander (BW), muscle artifacts (MA), and electrode movement (EM). These are controlled via the three sliders from 0% to 100%. The I/O tile also allows the user to select the AI modes for denoising, segmentation, and arrhythmia detection. The choices include *Off*, *DSP*, and *enhanced AI*. The *DSP* option provides open-source, reference algorithms for the three blocks using traditional DSP algorithms. The *enhanced AI* option provides a more advanced AI model for denoising, segmentation, and arrhythmia detection that were generated using Ambiq's HeartKit ADK.
 
+## AS7058 Profiles
+
+This project supports compile-time AS7058 sensor profiles (board/app specific), generated from AMS/OSRAM JSON.
+
+- Full profile architecture and mapping docs: `docs/as7058_profiles.md`
+- Generator script: `tools/as7058_json_to_profile.py`
+
+Quick flow for a new profile:
+
+1. Add or update JSON under `assets/`.
+2. Generate C profile artifacts:
+   ```bash
+   tools/as7058_json_to_profile.py \
+     --json assets/<your_profile>.json \
+     --board <click|evk|any> \
+     --name <profile_name> \
+     --out src/generated/as7058_profile_<profile_name>.h
+   ```
+3. Wire the generated profile into `src/as7058_profiles.c` selection.
+4. Select it in `src/constants.h` using `AS7058_APP_PROFILE`.
+
 ## Troubleshooting
 
 If Tileio fails to connect to the EVB, please follow the steps below:

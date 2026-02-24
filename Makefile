@@ -48,6 +48,7 @@ modules += modules/ns-tileio/tio-usb
 
 TARGET = $(local_app_name)
 sources := $(wildcard src/*.c)
+sources += $(wildcard src/generated/*.c)
 sources += $(wildcard src/*.cc)
 sources += $(wildcard src/*.cpp)
 sources += $(wildcard src/*.s)
