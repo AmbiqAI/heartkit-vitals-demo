@@ -46,7 +46,9 @@ The demo contains the following AI models:
 The following items are needed to run the demo:
 
 * 1x Ambiq Apollo510 EVB (Rev 2.1)
-* 1x [AMS/OSRAM AS7058 vitals sensor](https://ams-osram.com/products/boards-kits-accessories/kits/ams-as7058-evm-eb-evaluation-kit)
+* 1x AS7058 sensor board option:
+  * [AMS/OSRAM AS7058 EVM/EVK](https://ams-osram.com/products/boards-kits-accessories/kits/ams-as7058-evm-eb-evaluation-kit) (SPI path)
+  * mikroE **Life Metrics Click** (I2C path)
 * 1x Laptop/PC with desktop Chrome browser
 * 2x USB-C cables
 * 1x Micro USB cable
@@ -75,9 +77,28 @@ The only required tool is the J-Link software, which can be downloaded from the 
 
 ### Hardware Setup
 
-The Apollo510 EVB needs to be connected to the AS7058 EVM via SPI interface along with an interrupt signal.
+Two AS7058 board paths are supported via compile-time profile selection in `src/constants.h`:
 
-Please use jumper wires to connect the following pins:
+* `AS7058_PROFILE_EVK_SPI`: AS7058 EVM/EVK over SPI
+* `AS7058_PROFILE_CLICK_I2C`: **Life Metrics Click** over I2C
+
+Set:
+
+```c
+#define AS7058_BOARD_PROFILE AS7058_PROFILE_EVK_SPI
+```
+
+or
+
+```c
+#define AS7058_BOARD_PROFILE AS7058_PROFILE_CLICK_I2C
+```
+
+#### AS7058 EVM/EVK (SPI)
+
+The Apollo510 EVB is connected to the AS7058 EVM via SPI plus interrupt.
+
+Use jumper wires:
 
 | SIGNAL NAME | AS7058 EVM | Apollo510 EVB |
 | --- | --- | --- |
@@ -88,13 +109,22 @@ Please use jumper wires to connect the following pins:
 | GND | TH1.12 | GND |
 | INT | TH2.5 | GPIO2 |
 
+#### Life Metrics Click (I2C)
+
+The Apollo510 EVB is connected to the **Life Metrics Click** via I2C plus interrupt.
+
+Firmware defaults:
+
+* I2C address: `0x55`
+* Interrupt pin: `GPIO50`
+
 ---
 
 ## Run Demo
 
 1. Connect the EVB to your computer using a USB C port MAIN_USB (J16) USB on the EVB.
-2. Connect the AS7058 EVM sensor board to your computer via the micro-USB port on the AS7058.
-3. Turn on the AS7058 EVM by pressing the ON/OFF button for ~2 seconds.
+2. Connect the selected AS7058 board (EVM/EVK or Life Metrics Click) to the EVB using the wiring for the selected `AS7058_BOARD_PROFILE`.
+3. If using AS7058 EVM/EVK, connect it via micro-USB and power it on.
 4. Power on the Apollo510 EVB by setting switch SW4 to the ON position.
 5. On your laptop, launch [Tileio Web App](https://ambiqai.github.io/tileio) using a Desktop Chrome browser.
 6. On first time accessing the web app, you will need to create a new dashboard.
@@ -137,6 +167,7 @@ Quick flow for a new profile:
 
 1. Add or update JSON under `assets/`.
 2. Generate C profile artifacts:
+
    ```bash
    tools/as7058_json_to_profile.py \
      --json assets/<your_profile>.json \
@@ -144,6 +175,7 @@ Quick flow for a new profile:
      --name <profile_name> \
      --out src/generated/as7058_profile_<profile_name>.h
    ```
+
 3. Wire the generated profile into `src/as7058_profiles.c` selection.
 4. Select it in `src/constants.h` using `AS7058_APP_PROFILE`.
 

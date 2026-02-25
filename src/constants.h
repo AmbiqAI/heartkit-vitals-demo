@@ -114,6 +114,8 @@ extern "C" {
 #define PTS_PPG_DATA_LEN (2000)
 
 #define SENSOR_BUF_LEN (4 * 64)
+#define AS7058_SENSOR_TASK_STACK_WORDS (1024)
+#define AS7058_SENSOR_TASK_PRIORITY (2)
 
 ///////////////////////////////////////////////////////////////////////////////
 // Preprocess Configuration

@@ -441,12 +441,3 @@ ina228_context_t g_ina228Ctx = {
     .i2c_write = &ina228_write
 };
 
-
-static uint8_t tioUsbTxBuffer[512*TIO_USB_PACKET_LEN];
-rb_config_t rbTioUsbTx = {
-    .buffer = (void *)tioUsbTxBuffer,
-    .dlen = TIO_USB_PACKET_LEN,
-    .size = 512,
-    .head = 0,
-    .tail = 0,
-};

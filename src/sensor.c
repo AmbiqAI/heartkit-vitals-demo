@@ -3,6 +3,8 @@
 // NS includes
 #include "ns_ambiqsuite_harness.h"
 #include "ns_spi.h"
+#include "FreeRTOS.h"
+#include "task.h"
 // AS7058 includes
 #include "error_codes.h"
 #include "as7058_chiplib.h"
@@ -33,7 +35,9 @@ static volatile uint8_t g_spo2_ready_for_execution = 0;
 static volatile uint8_t g_rrm_ready_for_execution = 0;
 static volatile as7058_extract_metadata_t g_extract_metadata;
 static volatile uint32_t g_as7058_int_isr_count = 0;
+static volatile uint32_t g_sensor_irq_notify_missed = 0;
 static uint8_t g_spo2_profile_enabled = 0;
+static TaskHandle_t g_sensor_irq_task_handle = NULL;
 static sensor_context_t *g_sensorCtx;
 static uint8_t g_led_current = 0;
 static uint8_t g_pd_offset_current = 0;
@@ -150,19 +154,47 @@ as7058_osal_int_pin_deinit(void)
 }
 
 void
+sensor_set_irq_task_handle(TaskHandle_t handle)
+{
+    taskENTER_CRITICAL();
+    g_sensor_irq_task_handle = handle;
+    taskEXIT_CRITICAL();
+}
+
+void
+sensor_notify_irq_from_isr(BaseType_t *p_higher_priority_task_woken)
+{
+    if (NULL == g_sensor_irq_task_handle) {
+        g_sensor_irq_notify_missed++;
+        return;
+    }
+    vTaskNotifyGiveFromISR(g_sensor_irq_task_handle, p_higher_priority_task_woken);
+}
+
+void
+sensor_process_irq_events(void)
+{
+    as7058_osal_interrupt_callback();
+}
+
+void
 am_gpio0_001f_isr(void)
 {
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
     g_as7058_int_isr_count++;
     as7058_osal_int_pin_clear();
-    as7058_osal_interrupt_callback();
+    sensor_notify_irq_from_isr(&xHigherPriorityTaskWoken);
+    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 
 void
 am_gpio0_203f_isr(void)
 {
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
     g_as7058_int_isr_count++;
     as7058_osal_int_pin_clear();
-    as7058_osal_interrupt_callback();
+    sensor_notify_irq_from_isr(&xHigherPriorityTaskWoken);
+    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -372,6 +404,7 @@ sensor_as7058_callback(
             if (true || (g_sensorCtx->inputSource == LIVE_INPUT_MODE))
             {
                 // arm_biquad_cascade_df1_f32(&ppg1FilterCtx, samples_f32, samples_f32, sample_cnt);
+                // Producer ownership: SensorIrqTask is the sole writer of sensor ringbuffers.
                 ringbuffer_push(&rbPpg1Sensor, samples_f32, sample_cnt);
             }
             else
@@ -385,6 +418,7 @@ sensor_as7058_callback(
             // arm_biquad_cascade_df1_f32(&ppg2FilterCtx, samples_f32, samples_f32, sample_cnt);
             if (true || g_sensorCtx->inputSource == LIVE_INPUT_MODE)
             {
+                // Producer ownership: SensorIrqTask is the sole writer of sensor ringbuffers.
                 ringbuffer_push(&rbPpg2Sensor, samples_f32, sample_cnt);
             }
             else
@@ -401,6 +435,7 @@ sensor_as7058_callback(
         {
             if (g_sensorCtx->inputSource == LIVE_INPUT_MODE)
             {
+                // Producer ownership: SensorIrqTask is the sole writer of sensor ringbuffers.
                 ringbuffer_push(&rbEcgSensor, samples_f32, sample_cnt);
             }
             else
@@ -704,4 +739,10 @@ uint32_t
 sensor_get_as7058_int_isr_count(void)
 {
     return g_as7058_int_isr_count;
+}
+
+uint32_t
+sensor_get_irq_notify_missed_count(void)
+{
+    return g_sensor_irq_notify_missed;
 }

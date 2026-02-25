@@ -13,6 +13,7 @@
 #include "ns_ambiqsuite_harness.h"
 #include "ns_peripherals_power.h"
 #include "FreeRTOS.h"
+#include "queue.h"
 #include "task.h"
 #include "arm_math.h"
 #include "ns_i2c.h"
@@ -101,7 +102,10 @@ static TaskHandle_t ecgTaskHandle;
 static TaskHandle_t ppgTaskHandle;
 static TaskHandle_t cpuTaskHandle;
 static TaskHandle_t tioTaskHandle;
+static TaskHandle_t sensorIrqTaskHandle;
 static TaskStatus_t xTaskDetails[10];
+static QueueHandle_t g_tioTxQueue = NULL;
+static volatile uint32_t g_tio_tx_queue_drops = 0;
 static tio_usb_context_t tioUsbCtx = {
     .uio_update_cb = NULL,
     .slot_update_cb = NULL
@@ -133,7 +137,35 @@ void flush_pipeline() {
     ringbuffer_flush(&rbPpg2Met);
     ringbuffer_flush(&rbPpg1Tx);
     ringbuffer_flush(&rbPpg2Tx);
-    ringbuffer_flush(&rbTioUsbTx);
+    if (g_tioTxQueue != NULL) {
+        xQueueReset(g_tioTxQueue);
+    }
+}
+
+static bool
+enqueue_tio_packet(const uint8_t packet[TIO_USB_PACKET_LEN])
+{
+    BaseType_t queued = pdFALSE;
+    if (g_tioTxQueue == NULL) {
+        g_tio_tx_queue_drops++;
+        return false;
+    }
+
+    if (xPortIsInsideInterrupt()) {
+        BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+        queued = xQueueSendFromISR(g_tioTxQueue, packet, &xHigherPriorityTaskWoken);
+        if (pdTRUE == xHigherPriorityTaskWoken) {
+            portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+        }
+    } else {
+        queued = xQueueSend(g_tioTxQueue, packet, 0);
+    }
+
+    if (queued != pdTRUE) {
+        g_tio_tx_queue_drops++;
+        return false;
+    }
+    return true;
 }
 
 volatile static uint32_t g_webusb_available = false;
@@ -246,7 +278,7 @@ send_ecg_signals() {
         length += sizeof(int16_t);
     }
     tio_usb_pack_slot_data(0, 0, (uint8_t *)buffer, length, tioBuffer);
-    ringbuffer_push(&rbTioUsbTx, tioBuffer, 1);
+    enqueue_tio_packet(tioBuffer);
 
 }
 
@@ -270,7 +302,7 @@ send_ecg_metrics() {
     buffer[9] = ecgMetResults.segmentuIpspw;
     buffer[10] = ecgMetResults.arrhythmiaIpspw;
     tio_usb_pack_slot_data(0, 1, (uint8_t *)buffer, 11*sizeof(float32_t), tioBuffer);
-    ringbuffer_push(&rbTioUsbTx, tioBuffer, 1);
+    enqueue_tio_packet(tioBuffer);
 }
 
 
@@ -307,7 +339,7 @@ send_ppg_signals() {
         length += sizeof(int16_t);
     }
     tio_usb_pack_slot_data(1, 0, (uint8_t *)buffer, length, tioBuffer);
-    ringbuffer_push(&rbTioUsbTx, tioBuffer, 1);
+    enqueue_tio_packet(tioBuffer);
 
 }
 
@@ -323,7 +355,7 @@ send_ppg_metrics() {
     buffer[1] = ppgMetResults.spo2;
     buffer[2] = ppgMetResults.qos;
     tio_usb_pack_slot_data(1, 1, (uint8_t *)buffer, 3*sizeof(float32_t), tioBuffer);
-    ringbuffer_push(&rbTioUsbTx, tioBuffer, 1);
+    enqueue_tio_packet(tioBuffer);
 }
 
 void
@@ -356,7 +388,7 @@ send_cpu_signals() {
         length += sizeof(float32_t);
     }
     tio_usb_pack_slot_data(2, 0, (uint8_t *)buffer, length, tioBuffer);
-    ringbuffer_push(&rbTioUsbTx, tioBuffer, 1);
+    enqueue_tio_packet(tioBuffer);
 
 }
 
@@ -372,7 +404,7 @@ send_cpu_metrics() {
     buffer[1] = appMetResults.batteryDays;
     buffer[2] = appMetResults.avgAiIps;
     tio_usb_pack_slot_data(2, 1, (uint8_t *)buffer, 3*sizeof(float32_t), tioBuffer);
-    ringbuffer_push(&rbTioUsbTx, tioBuffer, 1);
+    enqueue_tio_packet(tioBuffer);
 }
 
 void
@@ -389,7 +421,7 @@ send_uio_state() {
     uioBuffer[TIO_UIO_ARR_MODE_IDX] = appState.arrMode;
     // tio_usb_send_uio_state(uioBuffer, 8);
     tio_usb_pack_slot_data(0, 2, uioBuffer, 8, tioBuffer);
-    ringbuffer_push(&rbTioUsbTx, tioBuffer, 1);
+    enqueue_tio_packet(tioBuffer);
 }
 
 void
@@ -418,8 +450,8 @@ TioProcessTask(void *pvParameters)
     uint8_t packet[TIO_USB_PACKET_LEN];
     while (true) {
         check_webusb_state();
-        if (ringbuffer_len(&rbTioUsbTx) > 0 && g_webusb_available && tio_usb_tx_available()) {
-            ringbuffer_pop(&rbTioUsbTx, packet, 1);
+        if ((g_tioTxQueue != NULL) && g_webusb_available && tio_usb_tx_available() &&
+            (xQueueReceive(g_tioTxQueue, packet, 0) == pdTRUE)) {
             taskENTER_CRITICAL();
             tio_usb_send_slot_packet(packet, TIO_USB_PACKET_LEN);
             taskEXIT_CRITICAL();
@@ -429,10 +461,21 @@ TioProcessTask(void *pvParameters)
 }
 
 void
+SensorIrqTask(void *pvParameters)
+{
+    while (true) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        sensor_process_irq_events();
+    }
+}
+
+void
 CpuProcessTask(void *pvParameters)
 {
     uint32_t cpuIdlePerc = 0;
     uint32_t runTimeTicks = 0;
+    uint32_t irq_notify_missed = 0, irq_notify_missed_prev = 0;
+    uint32_t tio_tx_drops_prev = 0;
     float32_t ecgTaskPerc = 0, ppgTaskPerc = 0, totalTaskPerc = 0, cpuTaskPerc, tioTaskPerc = 0;
     uint32_t prevRun = 0, prevEcg = 0, prevPpg = 0, prevCpu, prevTio;
     uint32_t runDelta, ecgDelta, ppgDelta, cpuDelta, tioDelta;
@@ -444,28 +487,28 @@ CpuProcessTask(void *pvParameters)
         prevRun = runTimeTicks;
         for (size_t i = 0; i < numTasks; i++) {
             // Get utilization for ECG task
-            if (xTaskDetails[i].xTaskNumber == 1)
+            if (xTaskDetails[i].xHandle == ecgTaskHandle)
             {
                 ecgDelta = (xTaskDetails[i].ulRunTimeCounter - prevEcg) >> 0;
                 prevEcg = xTaskDetails[i].ulRunTimeCounter;
                 ecgTaskPerc = 100.0f*(float32_t)ecgDelta/(float32_t)runDelta;
             }
             // Get utilization for PPG task
-            else if (xTaskDetails[i].xTaskNumber == 2)
+            else if (xTaskDetails[i].xHandle == ppgTaskHandle)
             {
                 ppgDelta = (xTaskDetails[i].ulRunTimeCounter - prevPpg) >> 0;
                 prevPpg = xTaskDetails[i].ulRunTimeCounter;
                 ppgTaskPerc = 100.0f*(float32_t)ppgDelta/(float32_t)runDelta;
             }
             // Get utilization for CPU task
-            else if (xTaskDetails[i].xTaskNumber == 3)
+            else if (xTaskDetails[i].xHandle == cpuTaskHandle)
             {
                 cpuDelta = (xTaskDetails[i].ulRunTimeCounter - prevCpu) >> 0;
                 prevCpu = xTaskDetails[i].ulRunTimeCounter;
                 cpuTaskPerc = 100.0f*(float32_t)cpuDelta/(float32_t)runDelta;
             }
             // Get utilization for TIO task
-            else if (xTaskDetails[i].xTaskNumber == 4)
+            else if (xTaskDetails[i].xHandle == tioTaskHandle)
             {
                 tioDelta = (xTaskDetails[i].ulRunTimeCounter - prevTio) >> 0;
                 prevTio = xTaskDetails[i].ulRunTimeCounter;
@@ -489,6 +532,19 @@ CpuProcessTask(void *pvParameters)
         // Every 1 second
         if (counter % 10 == 0) {
             send_cpu_metrics();
+            irq_notify_missed = sensor_get_irq_notify_missed_count();
+            if (irq_notify_missed != irq_notify_missed_prev) {
+                ns_lp_printf("AS7058 IRQ notify missed=%lu (+%lu)\n",
+                             irq_notify_missed,
+                             irq_notify_missed - irq_notify_missed_prev);
+                irq_notify_missed_prev = irq_notify_missed;
+            }
+            if (g_tio_tx_queue_drops != tio_tx_drops_prev) {
+                ns_lp_printf("TIO TX queue drops=%lu (+%lu)\n",
+                             g_tio_tx_queue_drops,
+                             g_tio_tx_queue_drops - tio_tx_drops_prev);
+                tio_tx_drops_prev = g_tio_tx_queue_drops;
+            }
         }
         counter += 1;
         // Delay 100 ms (10 Hz)
@@ -514,6 +570,7 @@ EcgProcessTask(void *pvParameters) {
 
         ///////////////////////////////////////////////////////////////////////
         // ECG PREPROCESSING BLOCK
+        // Consumer ownership: EcgProcessTask is the sole reader of rbEcgSensor.
         ///////////////////////////////////////////////////////////////////////
         numSamples = ringbuffer_len(&rbEcgSensor);
         for (size_t i = 0; i < numSamples/ECG_DS_RATE; i++) {
@@ -684,6 +741,7 @@ PpgProcessTask(void *pvParameters) {
 
         ///////////////////////////////////////////////////////////////////////
         // PPG PREPROCESSING BLOCK
+        // Consumer ownership: PpgProcessTask is the sole reader of rbPpg1Sensor/rbPpg2Sensor.
         ///////////////////////////////////////////////////////////////////////
         numSamples = MIN(
             ringbuffer_len(&rbPpg1Sensor),
@@ -778,6 +836,7 @@ PpgProcessTask(void *pvParameters) {
 int
 main(void)
 {
+    const uint32_t tioTxQueueDepth = 32;
     sensorCtx.inputSource = appState.inputSource;
     nsPwrCfg.eAIPowerMode = (ns_power_mode_e)(appState.speedMode ? HP_CPU_MODE : LP_CPU_MODE);
 
@@ -804,6 +863,12 @@ main(void)
 
     ns_itm_printf_enable();
     ns_interrupt_master_enable();
+
+    g_tioTxQueue = xQueueCreate(tioTxQueueDepth, TIO_USB_PACKET_LEN);
+    NS_TRY((g_tioTxQueue != NULL) ? 0 : 1, "TIO TX queue create failed\n");
+    ns_lp_printf("TIO TX queue enabled: depth=%lu packet_bytes=%d\n", tioTxQueueDepth, TIO_USB_PACKET_LEN);
+    ns_lp_printf("AS7058 IRQ deferral enabled: prio=%d stack=%d\n",
+                 AS7058_SENSOR_TASK_PRIORITY, AS7058_SENSOR_TASK_STACK_WORDS);
 
 #if AS7058_BRINGUP_MODE
     err_code_t sensor_init_result;
@@ -846,6 +911,13 @@ main(void)
     NS_TRY(tio_usb_init(&tioUsbCtx), "TIO Init Failed\n");
     ns_delay_us(200000);
     NS_TRY(sensor_configure(), "Sensor Configure failed.\n");
+    NS_TRY((xTaskCreate(
+               SensorIrqTask, "SensorIrqTask", AS7058_SENSOR_TASK_STACK_WORDS, 0,
+               AS7058_SENSOR_TASK_PRIORITY, &sensorIrqTaskHandle) == pdPASS)
+               ? 0
+               : 1,
+           "SensorIrqTask create failed.\n");
+    sensor_set_irq_task_handle(sensorIrqTaskHandle);
     NS_TRY(sensor_start(), "Sensor Start failed.\n");
     xTaskCreate(EcgProcessTask, "EcgProcessTask", 1024, 0, 1, &ecgTaskHandle);
     xTaskCreate(PpgProcessTask, "PpgProcessTask", 1024, 0, 1, &ppgTaskHandle);
