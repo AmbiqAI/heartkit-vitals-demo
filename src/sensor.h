@@ -4,6 +4,7 @@
 #include "FreeRTOS.h"
 #include "task.h"
 #include "error_codes.h"
+#include "bio_spo2_a0_typedefs.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -32,6 +33,9 @@ sensor_read_rrm(float32_t *rr);
 
 err_code_t
 sensor_read_hr(float32_t *hr);
+
+uint8_t
+sensor_get_spo2_config(bio_spo2_a0_configuration_t *p_cfg);
 
 #ifdef __cplusplus
 }

@@ -37,10 +37,34 @@ static volatile as7058_extract_metadata_t g_extract_metadata;
 static volatile uint32_t g_as7058_int_isr_count = 0;
 static volatile uint32_t g_sensor_irq_notify_missed = 0;
 static uint8_t g_spo2_profile_enabled = 0;
+static bio_spo2_a0_configuration_t g_spo2_config_for_metrics = {0};
+static uint8_t g_spo2_config_for_metrics_valid = 0;
+static as7058_sub_sample_ids_t g_spo2_red_sub_sample = AS7058_SUB_SAMPLE_ID_DISABLED;
+static as7058_sub_sample_ids_t g_spo2_ir_sub_sample = AS7058_SUB_SAMPLE_ID_DISABLED;
+static as7058_sub_sample_ids_t g_spo2_ambient_sub_sample = AS7058_SUB_SAMPLE_ID_DISABLED;
+static uint8_t g_spo2_fifo_copy[AS7058_FIFO_DATA_BUFFER_SIZE];
 static TaskHandle_t g_sensor_irq_task_handle = NULL;
 static sensor_context_t *g_sensorCtx;
-static uint8_t g_led_current = 0;
-static uint8_t g_pd_offset_current = 0;
+
+static uint32_t g_ppg_stim_prng_state = 0x13579BDFu;
+
+static inline float32_t
+ppg_stim_uniform_0_1(void)
+{
+    g_ppg_stim_prng_state = (1664525u * g_ppg_stim_prng_state) + 1013904223u;
+    return (float32_t)(g_ppg_stim_prng_state >> 8) * (1.0f / 16777216.0f);
+}
+
+static float32_t
+ppg_stim_gaussian_noise(float32_t stddev)
+{
+    float32_t z = 0.0f;
+    for (uint32_t i = 0; i < 12u; i++) {
+        z += ppg_stim_uniform_0_1();
+    }
+    z -= 6.0f;
+    return z * stddev;
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 // OSAL Functions
@@ -201,6 +225,7 @@ am_gpio0_203f_isr(void)
 // AS7058 Callbacks
 ///////////////////////////////////////////////////////////////////////////////
 
+#if EN_AS7058_CB_DEBUG_LOGS
 static void
 sensor_process_as7058_events(as7058_status_events_t sensor_events)
 {
@@ -256,6 +281,7 @@ sensor_process_as7058_events(as7058_status_events_t sensor_events)
         ns_lp_printf("\n");
     }
 }
+#endif
 
 uint32_t
 load_patient_data(uint32_t reqSamples, uint32_t slot)
@@ -294,11 +320,17 @@ load_patient_data(uint32_t reqSamples, uint32_t slot)
             if (slot == AS7058_SUB_SAMPLE_ID_PPG1_SUB1)
             {
                 val_f32 = ppg1_stimulus[stimulusIdx];
+                if (ptSel != LIVE_INPUT_MODE) {
+                    val_f32 += ppg_stim_gaussian_noise(PPG_STIM_GAUSS_STD);
+                }
                 ringbuffer_push(&rbPpg1Sensor, &val_f32, 1);
             }
             else
             {
                 val_f32 = ppg2_stimulus[stimulusIdx];
+                if (ptSel != LIVE_INPUT_MODE) {
+                    val_f32 += ppg_stim_gaussian_noise(PPG_STIM_GAUSS_STD);
+                }
                 ringbuffer_push(&rbPpg2Sensor, &val_f32, 1);
             }
         }
@@ -337,21 +369,29 @@ sensor_as7058_callback(
 
 #if EN_SPO2_ALGO
     /* Pass data to the SpO2 library. */
-    if (g_spo2_profile_enabled && (p_fifo_data != NULL) && (fifo_data_size > 0)) {
-        const agc_status_t *p_spo2_agc_statuses = p_agc_statuses;
-        uint8_t spo2_agc_statuses_num = agc_statuses_num;
-        static const agc_status_t s_spo2_dummy_agc_status = {0};
-        if (p_spo2_agc_statuses == NULL) {
-            p_spo2_agc_statuses = &s_spo2_dummy_agc_status;
-            spo2_agc_statuses_num = 0;
+    if (g_spo2_profile_enabled &&
+        (g_sensorCtx != NULL) &&
+        (g_sensorCtx->inputSource == LIVE_INPUT_MODE) &&
+        (p_fifo_data != NULL) &&
+        (fifo_data_size > 0)) {
+        const agc_status_t *p_spo2_agc_statuses = (agc_statuses_num > 0u) ? p_agc_statuses : NULL;
+        uint8_t spo2_agc_statuses_num = (p_spo2_agc_statuses != NULL) ? agc_statuses_num : 0u;
+        const uint8_t *p_spo2_fifo_data = p_fifo_data;
+        if (fifo_data_size <= sizeof(g_spo2_fifo_copy)) {
+            memcpy(g_spo2_fifo_copy, p_fifo_data, fifo_data_size);
+            p_spo2_fifo_data = g_spo2_fifo_copy;
         }
         result = as7058a_spo2_a0_set_input(
-            p_fifo_data, fifo_data_size, sensor_events,
+            p_spo2_fifo_data, fifo_data_size, sensor_events,
             p_spo2_agc_statuses, spo2_agc_statuses_num, &ready_for_execution);
-        if ((result == ERR_SUCCESS) && ready_for_execution)
-        {
+        if (result != ERR_SUCCESS) {
+            ns_lp_printf("as7058a_spo2_a0_set_input returned error %d.\n", result);
+        } else if (ready_for_execution) {
             g_spo2_ready_for_execution = ready_for_execution;
         }
+    } else if ((g_sensorCtx != NULL) && (g_sensorCtx->inputSource != LIVE_INPUT_MODE)) {
+        /* Non-live mode uses synthetic metrics path in main; prevent stale SpO2 execution. */
+        g_spo2_ready_for_execution = 0;
     }
 #endif
 
@@ -401,7 +441,7 @@ sensor_as7058_callback(
         // RED LED
         if (sub_sample_idx == AS7058_SUB_SAMPLE_ID_PPG1_SUB1)
         {
-            if (true || (g_sensorCtx->inputSource == LIVE_INPUT_MODE))
+            if (g_sensorCtx->inputSource == LIVE_INPUT_MODE)
             {
                 // arm_biquad_cascade_df1_f32(&ppg1FilterCtx, samples_f32, samples_f32, sample_cnt);
                 // Producer ownership: SensorIrqTask is the sole writer of sensor ringbuffers.
@@ -416,7 +456,7 @@ sensor_as7058_callback(
         else if (sub_sample_idx == AS7058_SUB_SAMPLE_ID_PPG1_SUB2)
         {
             // arm_biquad_cascade_df1_f32(&ppg2FilterCtx, samples_f32, samples_f32, sample_cnt);
-            if (true || g_sensorCtx->inputSource == LIVE_INPUT_MODE)
+            if (g_sensorCtx->inputSource == LIVE_INPUT_MODE)
             {
                 // Producer ownership: SensorIrqTask is the sole writer of sensor ringbuffers.
                 ringbuffer_push(&rbPpg2Sensor, samples_f32, sample_cnt);
@@ -445,7 +485,6 @@ sensor_as7058_callback(
         }
         // ECG sub-slots not used by the current app path.
     }
-    // sensor_process_as7058_events(sensor_events);
 }
 
 err_code_t sensor_init(sensor_context_t *ctx)
@@ -453,7 +492,6 @@ err_code_t sensor_init(sensor_context_t *ctx)
     char *p_interface = NULL;
     err_code_t result = ERR_SUCCESS;
     as7058_osal_config_t osal_cfg = {0};
-    uint8_t id;
     g_sensorCtx = ctx;
 
     // arm_biquad_cascade_df1_init_f32(&ppg1FilterCtx, PPG_SOS_LEN, ppgSos, ppg1SosState);
@@ -524,7 +562,6 @@ sensor_read_spo2(float32_t *spo2, float32_t *heart_rate, float32_t *quality)
     if (!g_spo2_profile_enabled) {
         return ERR_NOT_SUPPORTED;
     }
-
     if (!g_spo2_ready_for_execution) {
         return ERR_NO_DATA;
     }
@@ -554,8 +591,8 @@ err_code_t
 sensor_read_rrm(float32_t *rr)
 {
     err_code_t result = ERR_NOT_SUPPORTED;
-    bio_rrm_a0_output_t rrm_output;
 #if EN_RRM_ALGO
+    bio_rrm_a0_output_t rrm_output;
     if (g_rrm_ready_for_execution)
     {
         result = as7058a_rrm_a0_execute();
@@ -576,6 +613,7 @@ sensor_read_rrm(float32_t *rr)
 err_code_t
 sensor_configure()
 {
+    const uint8_t spo2_led_half_scale = 31;
     err_code_t result;
     const as7058_sensor_profile_t *p_active_profile;
     as7058_sensor_profile_t profile;
@@ -586,11 +624,29 @@ sensor_configure()
     }
     profile = *p_active_profile;
     g_spo2_profile_enabled = (profile.spo2_present && profile.spo2_enabled) ? 1 : 0;
+    g_spo2_config_for_metrics_valid = 0;
+    memset(&g_spo2_config_for_metrics, 0, sizeof(g_spo2_config_for_metrics));
+    g_spo2_red_sub_sample = profile.spo2_red_sub_sample;
+    g_spo2_ir_sub_sample = profile.spo2_ir_sub_sample;
+    g_spo2_ambient_sub_sample = profile.spo2_ambient_sub_sample;
 
     profile.control.reg_vals.i2c_mode = AS7058_USE_I2C ? 1 : 0;
     if (!g_spo2_profile_enabled) {
         profile.led.reg_vals.led_sub1 = AS7058_LED_SUB1_CFG;
         profile.led.reg_vals.led_sub2 = AS7058_LED_SUB2_CFG;
+    } else {
+        /* If AGC is still disabled, use fixed LED current as a safe fallback. */
+        if (profile.agc_config_num == 0) {
+        if (profile.led.reg_vals.led2_ictrl == 0) {
+            profile.led.reg_vals.led2_ictrl = spo2_led_half_scale;
+        }
+        if (profile.led.reg_vals.led3_ictrl == 0) {
+            profile.led.reg_vals.led3_ictrl = spo2_led_half_scale;
+        }
+        ns_lp_printf("SpO2 fixed LED current applied: led2=%u led3=%u\n",
+                     profile.led.reg_vals.led2_ictrl,
+                     profile.led.reg_vals.led3_ictrl);
+        }
     }
 
     result = as7058_apply_sensor_profile(&profile);
@@ -617,6 +673,8 @@ sensor_configure()
             ns_lp_printf("as7058a_spo2_a0_configure returned error %d.\n", result);
             return result;
         }
+        g_spo2_config_for_metrics = profile.spo2_config;
+        g_spo2_config_for_metrics_valid = 1;
     }
 #endif
 
@@ -649,14 +707,30 @@ sensor_start()
     ns_lp_printf("ECG Sampling rate %d\n", meas_config.ecg_seq1_sample_period_us / 1000);
     ns_lp_printf("ECG Sampling rate %d\n", meas_config.ecg_seq2_sample_period_us / 1000);
 
+#if EN_SPO2_ALGO
+    if (g_spo2_profile_enabled) {
+        const uint32_t required_spo2_flags =
+            M_AS7058_SUB_SAMPLE_ID_TO_FLAG(g_spo2_red_sub_sample) |
+            M_AS7058_SUB_SAMPLE_ID_TO_FLAG(g_spo2_ir_sub_sample) |
+            M_AS7058_SUB_SAMPLE_ID_TO_FLAG(g_spo2_ambient_sub_sample);
+        ns_lp_printf("SpO2 routing: red=%u ir=%u amb=%u fifo_map=0x%08lX\n",
+                     g_spo2_red_sub_sample, g_spo2_ir_sub_sample, g_spo2_ambient_sub_sample,
+                     meas_config.fifo_map);
+        if ((meas_config.fifo_map & required_spo2_flags) != required_spo2_flags) {
+            ns_lp_printf("SpO2 routing mismatch: required flags 0x%08lX missing from fifo_map\n",
+                         required_spo2_flags);
+            return ERR_CONFIG;
+        }
+    }
+#endif
+
     /* Mark sub-sample w/ ID so extraction routine knows the FIFO structure */
     g_extract_metadata.copy_recent_to_current = FALSE;
     g_extract_metadata.fifo_map = meas_config.fifo_map;
     g_extract_metadata.current.ppg1_sub = 0;
     g_extract_metadata.current.ppg2_sub = 0;
-    // TODO(adam/codex): recent.ppg2_sub is not initialized here; verify intended field init.
     g_extract_metadata.recent.ppg1_sub = 0;
-    g_extract_metadata.recent.ppg1_sub = 0;
+    g_extract_metadata.recent.ppg2_sub = 0;
 
 #if EN_SPO2_ALGO
     /* Start the SpO2 processing */
@@ -745,4 +819,14 @@ uint32_t
 sensor_get_irq_notify_missed_count(void)
 {
     return g_sensor_irq_notify_missed;
+}
+
+uint8_t
+sensor_get_spo2_config(bio_spo2_a0_configuration_t *p_cfg)
+{
+    if ((p_cfg == NULL) || (g_spo2_config_for_metrics_valid == 0u)) {
+        return 0;
+    }
+    *p_cfg = g_spo2_config_for_metrics;
+    return 1;
 }

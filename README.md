@@ -94,6 +94,10 @@ or
 #define AS7058_BOARD_PROFILE AS7058_PROFILE_CLICK_I2C
 ```
 
+Current repo defaults:
+- `AS7058_BOARD_PROFILE = AS7058_PROFILE_CLICK_I2C`
+- `AS7058_APP_PROFILE = AS7058_APP_PROFILE_CLICK_GOLDEN`
+
 #### AS7058 EVM/EVK (SPI)
 
 The Apollo510 EVB is connected to the AS7058 EVM via SPI plus interrupt.
@@ -178,6 +182,14 @@ Quick flow for a new profile:
 
 3. Wire the generated profile into `src/as7058_profiles.c` selection.
 4. Select it in `src/constants.h` using `AS7058_APP_PROFILE`.
+
+Current operational defaults for click bring-up/tuning in `src/constants.h`:
+- `PPG_AGC_MIN=180000`, `PPG_AGC_MAX=620000`
+- `PPG_TX_GAIN=1.0f`
+- AGC diagnostics off by default:
+  - `EN_SPO2_AGC_EVENT_TRACE=0`
+  - `EN_SPO2_RAW_STATS_TRACE=0`
+  - `EN_SPO2_AGC_VERIFY_TRACE=0`
 
 ## Troubleshooting
 

@@ -56,6 +56,7 @@ extern "C" {
 #define AS7058_APP_PROFILE_LEGACY_DEFAULT (0)
 #define AS7058_APP_PROFILE_CLICK_PPG_ECG (1)
 #define AS7058_APP_PROFILE_CLICK_SPO2 (2)
+#define AS7058_APP_PROFILE_CLICK_GOLDEN (3)
 
 #ifndef AS7058_BOARD_PROFILE
 #define AS7058_BOARD_PROFILE AS7058_PROFILE_CLICK_I2C
@@ -66,7 +67,7 @@ extern "C" {
 #endif
 
 #ifndef AS7058_APP_PROFILE
-#define AS7058_APP_PROFILE AS7058_APP_PROFILE_LEGACY_DEFAULT
+#define AS7058_APP_PROFILE AS7058_APP_PROFILE_CLICK_GOLDEN
 #endif
 
 #define AS7058_USE_SPI (AS7058_BOARD_PROFILE == AS7058_PROFILE_EVK_SPI)
@@ -93,11 +94,7 @@ extern "C" {
 #define AS7058_BOARD_ALLOWED_PD_MASK (0x16)
 
 #ifndef EN_SPO2_ALGO
-#if AS7058_BOARD_PROFILE == AS7058_PROFILE_CLICK_I2C
-#define EN_SPO2_ALGO (0)
-#else
 #define EN_SPO2_ALGO (1)
-#endif
 #endif
 
 #ifndef EN_RRM_ALGO
@@ -106,6 +103,22 @@ extern "C" {
 
 #ifndef EN_AS7058_IIR
 #define EN_AS7058_IIR (0)
+#endif
+
+#ifndef EN_AS7058_CB_DEBUG_LOGS
+#define EN_AS7058_CB_DEBUG_LOGS (0)
+#endif
+
+#ifndef EN_APP_DEBUG_LOGS
+#define EN_APP_DEBUG_LOGS (0)
+#endif
+
+#ifndef EN_APP_TIMING_LOGS
+#define EN_APP_TIMING_LOGS (1)
+#endif
+
+#ifndef EN_MODEL_VERBOSE_LOGS
+#define EN_MODEL_VERBOSE_LOGS (0)
 #endif
 
 #define NUM_INPUT_PTS (6)
@@ -131,8 +144,13 @@ extern "C" {
 #define PPG_SAMPLE_RATE (100)
 #define PPG_TARGET_RATE (100)
 #define PPG_DS_RATE (PPG_SAMPLE_RATE / PPG_TARGET_RATE)
-#define PPG_AGC_MIN (250000)
-#define PPG_AGC_MAX (770000)
+// Click-board AGC bring-up tuning: narrower/lower target band to reduce oscillation and clipping swings.
+#define PPG_AGC_MIN (180000)
+#define PPG_AGC_MAX (620000)
+// PPG TX gain after centering in send_ppg_signals(); keep at 1.0 for no extra amplification.
+#define PPG_TX_GAIN (1.0f)
+// Additional synthetic Gaussian noise (std-dev in ADC counts) for non-live PPG playback.
+#define PPG_STIM_GAUSS_STD (50.0f)
 
 ///////////////////////////////////////////////////////////////////////////////
 // ECG Denoise Configuration
@@ -309,10 +327,14 @@ extern "C" {
 
 #define RTOS_TIMER (4)
 
+#ifndef MIN
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
+#endif
 #define MIN3(a, b, c) (MIN(MIN(a, b), c))
 #define MIN4(a, b, c, d) (MIN(MIN(a, b), MIN(c, d)))
+#ifndef MAX
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
+#endif
 #define MAX3(a, b, c) (MAX(MAX(a, b), c))
 #define MAX4(a, b, c, d) (MAX(MAX(a, b), MAX(c, d)))
 #define CLIP(a, min, max) (MAX(MIN(a, max), min))

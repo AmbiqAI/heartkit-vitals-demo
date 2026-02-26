@@ -20,17 +20,30 @@ In `src/constants.h`:
 - `AS7058_APP_PROFILE_LEGACY_DEFAULT`
 - `AS7058_APP_PROFILE_CLICK_PPG_ECG`
 - `AS7058_APP_PROFILE_CLICK_SPO2`
-- `AS7058_APP_PROFILE` (default: legacy)
+- `AS7058_APP_PROFILE_CLICK_GOLDEN`
+- `AS7058_APP_PROFILE` (default: `AS7058_APP_PROFILE_CLICK_GOLDEN`)
 
-Board profile selection remains independent (`AS7058_BOARD_PROFILE`).
+Board profile selection remains independent (`AS7058_BOARD_PROFILE`), and currently defaults to `AS7058_PROFILE_CLICK_I2C`.
 
 ## Override Precedence
 `sensor_configure()` applies these overrides after loading profile:
 - `control.i2c_mode = AS7058_USE_I2C ? 1 : 0`
-- `led.led_sub1 = AS7058_LED_SUB1_CFG`
-- `led.led_sub2 = AS7058_LED_SUB2_CFG`
+- if SpO2 profile is disabled, force:
+  - `led.led_sub1 = AS7058_LED_SUB1_CFG`
+  - `led.led_sub2 = AS7058_LED_SUB2_CFG`
 
 This prevents imported profiles from breaking transport/wiring assumptions.
+
+## Current Bring-Up/Tuning Defaults
+Current `src/constants.h` defaults used for click bring-up:
+- `PPG_AGC_MIN = 180000`
+- `PPG_AGC_MAX = 620000`
+- `PPG_TX_GAIN = 1.0f`
+- `EN_SPO2_AGC_EVENT_TRACE = 0`
+- `EN_SPO2_RAW_STATS_TRACE = 0`
+- `EN_SPO2_AGC_VERIFY_TRACE = 0`
+
+PPG TX path (`send_ppg_signals`) centers around the active AGC span midpoint derived from `PPG_AGC_MIN/MAX` before int16 packing.
 
 ## JSON Generator
 Tool: `tools/as7058_json_to_profile.py`

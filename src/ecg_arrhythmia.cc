@@ -116,7 +116,9 @@ ecg_arrhythmia_inference(float32_t *ecgIn, float32_t threshold) {
         }
     }
     // We use 0 to represent inconclusive
+#if EN_MODEL_VERBOSE_LOGS
     ns_lp_printf("yMax=%f, yMaxIdx=%d\n", yMax, yMaxIdx);
+#endif
     yMaxIdx = yMax > threshold ? yMaxIdx + 1 : 0;
     return yMaxIdx;
 }

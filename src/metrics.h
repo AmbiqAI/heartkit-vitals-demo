@@ -16,6 +16,7 @@ extern "C" {
 #endif
 
 #include <arm_math.h>
+#include "bio_spo2_a0_typedefs.h"
 
 /**
  * @brief Metrics configuration
@@ -70,6 +71,16 @@ metrics_capture_ecg(
     uint16_t *ecgMask,
     size_t len,
     metrics_ecg_results_t *results
+);
+
+uint32_t
+metrics_capture_ppg(
+    metrics_config_t *ctx,
+    float32_t *ppg1,
+    float32_t *ppg2,
+    size_t len,
+    const bio_spo2_a0_configuration_t *p_spo2_cfg,
+    metrics_ppg_results_t *results
 );
 
 #ifdef __cplusplus

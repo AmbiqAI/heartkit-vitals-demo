@@ -14,6 +14,7 @@ typedef enum {
     AS7058_APP_PROFILE_ID_LEGACY_DEFAULT = 0,
     AS7058_APP_PROFILE_ID_CLICK_PPG_ECG = 1,
     AS7058_APP_PROFILE_ID_CLICK_SPO2 = 2,
+    AS7058_APP_PROFILE_ID_CLICK_GOLDEN = 3,
 } as7058_app_profile_id_t;
 
 typedef struct {
