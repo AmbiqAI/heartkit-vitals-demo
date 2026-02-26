@@ -1,0 +1,541 @@
+{
+    "name": "Life_metrics_Click: PPG-ECG",
+    "description": "Configuration preset for PPG and ECG measurement. ",
+    "icon_src": "qrc:/icons/hrm.png",
+    "gui_as7058": {
+        "filter": {
+            "selected_filter": {
+                "ppg": "Enhancement Filter",
+                "ecg1": "Enhancement Filter",
+                "ecg2": "Disabled"
+            },
+            "moving_average": {
+                "average_ppg": 2,
+                "average_ecg1": 2,
+                "average_ecg2": 2
+            },
+            "enhancement_filter": {
+                "ppg": {
+                    "baseline_removal": true,
+                    "denoising": true,
+                    "signal_inversion": false
+                },
+                "ecg1": {
+                    "baseline_removal": true,
+                    "denoising": true,
+                    "signal_inversion": false,
+                    "ac_removal": true
+                },
+                "ecg2": {
+                    "baseline_removal": true,
+                    "denoising": true,
+                    "signal_inversion": false,
+                    "ac_removal": true
+                }
+            }
+        },
+        "signal_calculation": {
+            "formula": ""
+        },
+        "applications": {
+            "bioz": {
+                "impedance_scaling_before_measurement": false,
+                "calibration": {
+                    "do_not_overwrite_ref_resistor": false,
+                    "do_not_overwrite_ref_temperature_adc": false,
+                    "do_not_overwrite_temperature_adc": false,
+                    "do_not_overwrite_slope": false,
+                    "do_not_overwrite_short": false,
+                    "do_not_overwrite_resistor": false,
+                    "do_not_overwrite_body": false,
+                    "do_not_overwrite_wrist": false,
+                    "do_not_overwrite_finger": false,
+                    "do_not_overwrite_total": false
+                }
+            },
+            "eda": {
+                "impedance_scaling_before_measurement": false
+            },
+            "pd_offset_compensation": {
+                "calibration_before_measurement": false
+            }
+        },
+        "chart_configuration": {
+            "chart_area1": {
+                "signals": [
+                    "PPG1_SUB1"
+                ],
+                "y_axis_scaling": "Automatic Scaling"
+            },
+            "chart_area2": {
+                "signals": [
+                    "ECG_SEQ1_SUB1"
+                ],
+                "y_axis_scaling": "Automatic Scaling"
+            },
+            "chart_area3": {
+                "signals": [],
+                "y_axis_scaling": "Automatic Scaling"
+            }
+        }
+    },
+    "device_as7058": {
+        "struct_version": 3,
+        "accelerometer": {
+            "sample_rate": 0
+        },
+        "applications": {
+            "raw": {
+                "enabled": true,
+                "parameters": {
+                    "enable_acc_data": false
+                }
+            },
+            "hrm": {
+                "enabled": false,
+                "parameters": {
+                    "enable_prv": false,
+                    "reserved": 0,
+                    "alpha_hr": 0,
+                    "alpha_acc": 0,
+                    "compensation_threshold": 0
+                },
+                "signal_routing": {
+                    "ppg": 1,
+                    "ambient": 2
+                },
+                "pre_processing": {
+                    "pd_offset_compensation": false
+                }
+            },
+            "spo2": {
+                "enabled": false,
+                "parameters": {
+                    "cal_coeff_a": 0,
+                    "cal_coeff_b": 0,
+                    "cal_coeff_c": 0,
+                    "dc_comp_red": 0,
+                    "dc_comp_ir": 0
+                },
+                "signal_routing": {
+                    "ppg_red": 0,
+                    "ppg_ir": 0,
+                    "ambient_light": 0
+                },
+                "pre_processing": {
+                    "pd_offset_compensation": false
+                }
+            },
+            "srd": {
+                "enabled": false,
+                "parameters": {
+                    "lower_threshold": 0,
+                    "upper_threshold": 0,
+                    "change_detection_samples_num": 0
+                },
+                "signal_routing": {
+                    "channel": 0
+                },
+                "pre_processing": {
+                    "pd_offset_compensation": false
+                }
+            },
+            "bioz": {
+                "enabled": false,
+                "parameters": {
+                    "ref_meas_result": {
+                        "timestamp": 0.0,
+                        "ref_resistor": 0,
+                        "ref_temperature_adc": 0,
+                        "temperature_adc": 0,
+                        "slope": 0.0,
+                        "short_i": 0,
+                        "short_q": 0,
+                        "resistor_i": 0,
+                        "resistor_q": 0,
+                        "body_i": 0,
+                        "body_q": 0,
+                        "wrist_i": 0,
+                        "wrist_q": 0,
+                        "finger_i": 0,
+                        "finger_q": 0,
+                        "total_i": 0,
+                        "total_q": 0
+                    },
+                    "ref_known_imps": {
+                        "body_magnitude": 0.0,
+                        "body_phase": 0.0,
+                        "wrist_magnitude": 0.0,
+                        "wrist_phase": 0.0,
+                        "finger_magnitude": 0.0,
+                        "finger_phase": 0.0
+                    },
+                    "input_drop_num": 1,
+                    "safety_protection_impedance": {
+                        "magnitude": 0.0,
+                        "phase": 0.0
+                    }
+                }
+            },
+            "eda": {
+                "enabled": false,
+                "parameters": {
+                    "scaling_data": {
+                        "timestamp": 0.0,
+                        "ref_resistor": 0,
+                        "ref_temperature_adc": 0,
+                        "temperature_adc": 0,
+                        "slope": 0.0,
+                        "short_p": 0,
+                        "short_n": 0,
+                        "resistor_p": 0,
+                        "resistor_n": 0
+                    },
+                    "avg_num": 1,
+                    "drop_num": 0,
+                    "temperature_delta_threshold": 0
+                },
+                "signal_routing": {
+                    "eda": 0,
+                    "temperature": 0
+                }
+            },
+            "stream": {
+                "enabled": false,
+                "parameters": {
+                    "item_filter": 2097120,
+                    "max_packet_size": 150
+                },
+                "pre_processing": {
+                    "pd_offset_compensation": false
+                }
+            },
+            "rrm": {
+                "enabled": false,
+                "parameters": {},
+                "signal_routing": {
+                    "ppg": 0
+                },
+                "pre_processing": {
+                    "pd_offset_compensation": false
+                }
+            }
+        },
+        "special_measurement": {
+            "bioz_scaling": {
+                "num_average": 32,
+                "num_dropped_first_samples": 16
+            },
+            "eda_scaling": {
+                "num_average": 1
+            },
+            "pd_offset_calibration": {
+                "channel": 1,
+                "num_average": 50,
+                "ppg_sample_period_multiplier": 63
+            }
+        },
+        "sensor": {
+            "power": {
+                "pwr_on": 23,
+                "pwr_iso": 8,
+                "clk_cfg": 7,
+                "ref_cfg1": 63,
+                "ref_cfg2": 14,
+                "ref_cfg3": 160,
+                "standby_on1": 0,
+                "standby_on2": 0,
+                "standby_en1": 4,
+                "standby_en2": 2,
+                "standby_en3": 4,
+                "standby_en4": 0,
+                "standby_en5": 3,
+                "standby_en6": 16,
+                "standby_en7": 16,
+                "standby_en8": 4,
+                "standby_en9": 0,
+                "standby_en10": 3,
+                "standby_en11": 16,
+                "standby_en12": 16,
+                "standby_en13": 16,
+                "standby_en14": 16
+            },
+            "control": {
+                "i2c_mode": 0,
+                "int_cfg": 0,
+                "if_cfg": 72,
+                "gpio_cfg1": 0,
+                "gpio_cfg2": 0,
+                "io_cfg": 0
+            },
+            "led": {
+                "vcsel_password": 87,
+                "vcsel_cfg": 0,
+                "vcsel_mode": 0,
+                "led_cfg": 0,
+                "led_drv1": 0,
+                "led_drv2": 0,
+                "led1_ictrl": 9,
+                "led2_ictrl": 0,
+                "led3_ictrl": 0,
+                "led4_ictrl": 0,
+                "led5_ictrl": 0,
+                "led6_ictrl": 0,
+                "led7_ictrl": 0,
+                "led8_ictrl": 0,
+                "led_irng1": 63,
+                "led_irng2": 63,
+                "led_sub1": 1,
+                "led_sub2": 0,
+                "led_sub3": 0,
+                "led_sub4": 0,
+                "led_sub5": 0,
+                "led_sub6": 0,
+                "led_sub7": 0,
+                "led_sub8": 0,
+                "lowvds_wait": 0
+            },
+            "pd": {
+                "pdsel_cfg": 0,
+                "ppg1_pdsel1": 2,
+                "ppg1_pdsel2": 0,
+                "ppg1_pdsel3": 0,
+                "ppg1_pdsel4": 0,
+                "ppg1_pdsel5": 0,
+                "ppg1_pdsel6": 0,
+                "ppg1_pdsel7": 0,
+                "ppg1_pdsel8": 0,
+                "ppg2_pdsel1": 0,
+                "ppg2_pdsel2": 0,
+                "ppg2_pdsel3": 0,
+                "ppg2_pdsel4": 0,
+                "ppg2_pdsel5": 0,
+                "ppg2_pdsel6": 0,
+                "ppg2_pdsel7": 0,
+                "ppg2_pdsel8": 0,
+                "ppg2_afesel1": 0,
+                "ppg2_afesel2": 0,
+                "ppg2_afesel3": 0,
+                "ppg2_afesel4": 0,
+                "ppg2_afeen": 0
+            },
+            "ios": {
+                "ios_ppg1_sub1": 0,
+                "ios_ppg1_sub2": 0,
+                "ios_ppg1_sub3": 0,
+                "ios_ppg1_sub4": 0,
+                "ios_ppg1_sub5": 0,
+                "ios_ppg1_sub6": 0,
+                "ios_ppg1_sub7": 0,
+                "ios_ppg1_sub8": 0,
+                "ios_ppg2_sub1": 0,
+                "ios_ppg2_sub2": 0,
+                "ios_ppg2_sub3": 0,
+                "ios_ppg2_sub4": 0,
+                "ios_ppg2_sub5": 0,
+                "ios_ppg2_sub6": 0,
+                "ios_ppg2_sub7": 0,
+                "ios_ppg2_sub8": 0,
+                "ios_ledoff": 0,
+                "ios_cfg": 0,
+                "aoc_sar_thres": 0,
+                "aoc_sar_range": 0,
+                "aoc_sar_ppg1": 0,
+                "aoc_sar_ppg2": 0
+            },
+            "ppg": {
+                "ppgmod_cfg1": 0,
+                "ppgmod_cfg2": 0,
+                "ppgmod_cfg3": 0,
+                "ppgmod1_cfg1": 167,
+                "ppgmod1_cfg2": 100,
+                "ppgmod1_cfg3": 7,
+                "ppgmod2_cfg1": 39,
+                "ppgmod2_cfg2": 100,
+                "ppgmod2_cfg3": 7
+            },
+            "ecg": {
+                "bioz_cfg": 0,
+                "bioz_excit": 0,
+                "bioz_mixer": 0,
+                "bioz_select": 13,
+                "bioz_gain": 0,
+                "ecgmod_cfg1": 12,
+                "ecgmod_cfg2": 0,
+                "ecgimux_cfg1": 64,
+                "ecgimux_cfg2": 0,
+                "ecgimux_cfg3": 0,
+                "ecgamp_cfg1": 96,
+                "ecgamp_cfg2": 0,
+                "ecgamp_cfg3": 89,
+                "ecgamp_cfg4": 255,
+                "ecgamp_cfg5": 75,
+                "ecgamp_cfg6": 22,
+                "ecgamp_cfg7": 179,
+                "ecg_bioz": 0,
+                "leadoff_cfg": 0,
+                "leadoff_thresl": 0,
+                "leadoff_thresh": 0
+            },
+            "sinc": {
+                "ppg_sinc_cfga": 4,
+                "ppg_sinc_cfgb": 3,
+                "ppg_sinc_cfgc": 0,
+                "ppg_sinc_cfgd": 0,
+                "ecg1_sinc_cfga": 44,
+                "ecg1_sinc_cfgb": 3,
+                "ecg1_sinc_cfgc": 0,
+                "ecg2_sinc_cfga": 44,
+                "ecg2_sinc_cfgb": 3,
+                "ecg2_sinc_cfgc": 0,
+                "ecg_sinc_cfg": 0
+            },
+            "iir": {
+                "iir_cfg": 27,
+                "iir_coeff_data_sos": [
+                    [
+                        9853,
+                        -18570,
+                        28987,
+                        9853,
+                        -14449
+                    ],
+                    [
+                        16384,
+                        -30880,
+                        28888,
+                        16384,
+                        -14493
+                    ],
+                    [
+                        16384,
+                        -30880,
+                        29186,
+                        16384,
+                        -14515
+                    ],
+                    [
+                        16384,
+                        -30880,
+                        28909,
+                        16384,
+                        -14657
+                    ],
+                    [
+                        16384,
+                        -30880,
+                        29461,
+                        16384,
+                        -14677
+                    ],
+                    [
+                        16384,
+                        -30880,
+                        29789,
+                        16384,
+                        -14916
+                    ],
+                    [
+                        16384,
+                        -30880,
+                        29064,
+                        16384,
+                        -14942
+                    ],
+                    [
+                        16384,
+                        -30880,
+                        30149,
+                        16384,
+                        -15216
+                    ],
+                    [
+                        16384,
+                        -30880,
+                        29358,
+                        16384,
+                        -15338
+                    ],
+                    [
+                        16384,
+                        -30880,
+                        30527,
+                        16384,
+                        -15563
+                    ],
+                    [
+                        16384,
+                        -30880,
+                        29802,
+                        16384,
+                        -15835
+                    ],
+                    [
+                        16384,
+                        -30880,
+                        30915,
+                        16384,
+                        -15958
+                    ]
+                ]
+            },
+            "seq": {
+                "irq_enable": 6,
+                "ppg_sub_wait": 30,
+                "ppg_sar_wait": 0,
+                "ppg_led_init": 10,
+                "ppg_freql": 63,
+                "ppg_freqh": 1,
+                "ppg1_sub_en": 1,
+                "ppg2_sub_en": 0,
+                "ppg_mode_1": 0,
+                "ppg_mode_2": 0,
+                "ppg_mode_3": 0,
+                "ppg_mode_4": 0,
+                "ppg_mode_5": 0,
+                "ppg_mode_6": 0,
+                "ppg_mode_7": 0,
+                "ppg_mode_8": 0,
+                "ppg_cfg": 0,
+                "ecg_freql": 31,
+                "ecg_freqh": 0,
+                "ecg1_freqdivl": 0,
+                "ecg1_freqdivh": 0,
+                "ecg2_freqdivl": 0,
+                "ecg2_freqdivh": 0,
+                "ecg_subs": 2,
+                "leadoff_initl": 0,
+                "leadoff_inith": 0,
+                "ecg_initl": 1,
+                "ecg_inith": 0,
+                "sample_num": 0
+            },
+            "post": {
+                "pp_cfg": 0,
+                "ppg1_pp1": 0,
+                "ppg1_pp2": 0,
+                "ppg2_pp1": 0,
+                "ppg2_pp2": 0
+            },
+            "fifo": {
+                "fifo_threshold": 64,
+                "fifo_ctrl": 0
+            }
+        },
+        "agc": [
+            {
+                "agc_mode": 0,
+                "led_control_mode": 1,
+                "ppg_channel": 1,
+                "led_current_min": 10,
+                "led_current_max": 20,
+                "rel_amplitude_min": 5,
+                "rel_amplitude_max": 20,
+                "rel_amplitude_motion": 50,
+                "num_led_steps": 5,
+                "threshold_min": 300000,
+                "threshold_max": 800000
+            }
+        ]
+    }
+}

@@ -68,7 +68,11 @@ LINKER_FILE := ./neuralspot/ns-core/src/$(BOARD)/gcc/linker_script.ld
 endif
 
 LFLAGS = -mthumb -mcpu=$(CPU) $(FPU_FLAG) -mfloat-abi=$(FABI)
-LFLAGS+= -nostartfiles -static -fno-exceptions
+LFLAGS+= -nostartfiles -static -fno-exceptions -fdiagnostics-show-option
+ifeq ($(GCC14),1)
+LFLAGS+= -Wl,--no-warn-rwx-segments
+endif
+LFLAGS+= -Wl,--wrap=_write_r -Wl,--wrap=_close_r -Wl,--wrap=_lseek_r -Wl,--wrap=_read_r -Wl,--wrap=_kill_r -Wl,--wrap=_getpid_r -Wl,--wrap=_fstat_r -Wl,--wrap=_isatty_r
 LFLAGS+= -Wl,--gc-sections,--entry,Reset_Handler,-Map,$(BINDIR)/output.map
 LFLAGS+= -Wl,--start-group -lm -lc -lgcc -lnosys -Wl,--whole-archive $(override_libraries) -Wl,--no-whole-archive $(libraries) $(lib_prebuilt) -lstdc++ -Wl,--end-group
 LFLAGS+=
@@ -149,6 +153,7 @@ DEFINES+= AM_PART_APOLLO4P
 endif
 ifeq ($(PART),apollo4l)
 DEFINES+= AM_PART_APOLLO4L
+DEFINES+= APOLLO4L_PRE_SDK
 endif
 ifeq ($(PART),apollo3p)
 	DEFINES+= AM_PART_APOLLO3P

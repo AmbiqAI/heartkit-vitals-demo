@@ -44,9 +44,83 @@ extern "C" {
 #define I2C_SPEED_HZ (100000)
 #define MAX86150_ADDR (0x5E)
 #define LEDSTICK_ADDR (0x23)
-#define EN_SPO2_ALGO (1)
-#define EN_RRM_ALGO (0)
+
+#define AS7058_PROFILE_EVK_SPI (0)
+#define AS7058_PROFILE_CLICK_I2C (1)
+
+#define AS7058_APP_PROFILE_LEGACY_DEFAULT (0)
+#define AS7058_APP_PROFILE_CLICK_PPG_ECG (1)
+#define AS7058_APP_PROFILE_CLICK_SPO2 (2)
+#define AS7058_APP_PROFILE_CLICK_GOLDEN (3)
+
+#ifndef AS7058_BOARD_PROFILE
+#define AS7058_BOARD_PROFILE AS7058_PROFILE_CLICK_I2C
+#endif
+
+#if AS7058_BOARD_PROFILE == AS7058_PROFILE_CLICK_I2C
+#define AS7058_OSAL_INT_PIN 50
+#else
 #define AS7058_OSAL_INT_PIN 2
+#endif
+
+#ifndef AS7058_BRINGUP_MODE
+#define AS7058_BRINGUP_MODE (0)
+#endif
+
+#ifndef AS7058_APP_PROFILE
+#define AS7058_APP_PROFILE AS7058_APP_PROFILE_CLICK_GOLDEN
+#endif
+
+#define AS7058_USE_SPI (AS7058_BOARD_PROFILE == AS7058_PROFILE_EVK_SPI)
+#define AS7058_USE_I2C (AS7058_BOARD_PROFILE == AS7058_PROFILE_CLICK_I2C)
+
+#ifndef AS7058_I2C_ADDR
+#define AS7058_I2C_ADDR (0x55)
+#endif
+
+#ifndef AS7058_I2C_SPEED_HZ
+#define AS7058_I2C_SPEED_HZ (100000)
+#endif
+
+#if AS7058_BOARD_PROFILE == AS7058_PROFILE_CLICK_I2C
+#define AS7058_LED_SUB1_CFG (0x02) // LED2 (red)
+#define AS7058_LED_SUB2_CFG (0x03) // LED3 (IR)
+#define AS7058_BOARD_ALLOWED_LED_MASK (0x07) // LEDs 1..3
+#else
+#define AS7058_LED_SUB1_CFG (34) // LED2 + LED6 (red pair)
+#define AS7058_LED_SUB2_CFG (51) // LED3 + LED7 (IR pair)
+#define AS7058_BOARD_ALLOWED_LED_MASK (0x77) // LEDs 1,2,3,5,6,7
+#endif
+// PD2, PD3, PD5 are physically connected on both EVK and Click variants used here.
+#define AS7058_BOARD_ALLOWED_PD_MASK (0x16)
+
+#ifndef EN_SPO2_ALGO
+#define EN_SPO2_ALGO (1)
+#endif
+
+#ifndef EN_RRM_ALGO
+#define EN_RRM_ALGO (0)
+#endif
+
+#ifndef EN_AS7058_IIR
+#define EN_AS7058_IIR (0)
+#endif
+
+#ifndef EN_AS7058_CB_DEBUG_LOGS
+#define EN_AS7058_CB_DEBUG_LOGS (0)
+#endif
+
+#ifndef EN_APP_DEBUG_LOGS
+#define EN_APP_DEBUG_LOGS (0)
+#endif
+
+#ifndef EN_APP_TIMING_LOGS
+#define EN_APP_TIMING_LOGS (1)
+#endif
+
+#ifndef EN_MODEL_VERBOSE_LOGS
+#define EN_MODEL_VERBOSE_LOGS (0)
+#endif
 
 #define NUM_INPUT_PTS (6)
 #define LIVE_INPUT_MODE NUM_INPUT_PTS
@@ -54,6 +128,8 @@ extern "C" {
 #define PTS_PPG_DATA_LEN (2000)
 
 #define SENSOR_BUF_LEN (4 * 64)
+#define AS7058_SENSOR_TASK_STACK_WORDS (1024)
+#define AS7058_SENSOR_TASK_PRIORITY (2)
 
 ///////////////////////////////////////////////////////////////////////////////
 // Preprocess Configuration
@@ -69,8 +145,13 @@ extern "C" {
 #define PPG_SAMPLE_RATE (100)
 #define PPG_TARGET_RATE (100)
 #define PPG_DS_RATE (PPG_SAMPLE_RATE / PPG_TARGET_RATE)
-#define PPG_AGC_MIN (250000)
-#define PPG_AGC_MAX (770000)
+// Click-board AGC bring-up tuning: narrower/lower target band to reduce oscillation and clipping swings.
+#define PPG_AGC_MIN (180000)
+#define PPG_AGC_MAX (620000)
+// PPG TX gain after centering in send_ppg_signals(); keep at 1.0 for no extra amplification.
+#define PPG_TX_GAIN (1.0f)
+// Additional synthetic Gaussian noise (std-dev in ADC counts) for non-live PPG playback.
+#define PPG_STIM_GAUSS_STD (50.0f)
 
 ///////////////////////////////////////////////////////////////////////////////
 // ECG Denoise Configuration
@@ -247,10 +328,14 @@ extern "C" {
 
 #define RTOS_TIMER (4)
 
+#ifndef MIN
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
+#endif
 #define MIN3(a, b, c) (MIN(MIN(a, b), c))
 #define MIN4(a, b, c, d) (MIN(MIN(a, b), MIN(c, d)))
+#ifndef MAX
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
+#endif
 #define MAX3(a, b, c) (MAX(MAX(a, b), c))
 #define MAX4(a, b, c, d) (MAX(MAX(a, b), MAX(c, d)))
 #define CLIP(a, min, max) (MAX(MIN(a, max), min))
