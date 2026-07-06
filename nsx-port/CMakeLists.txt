@@ -27,6 +27,7 @@ add_executable(nsx-port
     src/main.c
     src/sensor.c
     src/store.c
+    src/metrics.c
     src/as7058_profiles.c
     src/ringbuffer.c
     src/generated/as7058_profile_click_ppg_ecg.c
