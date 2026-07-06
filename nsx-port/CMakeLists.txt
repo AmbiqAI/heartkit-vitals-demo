@@ -24,10 +24,14 @@ nsx_bootstrap_app(
 )
 
 add_executable(nsx-port
-    src/main.c
+    src/main.cc
     src/sensor.c
     src/store.c
     src/metrics.c
+    src/tflm.cc
+    src/ecg_denoise.cc
+    src/ecg_segmentation.cc
+    src/ecg_arrhythmia.cc
     src/as7058_profiles.c
     src/ringbuffer.c
     src/generated/as7058_profile_click_ppg_ecg.c
@@ -51,6 +55,7 @@ target_link_libraries(nsx-port PRIVATE
     nsx::as7058_i2c
     nsx::as7058_spi
     nsx::physiokit
+    nsx::helia_rt
 )
 
 nsx_finalize_app(nsx-port)

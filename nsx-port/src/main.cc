@@ -1,20 +1,34 @@
 /**
- * @file main.c
- * @brief Phase 3: AS7058 PPG+ECG sensing + physiokit DSP metrics on apollo510_evb.
+ * @file main.cc
+ * @brief Phase 3/4: AS7058 PPG+ECG sensing + physiokit DSP metrics, plus
+ * heliaRT/TFLM AI model bring-up, on apollo510_evb.
  *
  * Ported from legacy heartkit-vitals-demo. Adds the DSP-only ECG pipeline
  * (biquad denoise -> pk_ecg peak-based segmentation -> HR/HRV metrics
  * -> simple threshold arrhythmia label) and PPG pipeline (pulse-rate +
  * quality-of-signal via pk_ppg), both driven entirely by nsx-physiokit +
- * helia-dsp (CMSISDSP) -- no AI/TFLM model dependency yet (that's heliaRT,
- * a later phase). See store.h for why PPG SpO2 is not yet meaningful on
- * this sensor profile.
+ * helia-dsp (CMSISDSP). See store.h for why PPG SpO2 is not yet
+ * meaningful on this sensor profile.
+ *
+ * Also brings up the 3 legacy TFLM ECG models (denoise/segmentation/
+ * arrhythmia) via nsx-helia-rt: AiModelDemoTask loads all 3 models
+ * (reusing the *_flatbuffer.h model data unchanged) and runs one timed
+ * inference pass per model with synthetic input, mirroring the
+ * kws_infer example's single-shot demo pattern. This validates that
+ * heliaRT builds/links/runs on real hardware, and reports per-model
+ * inference latency, ahead of wiring the models into the live sensor
+ * pipeline as a selectable AI mode (that mode-switching orchestration
+ * -- app_state_t, runtime BLE/USB control -- is ported in a later phase
+ * alongside the rest of main.cc's orchestration logic).
  */
 #include <math.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "FreeRTOS.h"
 #include "task.h"
+
+#include "am_mcu_apollo.h"
 
 #include "nsx_core.h"
 #include "nsx_freertos.h"
@@ -32,10 +46,32 @@
 #include "sensor.h"
 #include "store.h"
 
+#include "tflm.h"
+#include "ecg_arrhythmia.h"
+#include "ecg_denoise.h"
+#include "ecg_segmentation.h"
+
 static TaskHandle_t sensorIrqTaskHandle;
 static TaskHandle_t ecgProcessTaskHandle;
 static TaskHandle_t ppgProcessTaskHandle;
 static TaskHandle_t reportTaskHandle;
+static TaskHandle_t aiModelDemoTaskHandle;
+
+// DWT cycle counter helpers (Cortex-M55), matching the kws_infer example's
+// approach to measuring per-model inference latency.
+static inline void
+dwt_init(void)
+{
+    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+    DWT->CYCCNT = 0;
+    DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+}
+
+static inline uint32_t
+dwt_cycles(void)
+{
+    return DWT->CYCCNT;
+}
 
 void
 SensorIrqTask(void *pvParameters)
@@ -161,6 +197,74 @@ PpgProcessTask(void *pvParameters)
     }
 }
 
+/* Brings up the 3 legacy TFLM ECG models (denoise/segmentation/
+ * arrhythmia) via nsx-helia-rt and runs one timed inference pass per
+ * model with a synthetic sine-wave input, reporting arena usage and
+ * latency. This is a bring-up/validation task (mirrors the kws_infer
+ * example's single-shot demo pattern) -- it does not yet feed live
+ * sensor data or replace the DSP pipeline above; that full AI-mode
+ * wiring (mode switching, live windowed staging matching each model's
+ * pad length) is deferred to the main-orchestration porting phase. */
+void
+AiModelDemoTask(void *pvParameters)
+{
+    (void)pvParameters;
+    uint32_t err;
+    uint32_t cyclesStart, cyclesEnd;
+    static float32_t synthEcgDen[ECG_DEN_WINDOW_LEN];
+    static float32_t synthEcgDenOut[ECG_DEN_WINDOW_LEN];
+    static float32_t synthEcgSeg[ECG_SEG_WINDOW_LEN];
+    static uint16_t synthSegMask[ECG_SEG_WINDOW_LEN];
+    static float32_t synthEcgArr[ECG_ARR_WINDOW_LEN];
+    float32_t qos = 0;
+
+    dwt_init();
+
+    for (size_t i = 0; i < ECG_DEN_WINDOW_LEN; i++) {
+        synthEcgDen[i] = sinf(2.0f * (float32_t)M_PI * 1.2f * i / ECG_TARGET_RATE);
+    }
+    for (size_t i = 0; i < ECG_SEG_WINDOW_LEN; i++) {
+        synthEcgSeg[i] = sinf(2.0f * (float32_t)M_PI * 1.2f * i / ECG_TARGET_RATE);
+    }
+    for (size_t i = 0; i < ECG_ARR_WINDOW_LEN; i++) {
+        synthEcgArr[i] = sinf(2.0f * (float32_t)M_PI * 1.2f * i / ECG_TARGET_RATE);
+    }
+
+    nsx_printf("[ai] initializing TFLM (heliaRT) backend...\n");
+    tflm_init();
+
+    err = ecg_denoise_init();
+    nsx_printf("[ai] ecg_denoise_init err=%lu\n", (unsigned long)err);
+
+    err = ecg_segmentation_init();
+    nsx_printf("[ai] ecg_segmentation_init err=%lu\n", (unsigned long)err);
+
+    err = ecg_arrhythmia_init();
+    nsx_printf("[ai] ecg_arrhythmia_init err=%lu\n", (unsigned long)err);
+
+    while (true) {
+        cyclesStart = dwt_cycles();
+        err = ecg_denoise_inference(synthEcgDen, synthEcgDenOut, ECG_DEN_PAD_LEN, ECG_DEN_THRESHOLD);
+        cyclesEnd = dwt_cycles();
+        nsx_printf("[ai] denoise inference err=%lu latency_us=%lu\n", (unsigned long)err,
+                   (unsigned long)((cyclesEnd - cyclesStart) / (SystemCoreClock / 1000000)));
+
+        cyclesStart = dwt_cycles();
+        err = ecg_segmentation_inference(synthEcgSeg, synthSegMask, ECG_SEG_PAD_LEN, ECG_SEG_THRESHOLD, &qos);
+        cyclesEnd = dwt_cycles();
+        nsx_printf("[ai] segmentation inference err=%lu qos=%d latency_us=%lu\n", (unsigned long)err, (int)qos,
+                   (unsigned long)((cyclesEnd - cyclesStart) / (SystemCoreClock / 1000000)));
+
+        cyclesStart = dwt_cycles();
+        uint32_t arrLabel = ecg_arrhythmia_inference(synthEcgArr, ECG_ARR_THRESHOLD);
+        cyclesEnd = dwt_cycles();
+        nsx_printf("[ai] arrhythmia inference label=%lu latency_us=%lu\n", (unsigned long)arrLabel,
+                   (unsigned long)((cyclesEnd - cyclesStart) / (SystemCoreClock / 1000000)));
+
+        vTaskDelay(pdMS_TO_TICKS(10000));
+    }
+}
+
 /* Reports sensor throughput plus the latest DSP metrics every second. */
 void
 ReportTask(void *pvParameters)
@@ -250,7 +354,16 @@ main(void)
                &reportTaskHandle) != pdPASS),
            "ReportTask create failed.\n");
 
-    nsx_printf("nsx-port phase 3: AS7058 PPG+ECG sensing + physiokit DSP metrics\n");
+    NSX_TRY((xTaskCreate(
+               AiModelDemoTask,
+               "AiModelDemoTask",
+               4096,
+               0,
+               1,
+               &aiModelDemoTaskHandle) != pdPASS),
+           "AiModelDemoTask create failed.\n");
+
+    nsx_printf("nsx-port phase 3/4: AS7058 PPG+ECG sensing + physiokit DSP metrics + heliaRT AI model bring-up\n");
 
     nsx_freertos_start();
 
