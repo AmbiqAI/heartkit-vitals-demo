@@ -1,0 +1,57 @@
+schema_version: 2
+project:
+  name: nsx-port
+target:
+  board: apollo510b_evb
+  soc: apollo510b
+toolchain: arm-none-eabi-gcc
+channel: stable
+profile: apollo510_evb_minimal
+profile_status: active
+modules:
+- name: nsx-freertos
+- name: nsx-usb
+- name: nsx-i2c
+- name: nsx-spi
+- name: nsx-gpio
+- name: nsx-power
+- name: nsx-as7058
+- name: nsx-physiokit
+features: {}
+module_registry:
+  projects:
+    nsx-as7058:
+      name: nsx-as7058
+      url: https://github.com/AmbiqAI/nsx-as7058.git
+      revision: main
+      path: modules/nsx-as7058
+    nsx-physiokit:
+      name: nsx-physiokit
+      url: https://github.com/AmbiqAI/nsx-physiokit.git
+      revision: main
+      path: modules/nsx-physiokit
+    # TEMPORARY: pin to our upstream PR branch which fixes CMSISDSP's
+    # missing arch-flags linkage (see plan.md / PR AmbiqAI/helia-dsp#3).
+    # Revert to `revision: main` once that PR merges.
+    helia-dsp:
+      name: helia-dsp
+      url: https://github.com/AmbiqAI/helia-dsp.git
+      revision: fix/nsx-cmsisdsp-arch-flags
+      path: modules/helia-dsp
+  modules:
+    nsx-as7058:
+      project: nsx-as7058
+      revision: main
+      metadata: modules/nsx-as7058/nsx-module.yaml
+    nsx-physiokit:
+      project: nsx-physiokit
+      revision: main
+      metadata: modules/nsx-physiokit/nsx-module.yaml
+    helia-dsp:
+      project: helia-dsp
+      revision: fix/nsx-cmsisdsp-arch-flags
+      metadata: modules/helia-dsp/nsx-module.yaml
+tooling:
+  nsx:
+    version: 0.7.3
+    major: 0
