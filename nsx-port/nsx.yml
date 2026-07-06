@@ -30,13 +30,17 @@ module_registry:
       url: https://github.com/AmbiqAI/nsx-physiokit.git
       revision: main
       path: modules/nsx-physiokit
-    # TEMPORARY: pin to our upstream PR branch which fixes CMSISDSP's
-    # missing arch-flags linkage (see plan.md / PR AmbiqAI/helia-dsp#3).
-    # Revert to `revision: main` once that PR merges.
+    # TEMPORARY: pin to the exact commit that merged our upstream fix for
+    # CMSISDSP's missing arch-flags linkage (PR AmbiqAI/helia-dsp#3,
+    # merged into main). The neuralspotx packaged registry
+    # (registry.lock.yaml) still pins helia-dsp to a pre-fix commit
+    # (78a36d99), so this override remains necessary until that registry
+    # is refreshed upstream — at which point this whole override block
+    # (and the matching one under `modules:` below) can be deleted.
     helia-dsp:
       name: helia-dsp
       url: https://github.com/AmbiqAI/helia-dsp.git
-      revision: fix/nsx-cmsisdsp-arch-flags
+      revision: 5f344d5a94a8ef4263ea1bcf6f3e315d35d4b597
       path: modules/helia-dsp
   modules:
     nsx-as7058:
@@ -49,7 +53,7 @@ module_registry:
       metadata: modules/nsx-physiokit/nsx-module.yaml
     helia-dsp:
       project: helia-dsp
-      revision: fix/nsx-cmsisdsp-arch-flags
+      revision: 5f344d5a94a8ef4263ea1bcf6f3e315d35d4b597
       metadata: modules/helia-dsp/nsx-module.yaml
 tooling:
   nsx:
