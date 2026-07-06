@@ -3,12 +3,12 @@
 schema_version: 4
 targets:
   apollo510b_evb:
-    generated_at: '2026-07-06T21:31:59+00:00'
+    generated_at: '2026-07-06T21:43:11+00:00'
     nsx_tool:
       version: 0.7.3
     manifest:
       path: nsx.yml
-      hash: sha256:a58118b8410b11684c240b3bd5c6f366732221c90990e1ae37beaf24255bc5f9
+      hash: sha256:429c3154cd84f75fdeb160170f63a592993a0e311c4bf5662f35ddcc162e2552
     target:
       board: apollo510b_evb
       soc: apollo510b
@@ -254,3 +254,13 @@ targets:
           vendored_at: modules/helia-rt
           content_hash: sha256:75b415b1be12d035a0389778b7e7786104c6d6dcd206d4c70ce9662b2df62354
           acquired_at: '2026-07-06T21:32:04+00:00'
+      nsx-tileio-usb:
+        project: nsx-tileio
+        kind: git
+        constraint: 6c96b908985b72a464a6cd68d16073a76076d18e
+        resolved:
+          url: https://github.com/AmbiqAI/nsx-tileio.git
+          commit: 6c96b908985b72a464a6cd68d16073a76076d18e
+          vendored_at: modules/nsx-tileio
+          content_hash: sha256:c3ae65e16c1ef7f7e566c1011a720e4828ac92760f20704cb5553a0394063448
+          acquired_at: '2026-07-06T21:43:13+00:00'

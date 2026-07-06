@@ -51,11 +51,14 @@
 #include "ecg_denoise.h"
 #include "ecg_segmentation.h"
 
+#include "tio_usb.h"
+
 static TaskHandle_t sensorIrqTaskHandle;
 static TaskHandle_t ecgProcessTaskHandle;
 static TaskHandle_t ppgProcessTaskHandle;
 static TaskHandle_t reportTaskHandle;
 static TaskHandle_t aiModelDemoTaskHandle;
+static TaskHandle_t tioTxTaskHandle;
 
 // DWT cycle counter helpers (Cortex-M55), matching the kws_infer example's
 // approach to measuring per-model inference latency.
@@ -131,6 +134,11 @@ EcgProcessTask(void *pvParameters)
 
             ringbuffer_push(&rbEcgMet, &ecgSegInout[ECG_SEG_PAD_LEN], ECG_SEG_VALID_LEN);
             ringbuffer_push(&rbEcgMaskMet, &ecgSegMask[ECG_SEG_PAD_LEN], ECG_SEG_VALID_LEN);
+            /* Tee the same denoised+masked window into the TileIO TX taps
+             * (see store.h) for TioTxTask to stream live to a host
+             * dashboard. */
+            ringbuffer_push(&rbEcgTx, &ecgSegInout[ECG_SEG_PAD_LEN], ECG_SEG_VALID_LEN);
+            ringbuffer_push(&rbEcgMaskTx, &ecgSegMask[ECG_SEG_PAD_LEN], ECG_SEG_VALID_LEN);
             ringbuffer_seek(&rbEcgSeg, ECG_SEG_VALID_LEN);
         }
         /* Metrics: HR + HRV via metrics_capture_ecg(), then a simple
@@ -172,8 +180,14 @@ PpgProcessTask(void *pvParameters)
     while (true) {
         numSamples = ringbuffer_len(&rbPpg1Sensor);
         for (size_t i = 0; i < numSamples / PPG_DS_RATE; i++) {
+            float32_t sample;
             ringbuffer_seek(&rbPpg1Sensor, PPG_DS_RATE - 1);
-            ringbuffer_transfer(&rbPpg1Sensor, &rbPpg1Met, 1);
+            ringbuffer_peek(&rbPpg1Sensor, &sample, 1);
+            ringbuffer_push(&rbPpg1Met, &sample, 1);
+            /* Tee the same downsampled sample into the TileIO TX tap (see
+             * store.h) for TioTxTask to stream live to a host dashboard. */
+            ringbuffer_push(&rbPpg1Tx, &sample, 1);
+            ringbuffer_seek(&rbPpg1Sensor, 1);
         }
 
         if (ringbuffer_len(&rbPpg1Met) >= PPG_MET_WINDOW_LEN) {
@@ -265,12 +279,131 @@ AiModelDemoTask(void *pvParameters)
     }
 }
 
+///////////////////////////////////////////////////////////////////////////////
+// TileIO USB streaming
+///////////////////////////////////////////////////////////////////////////////
+//
+// Ported from legacy's tio_usb.h/webusb_controller.h usage onto
+// nsx-tileio-usb (a thin wrapper carrying the same TileIO packet framing
+// over the public nsx-usb vendor-channel API -- see
+// modules/nsx-tileio/modules/nsx-tileio-usb/README.md). Streams: slot 0 =
+// ECG (type 0 = denoised+mask signal, type 1 = HR/HRV/QoS/arrhythmia
+// metrics), slot 1 = PPG (type 0 = single-wavelength signal, type 1 =
+// PR/QoS metrics -- SpO2 is n/a, see store.h). UIO (input source, noise
+// levels, denoise/segmentation/arrhythmia mode selectors) receive is
+// stubbed/logged only -- there is no app_state_t-equivalent runtime mode
+// switch in nsx-port yet to actually apply those settings (that lands in
+// the main-orchestration porting phase); this still proves the TileIO USB
+// transport itself (enumeration, framing, RX/TX) end-to-end on hardware.
+
+// Forward declarations (defined below tioUsbCtx, referenced by it).
+static void TioUioUpdate(const uint8_t *data, uint32_t length);
+static void TioSlotUpdate(uint8_t slot, uint8_t slot_type, const uint8_t *data, uint32_t length);
+
+static tio_usb_context_t tioUsbCtx = {
+    .uio_update_cb = &TioUioUpdate,
+    .slot_update_cb = &TioSlotUpdate,
+    .manufacturer = "Ambiq",
+    .product = "heartkit-vitals-demo (nsx-port)",
+    .serial = "NSX-HKV-0001",
+    .cdc_interface = "NSX CDC",
+    .vendor_interface = "TileIO Vendor",
+    .webusb_url = "tileio.local",
+    .vid = TIO_USB_VENDOR_ID,
+    .pid = TIO_USB_PRODUCT_ID,
+};
+
+static void
+TioUioUpdate(const uint8_t *data, uint32_t length)
+{
+    nsx_printf("[tio] uio update received (len=%lu) -- mode switching not yet wired in nsx-port\n",
+               (unsigned long)length);
+    (void)data;
+}
+
+static void
+TioSlotUpdate(uint8_t slot, uint8_t slot_type, const uint8_t *data, uint32_t length)
+{
+    nsx_printf("[tio] slot update received slot=%d type=%d len=%lu (no host->device slot data expected)\n",
+               (int)slot, (int)slot_type, (unsigned long)length);
+    (void)data;
+}
+
+/* Packs+sends the denoised ECG (2ch: value, QRS mask) from rbEcgTx/
+ * rbEcgMaskTx, PPG (1ch: single-wavelength value) from rbPpg1Tx, and the
+ * latest ECG/PPG metrics snapshots -- to the TileIO host over USB. */
+void
+TioTxTask(void *pvParameters)
+{
+    (void)pvParameters;
+    uint8_t buffer[240];
+    float32_t ecgVal, ppgVal;
+    uint16_t ecgMaskVal;
+    int16_t txVal;
+    uint32_t length;
+    size_t numSamples;
+    float32_t metricsBuffer[16];
+
+    while (true) {
+        if (!tio_usb_tx_available()) {
+            vTaskDelay(pdMS_TO_TICKS(50));
+            continue;
+        }
+
+        /* ECG signal (slot 0, type 0): interleaved mask + denoised value. */
+        numSamples = MIN(ringbuffer_len(&rbEcgTx), ringbuffer_len(&rbEcgMaskTx));
+        numSamples = MIN(numSamples, sizeof(buffer) / (sizeof(uint16_t) + sizeof(int16_t)));
+        if (numSamples > 0) {
+            length = 0;
+            for (size_t i = 0; i < numSamples; i++) {
+                ringbuffer_pop(&rbEcgMaskTx, &ecgMaskVal, 1);
+                memcpy(&buffer[length], &ecgMaskVal, sizeof(uint16_t));
+                length += sizeof(uint16_t);
+                ringbuffer_pop(&rbEcgTx, &ecgVal, 1);
+                txVal = (int16_t)CLIP(TIO_SLOT0_SCALE * ecgVal, -32768, 32767);
+                memcpy(&buffer[length], &txVal, sizeof(int16_t));
+                length += sizeof(int16_t);
+            }
+            tio_usb_send_slot_data(0, 0, buffer, length);
+        }
+
+        /* PPG signal (slot 1, type 0): single wavelength value only (see
+         * store.h for why there is no second channel to send). */
+        numSamples = ringbuffer_len(&rbPpg1Tx);
+        numSamples = MIN(numSamples, sizeof(buffer) / sizeof(int16_t));
+        if (numSamples > 0) {
+            length = 0;
+            for (size_t i = 0; i < numSamples; i++) {
+                ringbuffer_pop(&rbPpg1Tx, &ppgVal, 1);
+                txVal = (int16_t)CLIP(ppgVal, -32768.0f, 32767.0f);
+                memcpy(&buffer[length], &txVal, sizeof(int16_t));
+                length += sizeof(int16_t);
+            }
+            tio_usb_send_slot_data(1, 0, buffer, length);
+        }
+
+        /* ECG metrics (slot 0, type 1). */
+        metricsBuffer[0] = ecgMetResults.hr;
+        metricsBuffer[1] = ecgMetResults.hrv;
+        metricsBuffer[2] = ecgMetResults.arrhythmiaLabel;
+        metricsBuffer[3] = ecgMetResults.qos;
+        tio_usb_send_slot_data(0, 1, (const uint8_t *)metricsBuffer, 4 * sizeof(float32_t));
+
+        /* PPG metrics (slot 1, type 1). spo2 is always 0 -- n/a (see store.h). */
+        metricsBuffer[0] = ppgMetResults.pr;
+        metricsBuffer[1] = ppgMetResults.spo2;
+        metricsBuffer[2] = ppgMetResults.qos;
+        tio_usb_send_slot_data(1, 1, (const uint8_t *)metricsBuffer, 3 * sizeof(float32_t));
+
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+}
+
 /* Reports sensor throughput plus the latest DSP metrics every second. */
 void
 ReportTask(void *pvParameters)
 {
     (void)pvParameters;
-
     while (true) {
         nsx_printf("[sensor] isr=%lu missed=%lu ppg(push=%lu drop=%lu) ecg(push=%lu drop=%lu)\n",
                    (unsigned long)sensor_get_as7058_int_isr_count(),
@@ -314,6 +447,8 @@ main(void)
 
     NSX_TRY(sensor_init(&sensorCtx) != ERR_SUCCESS, "Sensor Init failed.\n");
     NSX_TRY(sensor_configure() != ERR_SUCCESS, "Sensor Configure failed.\n");
+
+    NSX_TRY(tio_usb_init(&tioUsbCtx) != NSX_STATUS_SUCCESS, "TileIO USB Init failed.\n");
 
     NSX_TRY((xTaskCreate(
                SensorIrqTask,
@@ -363,7 +498,17 @@ main(void)
                &aiModelDemoTaskHandle) != pdPASS),
            "AiModelDemoTask create failed.\n");
 
-    nsx_printf("nsx-port phase 3/4: AS7058 PPG+ECG sensing + physiokit DSP metrics + heliaRT AI model bring-up\n");
+    NSX_TRY((xTaskCreate(
+               TioTxTask,
+               "TioTxTask",
+               2048,
+               0,
+               1,
+               &tioTxTaskHandle) != pdPASS),
+           "TioTxTask create failed.\n");
+
+    nsx_printf("nsx-port phase 3/4/5: AS7058 PPG+ECG sensing + physiokit DSP metrics + heliaRT AI model bring-up + "
+               "TileIO USB streaming\n");
 
     nsx_freertos_start();
 

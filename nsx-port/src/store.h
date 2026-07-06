@@ -105,6 +105,24 @@ extern float32_t ppg1MetData[PPG_MET_WINDOW_LEN];
 
 extern metrics_ppg_results_t ppgMetResults;
 
+///////////////////////////////////////////////////////////////////////////////
+// TileIO Streaming Taps
+///////////////////////////////////////////////////////////////////////////////
+//
+// Separate from the metrics-stage ringbuffers above: these are lightweight
+// tap-offs of already-computed denoised ECG + QRS mask (from EcgProcessTask's
+// segmentation stage) and downsampled PPG samples (from PpgProcessTask),
+// drained by TioTxTask in main.cc to stream live signals to a Tileio host
+// dashboard over nsx-tileio-usb. Unlike legacy (which tees raw+denoised+mask
+// 3-wide for ECG and dual-wavelength for PPG), this only streams
+// denoised+mask for ECG (2ch) and the single available PPG wavelength (1ch)
+// -- matching the same single-wavelength sensor profile limitation
+// documented in the PPG metrics section above.
+
+extern rb_config_t rbEcgTx;
+extern rb_config_t rbEcgMaskTx;
+extern rb_config_t rbPpg1Tx;
+
 #ifdef __cplusplus
 }
 #endif

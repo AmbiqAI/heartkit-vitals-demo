@@ -56,6 +56,7 @@ target_link_libraries(nsx-port PRIVATE
     nsx::as7058_spi
     nsx::physiokit
     nsx::helia_rt
+    nsx::tileio_usb
 )
 
 nsx_finalize_app(nsx-port)

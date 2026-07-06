@@ -157,3 +157,34 @@ metrics_ppg_results_t ppgMetResults = {
     .spo2 = 0,
     .qos = 0,
 };
+
+///////////////////////////////////////////////////////////////////////////////
+// TileIO Streaming Taps
+///////////////////////////////////////////////////////////////////////////////
+
+static float32_t ecgTxBuffer[ECG_TX_BUF_LEN];
+rb_config_t rbEcgTx = {
+    .buffer = (void *)ecgTxBuffer,
+    .dlen = sizeof(float32_t),
+    .size = ECG_TX_BUF_LEN,
+    .head = 0,
+    .tail = 0,
+};
+
+static uint16_t ecgMaskTxBuffer[ECG_TX_BUF_LEN];
+rb_config_t rbEcgMaskTx = {
+    .buffer = (void *)ecgMaskTxBuffer,
+    .dlen = sizeof(uint16_t),
+    .size = ECG_TX_BUF_LEN,
+    .head = 0,
+    .tail = 0,
+};
+
+static float32_t ppg1TxBuffer[PPG_TX_BUF_LEN];
+rb_config_t rbPpg1Tx = {
+    .buffer = (void *)ppg1TxBuffer,
+    .dlen = sizeof(float32_t),
+    .size = PPG_TX_BUF_LEN,
+    .head = 0,
+    .tail = 0,
+};
