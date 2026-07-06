@@ -22,6 +22,17 @@ extern "C" {
 
 typedef struct {
     uint8_t initialized;
+    /* Mirrors legacy app_state_t.inputSource (constants.h: NUM_INPUT_PTS
+     * canned stimulus slots, LIVE_INPUT_MODE = live AS7058 sensor). Wired
+     * through from main.cc/store.c for API parity with legacy and to gate
+     * main.cc's noise-injection/cosine-similarity code paths, but sensor.c
+     * itself does not yet implement legacy's stimulus-substitution ISR
+     * path (canned ecg_stimulus/ppg1_stimulus/ppg2_stimulus playback in
+     * place of live AS7058 FIFO data) -- that is a real, explicitly
+     * deferred gap (see plan.md phase 6 notes): setting inputSource to a
+     * non-live value here currently has no effect on the sampled data,
+     * it always reflects the live sensor. */
+    uint8_t inputSource;
 } sensor_context_t;
 
 err_code_t sensor_init(sensor_context_t *ctx);

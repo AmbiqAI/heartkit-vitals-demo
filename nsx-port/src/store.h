@@ -1,14 +1,16 @@
 /**
  * @file store.h
- * @brief Central store for the NSX port (phase 3: DSP metrics pipeline).
+ * @brief Central store for the NSX port (phase 6: full app orchestration).
  *
- * Subset of the legacy heartkit-vitals-demo store.h: board/bus configuration
- * (phase 2) plus the ECG/PPG DSP preprocessing + metrics buffers needed to
- * compute HR/HRV (ECG) and PR/QoS (PPG) purely via nsx-physiokit, with no AI
- * dependency (heliaRT ML integration is a later phase). AI-mode-only
- * globals (denoise/segmentation/arrhythmia model buffers, PMIC, TileIO
- * streaming, app_state_t mode switches) are intentionally still omitted —
- * only the DSP code path in the legacy app is exercised for now.
+ * Extends the phase 3 DSP-only store with the pieces needed for full parity
+ * with legacy heartkit-vitals-demo's main.cc: app_state_t runtime mode
+ * switches (input source, denoise/segmentation/arrhythmia mode, noise
+ * levels, CPU speed mode), the app-level CPU/battery metrics struct, the
+ * raw+noisy ECG segmentation staging buffers, and the CPU-utilization
+ * TileIO TX taps. AI-mode denoise/segmentation/arrhythmia model buffers
+ * live in ecg_denoise.h/ecg_segmentation.h/ecg_arrhythmia.h (already
+ * ported in phase 4) -- only the orchestration-level globals are added
+ * here.
  */
 #ifndef __APP_STORE_H
 #define __APP_STORE_H
@@ -31,6 +33,30 @@ extern "C" {
 #include "metrics.h"
 #include "sensor.h"
 
+///////////////////////////////////////////////////////////////////////////////
+// App State
+///////////////////////////////////////////////////////////////////////////////
+
+typedef struct {
+    float32_t cpuPercUtil;
+    float32_t batteryDays;
+    float32_t avgAiIps;
+} metrics_app_results_t;
+
+typedef struct {
+    uint8_t inputSource;
+    uint8_t bwNoiseLevel; // 0-100
+    uint8_t maNoiseLevel; // 0-100
+    uint8_t emNoiseLevel; // 0-100
+    uint8_t speedMode;  // 0-1
+    uint8_t denoiseMode; // 0-2
+    uint8_t segMode;  // 0-2
+    uint8_t arrMode;  // 0-2
+} app_state_t;
+
+extern app_state_t appState;
+extern metrics_app_results_t appMetResults;
+
 extern nsx_power_config_t nsxPwrCfg;
 extern nsx_i2c_config_t nsxI2cCfg;
 extern nsx_spi_config_t nsxSpiCfg;
@@ -49,7 +75,15 @@ extern arm_biquad_casd_df1_inst_f32 ecgFilterCtx;
 
 extern float32_t ecgDenScratch[ECG_DEN_WINDOW_LEN];
 extern float32_t ecgDenInout[ECG_DEN_WINDOW_LEN];
+// Noise-free copy of the denoise input window, kept so EcgProcessTask can
+// compute a cosine-similarity "denoise quality" score against the noisy/
+// AI-denoised output when running in synthetic (non-live) input mode --
+// mirrors legacy's ecgDenNoise.
+extern float32_t ecgDenNoise[ECG_DEN_WINDOW_LEN];
 extern rb_config_t rbEcgDen;
+// Parallel (non-filtered) raw+noise staging ringbuffer, teed alongside
+// rbEcgDen -- feeds the "raw" channel of the 3ch ECG TileIO TX packet.
+extern rb_config_t rbEcgRawSeg;
 
 ///////////////////////////////////////////////////////////////////////////////
 // ECG Segmentation Configuration (DSP-only: pk_ecg_find_peaks_f32)
@@ -110,18 +144,33 @@ extern metrics_ppg_results_t ppgMetResults;
 ///////////////////////////////////////////////////////////////////////////////
 //
 // Separate from the metrics-stage ringbuffers above: these are lightweight
-// tap-offs of already-computed denoised ECG + QRS mask (from EcgProcessTask's
-// segmentation stage) and downsampled PPG samples (from PpgProcessTask),
-// drained by TioTxTask in main.cc to stream live signals to a Tileio host
-// dashboard over nsx-tileio-usb. Unlike legacy (which tees raw+denoised+mask
-// 3-wide for ECG and dual-wavelength for PPG), this only streams
-// denoised+mask for ECG (2ch) and the single available PPG wavelength (1ch)
-// -- matching the same single-wavelength sensor profile limitation
-// documented in the PPG metrics section above.
+// tap-offs of raw + denoised ECG + QRS mask (from EcgProcessTask's
+// preprocessing/segmentation stages) and downsampled PPG samples (from
+// PpgProcessTask), drained by TioProcessTask in main.cc to stream live
+// signals to a Tileio host dashboard over nsx-tileio-usb. ECG streams
+// raw+denoised+mask (3ch), matching legacy. PPG streams only the single
+// available wavelength (1ch), matching the single-wavelength sensor
+// profile limitation documented in the PPG metrics section above.
 
-extern rb_config_t rbEcgTx;
+extern rb_config_t rbEcgRawTx;
+extern rb_config_t rbEcgDenTx;
 extern rb_config_t rbEcgMaskTx;
 extern rb_config_t rbPpg1Tx;
+
+///////////////////////////////////////////////////////////////////////////////
+// CPU Utilization TileIO Streaming Taps (slot 2)
+///////////////////////////////////////////////////////////////////////////////
+//
+// Per-second ECG/PPG task CPU utilization percentages plus the combined
+// total, sampled by CpuProcessTask (main.cc) from FreeRTOS runtime stats
+// and streamed to the host dashboard as slot 2. Requires
+// configGENERATE_RUN_TIME_STATS=1 (see FreeRTOSConfig.h) and the
+// RTOS_AppConfigureTimerForRuntimeStats/GetRuntimeCounterValueFromISR hooks
+// (main.cc) backed by an am_hal_timer instance (RTOS_TIMER, constants.h).
+
+extern rb_config_t rbEcgCpuTx;
+extern rb_config_t rbPpgCpuTx;
+extern rb_config_t rbTotalCpuTx;
 
 #ifdef __cplusplus
 }

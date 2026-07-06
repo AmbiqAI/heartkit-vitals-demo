@@ -51,7 +51,17 @@ extern uint32_t SystemCoreClock;
 #define configMINIMAL_STACK_SIZE                        ( ( uint16_t ) 256 )
 #define configMINIMAL_SECURE_STACK_SIZE                 ( 1024 )
 #define configMAX_TASK_NAME_LEN                         ( 16 )
-#define configTOTAL_HEAP_SIZE                           ( ( size_t ) ( 32 * 1024 ) )
+/* Bumped from the phase-1 scaffold default of 32 KiB: phase 6 adds
+ * CpuProcessTask + TioProcessTask (2 more task stacks) plus a 32-entry x
+ * 256B TileIO TX queue (8 KiB) sized to match legacy's queue depth --
+ * heap_4 must cover all task stacks + TCBs + the queue's own storage,
+ * which alone exceeds 32 KiB. Sized with headroom on top of the ~41 KiB
+ * hard minimum (6 task stacks ~32 KiB + TIO queue 8 KiB + TCB/idle/timer
+ * overhead ~3 KiB). Malloc-failed-hook fires immediately at boot
+ * (xQueueCreate for the TIO queue) if this is too small -- confirmed via
+ * SWO (neuralspotx PR #175 / nsx 0.7.4) after this heap bump.
+ */
+#define configTOTAL_HEAP_SIZE                           ( ( size_t ) ( 48 * 1024 ) )
 
 /* Phase 1 uses a plain SysTick tick; tickless idle is disabled. */
 #define configUSE_TICKLESS_IDLE                         0
@@ -62,7 +72,15 @@ extern uint32_t SystemCoreClock;
 #define configUSE_COUNTING_SEMAPHORES                   1
 #define configUSE_TASK_NOTIFICATIONS                    1
 #define configUSE_QUEUE_SETS                            0
-#define configUSE_TRACE_FACILITY                        0
+/* Runtime stats: app-level CpuProcessTask (nsx-port/src/main.cc) reads
+ * per-task run-time counters via uxTaskGetSystemState(), which requires
+ * configGENERATE_RUN_TIME_STATS + configUSE_TRACE_FACILITY. The app
+ * supplies the timer hooks below (RTOS_AppConfigureTimerForRuntimeStats /
+ * RTOS_AppGetRuntimeCounterValueFromISR), backed by an am_hal_timer
+ * instance (RTOS_TIMER, see constants.h). */
+#define configGENERATE_RUN_TIME_STATS                   1
+#define configUSE_TRACE_FACILITY                        1
+#define configUSE_STATS_FORMATTING_FUNCTIONS             0
 #define configQUEUE_REGISTRY_SIZE                       0
 #define configUSE_NEWLIB_REENTRANT                      0
 
@@ -120,5 +138,21 @@ extern uint32_t SystemCoreClock;
 #define INCLUDE_xTaskGetIdleTaskHandle                  1
 #define INCLUDE_eTaskGetState                           1
 #define INCLUDE_xTimerPendFunctionCall                  1
+
+/* Run-time stats timer hooks (app-supplied, see nsx-port/src/main.cc). Must
+ * be declared before use here since FreeRTOSConfig.h is included ahead of
+ * the app's own headers. This header is included from both plain-C
+ * FreeRTOS sources and main.cc (C++, since heliaRT/TFLM types force main
+ * to be C++) -- guard with extern "C" so the two see matching linkage. */
+#ifdef __cplusplus
+extern "C" {
+#endif
+extern uint32_t RTOS_AppConfigureTimerForRuntimeStats(void);
+extern uint32_t RTOS_AppGetRuntimeCounterValueFromISR(void);
+#ifdef __cplusplus
+}
+#endif
+#define portCONFIGURE_TIMER_FOR_RUN_TIME_STATS() RTOS_AppConfigureTimerForRuntimeStats()
+#define portGET_RUN_TIME_COUNTER_VALUE() RTOS_AppGetRuntimeCounterValueFromISR()
 
 #endif /* FREERTOS_CONFIG_H */

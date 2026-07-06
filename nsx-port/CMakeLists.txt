@@ -34,6 +34,8 @@ add_executable(nsx-port
     src/ecg_arrhythmia.cc
     src/as7058_profiles.c
     src/ringbuffer.c
+    src/stimulus.c
+    src/nstdb_noise.c
     src/generated/as7058_profile_click_ppg_ecg.c
     src/generated/as7058_profile_click_spo2.c
 )

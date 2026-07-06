@@ -31,6 +31,23 @@ sensor_context_t sensorCtx = {
     .initialized = false,
 };
 
+app_state_t appState = {
+    .inputSource = 0,
+    .bwNoiseLevel = 0,
+    .maNoiseLevel = 0,
+    .emNoiseLevel = 0,
+    .speedMode = 0,
+    .denoiseMode = DenoiseModeAi,
+    .segMode = SegmentationModeAi,
+    .arrMode = ArrhythmiaModeAi,
+};
+
+metrics_app_results_t appMetResults = {
+    .cpuPercUtil = 0,
+    .batteryDays = 0,
+    .avgAiIps = 0,
+};
+
 ///////////////////////////////////////////////////////////////////////////////
 // ECG Preprocess Configuration
 ///////////////////////////////////////////////////////////////////////////////
@@ -51,12 +68,22 @@ arm_biquad_casd_df1_inst_f32 ecgFilterCtx = {.numStages = ECG_SOS_LEN, .pState =
 
 float32_t ecgDenScratch[ECG_DEN_WINDOW_LEN];
 float32_t ecgDenInout[ECG_DEN_WINDOW_LEN];
+float32_t ecgDenNoise[ECG_DEN_WINDOW_LEN];
 
 static float32_t ecgDenBuffer[ECG_DEN_BUF_LEN];
 rb_config_t rbEcgDen = {
     .buffer = (void *)ecgDenBuffer,
     .dlen = sizeof(float32_t),
     .size = ECG_DEN_BUF_LEN,
+    .head = 0,
+    .tail = 0,
+};
+
+static float32_t ecgRawSegBuffer[ECG_SEG_BUF_LEN];
+rb_config_t rbEcgRawSeg = {
+    .buffer = (void *)ecgRawSegBuffer,
+    .dlen = sizeof(float32_t),
+    .size = ECG_SEG_BUF_LEN,
     .head = 0,
     .tail = 0,
 };
@@ -162,9 +189,18 @@ metrics_ppg_results_t ppgMetResults = {
 // TileIO Streaming Taps
 ///////////////////////////////////////////////////////////////////////////////
 
-static float32_t ecgTxBuffer[ECG_TX_BUF_LEN];
-rb_config_t rbEcgTx = {
-    .buffer = (void *)ecgTxBuffer,
+static float32_t ecgRawTxBuffer[ECG_TX_BUF_LEN];
+rb_config_t rbEcgRawTx = {
+    .buffer = (void *)ecgRawTxBuffer,
+    .dlen = sizeof(float32_t),
+    .size = ECG_TX_BUF_LEN,
+    .head = 0,
+    .tail = 0,
+};
+
+static float32_t ecgDenTxBuffer[ECG_TX_BUF_LEN];
+rb_config_t rbEcgDenTx = {
+    .buffer = (void *)ecgDenTxBuffer,
     .dlen = sizeof(float32_t),
     .size = ECG_TX_BUF_LEN,
     .head = 0,
@@ -188,3 +224,35 @@ rb_config_t rbPpg1Tx = {
     .head = 0,
     .tail = 0,
 };
+
+///////////////////////////////////////////////////////////////////////////////
+// CPU Utilization TileIO Streaming Taps (slot 2)
+///////////////////////////////////////////////////////////////////////////////
+
+static float32_t ecgCpuTxBuffer[ECG_TX_BUF_LEN];
+rb_config_t rbEcgCpuTx = {
+    .buffer = (void *)ecgCpuTxBuffer,
+    .dlen = sizeof(float32_t),
+    .size = ECG_TX_BUF_LEN,
+    .head = 0,
+    .tail = 0,
+};
+
+static float32_t ppgCpuTxBuffer[PPG_TX_BUF_LEN];
+rb_config_t rbPpgCpuTx = {
+    .buffer = (void *)ppgCpuTxBuffer,
+    .dlen = sizeof(float32_t),
+    .size = PPG_TX_BUF_LEN,
+    .head = 0,
+    .tail = 0,
+};
+
+static float32_t totalCpuTxBuffer[PPG_TX_BUF_LEN];
+rb_config_t rbTotalCpuTx = {
+    .buffer = (void *)totalCpuTxBuffer,
+    .dlen = sizeof(float32_t),
+    .size = PPG_TX_BUF_LEN,
+    .head = 0,
+    .tail = 0,
+};
+
