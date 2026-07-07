@@ -5,6 +5,8 @@ helia-rt/
 ns-cmsis-nn/
 nsx-ambiq-sdk/
 nsx-as7058/
+nsx-board-apollo330mp-evb/
+nsx-board-apollo510-evb/
 nsx-board-apollo510b-evb/
 nsx-physiokit/
 nsx-pmu-armv8m/

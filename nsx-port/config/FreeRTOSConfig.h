@@ -60,8 +60,21 @@ extern uint32_t SystemCoreClock;
  * overhead ~3 KiB). Malloc-failed-hook fires immediately at boot
  * (xQueueCreate for the TIO queue) if this is too small -- confirmed via
  * SWO (neuralspotx PR #175 / nsx 0.7.4) after this heap bump.
- */
+ *
+ * apollo510b_evb only: TileIO BLE (ble_bringup.c) adds a 7th task
+ * (BleRadioTask, 4096-word/16 KiB stack -- matches the ble_webble
+ * reference example's radio task sizing) on top of the 48 KiB baseline
+ * above, which is otherwise sufficient for the other 2 boards (no BLE
+ * task there -- ble_bringup.c is compiled out, see CMakeLists.txt).
+ * 48 KiB + ~16 KiB task stack + TCB overhead rounds up to 72 KiB with
+ * headroom. Reproduced + confirmed via SWO: without this bump,
+ * xTaskCreate(BleRadioTask, ...) exhausts the heap and
+ * vApplicationMallocFailedHook() fires at boot on apollo510b_evb. */
+#if defined(AM_PART_APOLLO510B)
+#define configTOTAL_HEAP_SIZE                           ( ( size_t ) ( 72 * 1024 ) )
+#else
 #define configTOTAL_HEAP_SIZE                           ( ( size_t ) ( 48 * 1024 ) )
+#endif
 
 /* Phase 1 uses a plain SysTick tick; tickless idle is disabled. */
 #define configUSE_TICKLESS_IDLE                         0

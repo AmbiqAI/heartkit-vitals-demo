@@ -4,6 +4,25 @@ project:
 target:
   board: apollo510b_evb
   soc: apollo510b
+# Explicit multi-target manifest (see neuralspotx docs/architecture/
+# multi-target-portability.md): this app builds identically for all 3
+# Apollo5 EVB variants, but only apollo510b_evb has the EM9305 BLE radio.
+# An explicit `targets:` block (rather than the legacy singular `target:`
+# above, kept for backward compat) is REQUIRED for `nsx build/lock/configure
+# --board <sibling>` to resolve a per-board module closure -- without it,
+# `--board` only changes the CMake board/SoC selection while module
+# resolution silently keeps using the singular `target.board` above for
+# every board, defeating the `modules[].boards:` scoping used below to
+# board-gate nsx-tileio-ble/nsx-ble/nsx-cordio to apollo510b_evb only.
+targets:
+  default: apollo510b_evb
+  supported:
+    apollo510_evb:
+      soc: apollo510
+    apollo510b_evb:
+      soc: apollo510b
+    apollo330mP_evb:
+      soc: apollo330P
 toolchain: arm-none-eabi-gcc
 channel: stable
 profile: apollo510_evb_minimal
@@ -19,6 +38,9 @@ modules:
 - name: nsx-physiokit
 - name: nsx-helia-rt
 - name: nsx-tileio-usb
+- name: nsx-tileio-ble
+  boards:
+  - apollo510b_evb
 features: {}
 module_registry:
   projects:

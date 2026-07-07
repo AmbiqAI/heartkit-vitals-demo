@@ -40,6 +40,17 @@ add_executable(nsx-port
     src/generated/as7058_profile_click_spo2.c
 )
 
+# TileIO BLE is hardware-gated to apollo510b_evb (the only board in this
+# app's family with the EM9305 BLE radio). ble_bringup.c's own contents are
+# additionally guarded by `#if defined(AM_PART_APOLLO510B)` (see that file),
+# but it must not even be compiled for the other boards -- apollo510_evb and
+# apollo330mP_evb don't vendor nsx-cordio/nsx-ble/nsx-tileio-ble at all (see
+# nsx.yml's `modules[].boards: [apollo510b_evb]` scoping), so tio_ble.h
+# wouldn't even resolve for those targets.
+if(NSX_BOARD STREQUAL "apollo510b_evb")
+    target_sources(nsx-port PRIVATE src/ble_bringup.c)
+endif()
+
 target_include_directories(nsx-port PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/src
 )
@@ -60,5 +71,12 @@ target_link_libraries(nsx-port PRIVATE
     nsx::helia_rt
     nsx::tileio_usb
 )
+
+if(NSX_BOARD STREQUAL "apollo510b_evb")
+    target_link_libraries(nsx-port PRIVATE
+        nsx::ble
+        nsx::tileio_ble
+    )
+endif()
 
 nsx_finalize_app(nsx-port)

@@ -62,6 +62,16 @@
 
 #include "tio_usb.h"
 
+/* TileIO BLE is board-gated to apollo510b_evb (only board in this app's
+ * family with the EM9305 BLE radio -- see nsx-port/nsx.yml's `boards:
+ * [apollo510b_evb]` scoping of nsx-tileio-ble/nsx-ble/nsx-cordio and
+ * CMakeLists.txt's matching `if(NSX_BOARD STREQUAL "apollo510b_evb")`
+ * source/link gate). ble_bringup.h/.c are not even compiled in for the
+ * other two boards. */
+#if defined(AM_PART_APOLLO510B) && TIO_BLE_ENABLED
+#include "ble_bringup.h"
+#endif
+
 static TaskHandle_t sensorIrqTaskHandle;
 static TaskHandle_t ecgProcessTaskHandle;
 static TaskHandle_t ppgProcessTaskHandle;
@@ -456,6 +466,30 @@ received_slot_data(uint8_t slot, uint8_t slot_type, const uint8_t *data, uint32_
     (void)data;
     (void)length;
 }
+
+#if defined(AM_PART_APOLLO510B) && TIO_BLE_ENABLED
+/*
+ * ble_bringup.c (a plain C file) needs to hand these callbacks to
+ * tio_ble_context_t as C function pointers, but received_slot_data/
+ * received_uio_state above are C++-linkage `static` functions -- neither
+ * `extern`-able by name (static) nor C-callable without extern "C" (name
+ * mangling). Rather than changing their linkage/visibility (and risking the
+ * hardware-validated USB callback wiring above), add two tiny extern "C"
+ * forwarders with matching signatures that main() hands to ble_bringup_init()
+ * indirectly via ble_bringup.c's tio_ble_context_t.
+ */
+extern "C" void
+ble_bringup_slot_update_cb(uint8_t slot, uint8_t slot_type, const uint8_t *data, uint32_t length)
+{
+    received_slot_data(slot, slot_type, data, length);
+}
+
+extern "C" void
+ble_bringup_uio_update_cb(const uint8_t *data, uint32_t length)
+{
+    received_uio_state(data, length);
+}
+#endif
 
 /*
  * ROOT-CAUSE NOTE (AS7058 ISR freeze on host connect): nsx-tileio-usb
@@ -1064,12 +1098,38 @@ TioProcessTask(void *pvParameters)
             vTaskDelay(pdMS_TO_TICKS(1));
             continue;
         }
-        if (!g_tio_available || !tio_usb_tx_available()) {
+        bool usbReady = g_tio_available && tio_usb_tx_available();
+        /* BLE is a second, independent consumer of the SAME queue item (not
+         * a second queue): dual queues would double memory and complexity
+         * for no benefit here, since both transports need every packet.
+         * Draining once and fanning out to both transports in-line (below)
+         * keeps a single-consumer queue with clean semantics, at the cost of
+         * a disconnected BLE not being distinguishable from "no work yet" --
+         * acceptable since bleReady already covers that case explicitly. */
+#if defined(AM_PART_APOLLO510B) && TIO_BLE_ENABLED
+        bool bleReady = ble_bringup_connected();
+#else
+        bool bleReady = false;
+#endif
+        if (!usbReady && !bleReady) {
+            /* Neither transport has anyone listening: leave packets queued
+             * (bounded depth, oldest producer-side drops apply) rather than
+             * draining into the void -- matches the pre-BLE USB-only
+             * behavior exactly when BLE is compiled out/disconnected. */
             vTaskDelay(kTioTxTaskPollTicks);
             continue;
         }
         if (xQueueReceive(g_tioTxQueue, packet, kTioTxTaskPollTicks) == pdTRUE) {
-            tio_usb_send_slot_packet(packet, TIO_USB_PACKET_LEN);
+            if (usbReady) {
+                tio_usb_send_slot_packet(packet, TIO_USB_PACKET_LEN);
+            }
+#if defined(AM_PART_APOLLO510B) && TIO_BLE_ENABLED
+            if (bleReady) {
+                /* Non-blocking (see ble_bringup_send_slot_packet's doc
+                 * comment): never allowed to stall USB delivery above. */
+                ble_bringup_send_slot_packet(packet, TIO_USB_PACKET_LEN);
+            }
+#endif
         }
     }
 }
@@ -1179,7 +1239,22 @@ main(void)
     g_tioTxQueue = xQueueCreate(tioTxQueueDepth, TIO_USB_PACKET_LEN);
     NSX_TRY((g_tioTxQueue == NULL), "TIO TX queue create failed\n");
 
+#if TIO_USB_ENABLED
     NSX_TRY(tio_usb_init(&tioUsbCtx) != NSX_STATUS_SUCCESS, "TileIO USB Init failed.\n");
+#endif
+
+    /* BLE bring-up: app-owned EM9305 radio/WSF-pool/dispatcher-task setup
+     * (see ble_bringup.c). Board power-up is already covered by
+     * nsx_power_configure() above -- this only layers the BLE-specific
+     * ns_ble_pre_init() + radio task creation on top, unlike ble_webble's
+     * standalone example (which calls am_bsp_low_power_init() itself,
+     * since it has no other board bring-up to reuse). Placed after core
+     * inits/queue creation, alongside where tio_usb_init() runs, so both
+     * transports come up together before the sensor/processing tasks start
+     * producing TileIO packets. */
+#if defined(AM_PART_APOLLO510B) && TIO_BLE_ENABLED
+    NSX_TRY(ble_bringup_init() != NSX_STATUS_SUCCESS, "TileIO BLE bring-up failed.\n");
+#endif
 
     NSX_TRY(sensor_configure() != ERR_SUCCESS, "Sensor Configure failed.\n");
 
