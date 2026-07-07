@@ -119,6 +119,15 @@ dwt_delta_us(uint32_t startCycles)
     return deltaCycles / (SystemCoreClock / 1000000);
 }
 
+/* Legacy IPS scale: 2e6/deltaUs (legacy main.cc used 2000000.0/deltaUs with a
+ * true-microsecond ticker) -- the host dashboard expects this scale. Guarded
+ * against deltaUs==0 (fast DSP paths + coarse cycle->us division). */
+static inline float32_t
+ips_from_delta_us(uint32_t deltaUs)
+{
+    return 2.0e6f / (float32_t)MAX(deltaUs, 1u);
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // FreeRTOS runtime-stats timer (am_hal_timer, RTOS_TIMER channel)
 ///////////////////////////////////////////////////////////////////////////////
@@ -208,25 +217,79 @@ static tio_usb_context_t tioUsbCtx = {
     .pid = TIO_USB_PRODUCT_ID,
 };
 
-/**
- * @brief Flush pipeline buffers (called on host reconnect to avoid streaming
- * stale data accumulated while no host was attached).
+/*
+ * Pipeline flush on host (re)connect, race-free version.
+ *
+ * ringbuffer.c is not thread-safe: each rb tolerates exactly one producer
+ * (head writer) and one consumer (tail writer). ringbuffer_flush() writes
+ * tail, so it may only be executed by each buffer's CONSUMER task -- a
+ * cross-task flush racing a concurrent seek/pop can leave tail past head,
+ * making ringbuffer_len() report a huge bogus length (this hazard existed
+ * in legacy too). Instead of flushing directly, TioProcessTask raises
+ * per-owner request flags and each owning task flushes its own buffers at
+ * the top of its loop.
  */
-static rb_config_t *const g_pipeline_flush_buffers[] = {
-    &rbEcgSensor, &rbEcgDen,     &rbEcgRawSeg,  &rbEcgSeg,    &rbEcgMet,   &rbEcgMaskMet,
-    &rbEcgRawTx,  &rbEcgDenTx,   &rbEcgMaskTx,  &rbPpg1Sensor, &rbPpg2Sensor, &rbPpg1Met, &rbPpg2Met,
-    &rbPpg1Tx,    &rbPpg2Tx,     &rbEcgCpuTx,   &rbPpgCpuTx,   &rbTotalCpuTx,
-};
+static volatile uint8_t g_flush_req_ecg = 0;
+static volatile uint8_t g_flush_req_ppg = 0;
+static volatile uint8_t g_flush_req_cpu = 0;
 
 static void
-flush_pipeline(void)
+request_pipeline_flush(void)
 {
-    for (size_t i = 0; i < (sizeof(g_pipeline_flush_buffers) / sizeof(g_pipeline_flush_buffers[0])); ++i) {
-        ringbuffer_flush(g_pipeline_flush_buffers[i]);
-    }
+    g_flush_req_ecg = 1;
+    g_flush_req_ppg = 1;
+    g_flush_req_cpu = 1;
     if (g_tioTxQueue != NULL) {
         xQueueReset(g_tioTxQueue);
     }
+}
+
+/* EcgProcessTask owns (is sole consumer of) all ECG-side buffers. */
+static void
+service_ecg_flush_request(void)
+{
+    if (!g_flush_req_ecg) {
+        return;
+    }
+    g_flush_req_ecg = 0;
+    ringbuffer_flush(&rbEcgSensor);
+    ringbuffer_flush(&rbEcgDen);
+    ringbuffer_flush(&rbEcgRawSeg);
+    ringbuffer_flush(&rbEcgSeg);
+    ringbuffer_flush(&rbEcgMet);
+    ringbuffer_flush(&rbEcgMaskMet);
+    ringbuffer_flush(&rbEcgRawTx);
+    ringbuffer_flush(&rbEcgDenTx);
+    ringbuffer_flush(&rbEcgMaskTx);
+}
+
+/* PpgProcessTask owns all PPG-side buffers. */
+static void
+service_ppg_flush_request(void)
+{
+    if (!g_flush_req_ppg) {
+        return;
+    }
+    g_flush_req_ppg = 0;
+    ringbuffer_flush(&rbPpg1Sensor);
+    ringbuffer_flush(&rbPpg2Sensor);
+    ringbuffer_flush(&rbPpg1Met);
+    ringbuffer_flush(&rbPpg2Met);
+    ringbuffer_flush(&rbPpg1Tx);
+    ringbuffer_flush(&rbPpg2Tx);
+}
+
+/* CpuProcessTask owns the CPU-stat TX buffers. */
+static void
+service_cpu_flush_request(void)
+{
+    if (!g_flush_req_cpu) {
+        return;
+    }
+    g_flush_req_cpu = 0;
+    ringbuffer_flush(&rbEcgCpuTx);
+    ringbuffer_flush(&rbPpgCpuTx);
+    ringbuffer_flush(&rbTotalCpuTx);
 }
 
 static volatile uint32_t g_tio_enqueue_ok[3] = {0};
@@ -283,6 +346,8 @@ pack_and_enqueue_tio_packet(uint8_t slot, uint8_t slot_type, const void *payload
 
 static volatile bool g_tio_available = false;
 
+static void send_uio_state(void);
+
 static void
 check_tio_state(void)
 {
@@ -291,7 +356,12 @@ check_tio_state(void)
         g_tio_available = available;
         if (g_tio_available) {
             nsx_printf("[tio] host connected\n");
-            flush_pipeline();
+            request_pipeline_flush();
+            /* Tell the newly connected host our current mode state so its UI
+             * reflects reality without requiring it to write UIO first --
+             * matches legacy's check_webusb_state(). (Runs in TioProcessTask
+             * context; send_uio_state only enqueues.) */
+            send_uio_state();
         }
     }
 }
@@ -444,8 +514,15 @@ apply_pending_uio_state(void)
     if (!g_uio_pending) {
         return;
     }
-    memcpy(local, g_uio_rx_buf, 8);
-    g_uio_pending = 0;
+    /* Clear-then-copy with a re-check: if the ISR delivers a fresh UIO write
+     * mid-copy (re-raising the flag), loop and re-copy so we never act on a
+     * torn snapshot and never silently drop the newest state. */
+    do {
+        g_uio_pending = 0;
+        __asm volatile("" ::: "memory");
+        memcpy(local, g_uio_rx_buf, 8);
+        __asm volatile("" ::: "memory");
+    } while (g_uio_pending);
 
     set_input_source(local[TIO_UIO_INPUT_SEL_IDX]);
     set_noise_inputs(local[TIO_UIO_BW_NOISE_IDX], local[TIO_UIO_MA_NOISE_IDX], local[TIO_UIO_EM_NOISE_IDX]);
@@ -633,13 +710,13 @@ EcgProcessTask(void *pvParameters)
     (void)pvParameters;
     uint32_t err = 0;
     uint32_t tickStart;
-    uint32_t numPeaks;
     size_t numSamples;
     uint32_t loopTickStart;
 
     while (true) {
         err = 0;
         loopTickStart = dwt_cycles();
+        service_ecg_flush_request();
 
         ///////////////////////////////////////////////////////////////////
         // ECG PREPROCESSING: downsample sensor rate to target rate.
@@ -695,7 +772,7 @@ EcgProcessTask(void *pvParameters)
             ringbuffer_push(&rbEcgSeg, &ecgDenInout[ECG_DEN_PAD_LEN], ECG_DEN_VALID_LEN);
             ringbuffer_seek(&rbEcgDen, ECG_DEN_VALID_LEN);
 
-            ecgMetResults.denoiseIps = 1.0e6f / (float32_t)dwt_delta_us(tickStart);
+            ecgMetResults.denoiseIps = ips_from_delta_us(dwt_delta_us(tickStart));
             ecgMetResults.denoiseuIpspw = 1.0e3f * ecgMetResults.denoiseIps / AVG_INFERENCE_POWER;
 #if EN_APP_TIMING_LOGS
             nsx_printf("[ecg] denoise err=%lu\n", (unsigned long)err);
@@ -711,14 +788,12 @@ EcgProcessTask(void *pvParameters)
             ringbuffer_peek(&rbEcgSeg, ecgSegInout, ECG_SEG_WINDOW_LEN);
 
             if (appState.segMode == SegmentationModeDsp) {
-                numPeaks = pk_ecg_find_peaks_f32(&ecgPkPeakCtx, ecgSegInout, ECG_SEG_WINDOW_LEN, peaksMetrics, ecgSegMask);
-                for (size_t i = 0; i < ECG_SEG_WINDOW_LEN; i++) {
-                    ecgSegMask[i] = ecgSegMask[i] > 0 ? ECG_SEG_QRS : ECG_SEG_NONE;
-                }
-                for (size_t i = 0; i < numPeaks; i++) {
-                    ecgSegMask[peaksMetrics[i]] |= (ECG_FID_PEAK_QRS << ECG_MASK_FID_PEAK_OFFSET);
-                }
-                err = 0;
+                /* Use the shared physiokit DSP segmentation (same as legacy)
+                 * rather than an inline reimplementation: it also stamps the
+                 * QoS bits into the mask and reports a qos value, which the
+                 * inline version was silently dropping (stale qos in DSP
+                 * mode). */
+                err = ecg_physiokit_segmentation_inference(ecgSegInout, ecgSegMask, 0, &ecgMetResults.qos);
             } else if (appState.segMode == SegmentationModeAi) {
                 err = ecg_segmentation_inference(ecgSegInout, ecgSegMask, 0, ECG_SEG_THRESHOLD, &ecgMetResults.qos);
             } else {
@@ -737,7 +812,7 @@ EcgProcessTask(void *pvParameters)
 
             ringbuffer_seek(&rbEcgSeg, ECG_SEG_VALID_LEN);
 
-            ecgMetResults.segmentIps = 1.0e6f / (float32_t)dwt_delta_us(tickStart);
+            ecgMetResults.segmentIps = ips_from_delta_us(dwt_delta_us(tickStart));
             ecgMetResults.segmentuIpspw = 1.0e3f * ecgMetResults.segmentIps / AVG_INFERENCE_POWER;
 #if EN_APP_TIMING_LOGS
             nsx_printf("[ecg] segment err=%lu\n", (unsigned long)err);
@@ -766,7 +841,7 @@ EcgProcessTask(void *pvParameters)
             ringbuffer_seek(&rbEcgMet, ECG_MET_VALID_LEN);
             ringbuffer_seek(&rbEcgMaskMet, ECG_MET_VALID_LEN);
 
-            ecgMetResults.arrhythmiaIps = 1.0e6f / (float32_t)dwt_delta_us(tickStart);
+            ecgMetResults.arrhythmiaIps = ips_from_delta_us(dwt_delta_us(tickStart));
             ecgMetResults.arrhythmiaIpspw = 1.0e3f * ecgMetResults.arrhythmiaIps / AVG_INFERENCE_POWER;
 
             send_ecg_metrics();
@@ -824,6 +899,7 @@ PpgProcessTask(void *pvParameters)
     while (true) {
         g_ppg_loop_iters++;
         loopTickStart = dwt_cycles();
+        service_ppg_flush_request();
         size_t numSamples = MIN(ringbuffer_len(&rbPpg1Sensor), ringbuffer_len(&rbPpg2Sensor));
         for (size_t i = 0; i < numSamples / PPG_DS_RATE; i++) {
             float32_t sample1, sample2;
@@ -901,6 +977,7 @@ CpuProcessTask(void *pvParameters)
 
     while (true) {
         uint32_t idleCounter = 0;
+        service_cpu_flush_request();
         numTasks = uxTaskGetSystemState(xTaskDetails, 10, &runTimeTicks);
         runDelta = runTimeTicks - prevRun;
         if (prevRun == 0 || runDelta == 0) {
