@@ -59,6 +59,11 @@ module_registry:
       url: https://github.com/AmbiqAI/helia-dsp.git
       revision: 9c18599bf7a734f4d9952e891ae42c38010981b8
       path: modules/helia-dsp
+    nsx-tileio:
+      name: nsx-tileio
+      url: https://github.com/AmbiqAI/nsx-tileio.git
+      revision: 2f89e61ba42798cbb7133a816d6974cb12f42615
+      path: modules/nsx-tileio
   modules:
     nsx-as7058:
       project: nsx-as7058
@@ -72,6 +77,14 @@ module_registry:
       project: helia-dsp
       revision: 9c18599bf7a734f4d9952e891ae42c38010981b8
       metadata: modules/helia-dsp/nsx-module.yaml
+    nsx-tileio-usb:
+      project: nsx-tileio
+      revision: 2f89e61ba42798cbb7133a816d6974cb12f42615
+      metadata: modules/nsx-tileio/modules/nsx-tileio-usb/nsx-module.yaml
+    nsx-tileio-ble:
+      project: nsx-tileio
+      revision: 2f89e61ba42798cbb7133a816d6974cb12f42615
+      metadata: modules/nsx-tileio/modules/nsx-tileio-ble/nsx-module.yaml
 tooling:
   nsx:
     version: 0.7.3

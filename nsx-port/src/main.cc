@@ -514,6 +514,17 @@ static uint8_t g_uio_rx_buf[8];
 static void
 received_uio_state(const uint8_t *data, uint32_t length)
 {
+    /* Always-on breadcrumb confirming host UIO writes actually reach and
+     * are correctly framed by the time they get here -- this is the ISR
+     * callback nsx-tileio-usb invokes once it has reconstructed a full,
+     * CRC-valid UIO packet from the host's raw byte stream (see tio_usb.c),
+     * so seeing this fire is proof positive the write was received intact.
+     * Useful for diagnosing "web app selections don't seem to take effect"
+     * reports without needing a hardware protocol analyzer. */
+    nsx_printf("[uio-rx] received_uio_state len=%lu bytes=%02x %02x %02x %02x %02x %02x %02x %02x\n",
+               (unsigned long)length, length > 0 ? data[0] : 0, length > 1 ? data[1] : 0,
+               length > 2 ? data[2] : 0, length > 3 ? data[3] : 0, length > 4 ? data[4] : 0,
+               length > 5 ? data[5] : 0, length > 6 ? data[6] : 0, length > 7 ? data[7] : 0);
     if (length < 8) {
         return;
     }

@@ -17,13 +17,22 @@ Protocol: modules/nsx-tileio/modules/nsx-tileio-usb/src/tio_usb.c
       [255]   stop    = 0xAA
   - CRC16: init=0xEF4A, poly=0x1021 (CCITT-style, MSB-first), see
     tio_usb_compute_crc16() in tio_usb.c.
+  - Host->device framing: every client (the production TileIO web
+    dashboard, api/usb.ts's setUioState()) sends host->device writes as a
+    single raw WebUSB transferOut() of the full packed 256-byte packet --
+    no application-level chunking or per-transfer header. WebUSB
+    automatically splits this into as many wMaxPacketSize (64-byte) USB
+    transactions as needed, mirroring how the device->host read direction
+    already works. (An earlier web app version instead split writes into
+    62-byte payloads with a 2-byte "NS frame header" per 64-byte transfer,
+    a legacy convention this firmware never actually implemented -- fixed
+    by dropping that framing from both the web app and firmware together
+    rather than teaching the firmware to parse it.)
 
 IMPORTANT: the device only starts streaming (tio_usb_tx_available()) once it
-has received at least one vendor OUT packet from the host -- this mirrors
-real WebUSB dashboard behavior (host opens the vendor pipe and writes first)
-but means a passive read-only client will see nothing. This tool writes a
-"kick" packet (a UIO-state echo request) before reading, exactly like a real
-dashboard connecting.
+has received at least one vendor OUT write from the host -- this tool
+writes a "kick" packet (a UIO-state echo request) before reading, exactly
+like a real dashboard connecting.
 
 Requires: pip install pyusb, and a libusb backend (libusb-1.0) installed.
 On macOS: brew install libusb
@@ -188,7 +197,14 @@ def main():
           f"IN endpoint: 0x{ep_in.bEndpointAddress:02X}, max packet size: {ep_in.wMaxPacketSize}")
 
     if dev.is_kernel_driver_active(intf_num):
-        dev.detach_kernel_driver(intf_num)
+        try:
+            dev.detach_kernel_driver(intf_num)
+        except usb.core.USBError:
+            # macOS's libusb backend doesn't support detach_kernel_driver
+            # (there's no vendor-class kernel driver to detach from in the
+            # first place there); harmless to skip and proceed straight to
+            # claim_interface().
+            pass
 
     usb.util.claim_interface(dev, intf_num)
     try:
@@ -196,8 +212,8 @@ def main():
             # Wake up TileIO TX: the device only marks the vendor channel
             # "connected" (and starts streaming) after it observes any
             # vendor OUT traffic. Send a harmless UIO-state echo request
-            # (slot 0, type 2, 8 zero bytes) -- same framing a real host
-            # dashboard would send on connect.
+            # (slot 0, type 2, 8 zero bytes) as a single raw write, exactly
+            # like a real host dashboard write.
             kick = pack_packet(0, 2, bytes(8))
             ep_out.write(kick, timeout=args.timeout_ms)
             print("sent wake-up UIO packet")
