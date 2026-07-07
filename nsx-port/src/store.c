@@ -177,7 +177,17 @@ rb_config_t rbPpg1Met = {
     .tail = 0,
 };
 
+static float32_t ppg2MetRBuffer[PPG_MET_BUF_LEN];
+rb_config_t rbPpg2Met = {
+    .buffer = (void *)ppg2MetRBuffer,
+    .dlen = sizeof(float32_t),
+    .size = PPG_MET_BUF_LEN,
+    .head = 0,
+    .tail = 0,
+};
+
 float32_t ppg1MetData[PPG_MET_WINDOW_LEN];
+float32_t ppg2MetData[PPG_MET_WINDOW_LEN];
 
 metrics_ppg_results_t ppgMetResults = {
     .pr = 0,
@@ -219,6 +229,15 @@ rb_config_t rbEcgMaskTx = {
 static float32_t ppg1TxBuffer[PPG_TX_BUF_LEN];
 rb_config_t rbPpg1Tx = {
     .buffer = (void *)ppg1TxBuffer,
+    .dlen = sizeof(float32_t),
+    .size = PPG_TX_BUF_LEN,
+    .head = 0,
+    .tail = 0,
+};
+
+static float32_t ppg2TxBuffer[PPG_TX_BUF_LEN];
+rb_config_t rbPpg2Tx = {
+    .buffer = (void *)ppg2TxBuffer,
     .dlen = sizeof(float32_t),
     .size = PPG_TX_BUF_LEN,
     .head = 0,

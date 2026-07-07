@@ -22,10 +22,16 @@
  *    legacy only computes in non-live/synthetic mode, are wired the same
  *    way here for API parity but are effectively inert while
  *    sensorCtx.inputSource stays at its LIVE_INPUT_MODE default.
- *  - True dual-wavelength PPG/SpO2 remains n/a: the active AS7058
- *    "click_ppg_ecg" profile only streams one PPG wavelength (see
- *    store.h). PPG signal streaming is 1ch instead of legacy's 2ch, and
- *    spo2 is always reported as 0 (n/a).
+ *  - True dual-wavelength PPG/SpO2: FIXED in this revision. sensor.c
+ *    previously hardcoded the simplified single-wavelength JSON-generated
+ *    "click_ppg_ecg" profile (one LED, wrong physical LED mapping baked
+ *    into the raw JSON data); it now applies the real "click golden"
+ *    profile via as7058_get_active_profile() (Red PPG1_SUB1 + IR PPG1_SUB2
+ *    + ECG, matching legacy's default), with the LED sub1/sub2 physical
+ *    mapping override legacy applies at runtime. PPG signal streaming is
+ *    now 2ch and spo2 is a real ratiometric value (pk_ppg math + the
+ *    profile's calibration coefficients -- no AMS on-chip bio_spo2_a0
+ *    algorithm needed, see sensor.h).
  */
 #include <math.h>
 #include <stdint.h>
@@ -207,9 +213,9 @@ static tio_usb_context_t tioUsbCtx = {
  * stale data accumulated while no host was attached).
  */
 static rb_config_t *const g_pipeline_flush_buffers[] = {
-    &rbEcgSensor, &rbEcgDen,   &rbEcgRawSeg, &rbEcgSeg,     &rbEcgMet,   &rbEcgMaskMet,
-    &rbEcgRawTx,  &rbEcgDenTx, &rbEcgMaskTx, &rbPpg1Sensor, &rbPpg1Met,  &rbPpg1Tx,
-    &rbEcgCpuTx,  &rbPpgCpuTx, &rbTotalCpuTx,
+    &rbEcgSensor, &rbEcgDen,     &rbEcgRawSeg,  &rbEcgSeg,    &rbEcgMet,   &rbEcgMaskMet,
+    &rbEcgRawTx,  &rbEcgDenTx,   &rbEcgMaskTx,  &rbPpg1Sensor, &rbPpg2Sensor, &rbPpg1Met, &rbPpg2Met,
+    &rbPpg1Tx,    &rbPpg2Tx,     &rbEcgCpuTx,   &rbPpgCpuTx,   &rbTotalCpuTx,
 };
 
 static void
@@ -436,22 +442,26 @@ static void
 send_ppg_signals(void)
 {
     uint8_t buffer[240];
-    float32_t val;
+    float32_t val1, val2;
     int16_t txVal;
     uint32_t length;
     uint8_t qos = (uint8_t)(ppgMetResults.qos / 25);
     uint16_t mask = (uint16_t)(qos << SIG_MASK_QOS_OFFSET);
-    size_t numSamples = ringbuffer_len(&rbPpg1Tx);
+    size_t numSamples = MIN(ringbuffer_len(&rbPpg1Tx), ringbuffer_len(&rbPpg2Tx));
     if (numSamples == 0) {
         return;
     }
-    numSamples = MIN(numSamples, sizeof(buffer) / (sizeof(uint16_t) + sizeof(int16_t)));
+    numSamples = MIN(numSamples, sizeof(buffer) / (sizeof(uint16_t) + 2 * sizeof(int16_t)));
     length = 0;
     for (size_t i = 0; i < numSamples; i++) {
         memcpy(&buffer[length], &mask, sizeof(uint16_t));
         length += sizeof(uint16_t);
-        ringbuffer_pop(&rbPpg1Tx, &val, 1);
-        txVal = (int16_t)CLIP(val, -32768.0f, 32767.0f);
+        ringbuffer_pop(&rbPpg1Tx, &val1, 1);
+        txVal = (int16_t)CLIP(val1, -32768.0f, 32767.0f);
+        memcpy(&buffer[length], &txVal, sizeof(int16_t));
+        length += sizeof(int16_t);
+        ringbuffer_pop(&rbPpg2Tx, &val2, 1);
+        txVal = (int16_t)CLIP(val2, -32768.0f, 32767.0f);
         memcpy(&buffer[length], &txVal, sizeof(int16_t));
         length += sizeof(int16_t);
     }
@@ -687,35 +697,47 @@ EcgProcessTask(void *pvParameters)
 // PPG process task
 ///////////////////////////////////////////////////////////////////////////////
 //
-// Single-wavelength pipeline (see store.h): downsample -> metrics
-// (PR/QoS via pk_ppg; spo2 explicitly n/a) -> TileIO TX. No denoise/
-// segmentation stage, matching legacy's pass-through behavior absent a
-// second wavelength/AI model for PPG.
+// Dual-wavelength pipeline: downsample Red (PPG1_SUB1) + IR (PPG1_SUB2) ->
+// metrics (PR/QoS/real ratiometric SpO2 via pk_ppg + sensor_get_spo2_config()
+// calibration coefficients) -> TileIO TX (2ch). No denoise/segmentation
+// stage, matching legacy's pass-through behavior absent an AI model for PPG.
+// (Phase 6 fix: previously ran single-wavelength only because sensor.c
+// applied the wrong AS7058 profile -- see sensor.c/store.h.)
 
 void
 PpgProcessTask(void *pvParameters)
 {
     (void)pvParameters;
     uint32_t err;
+    bio_spo2_a0_configuration_t spo2Cfg;
+    const bio_spo2_a0_configuration_t *pSpo2Cfg;
 
     while (true) {
-        size_t numSamples = ringbuffer_len(&rbPpg1Sensor);
+        size_t numSamples = MIN(ringbuffer_len(&rbPpg1Sensor), ringbuffer_len(&rbPpg2Sensor));
         for (size_t i = 0; i < numSamples / PPG_DS_RATE; i++) {
-            float32_t sample;
+            float32_t sample1, sample2;
             ringbuffer_seek(&rbPpg1Sensor, PPG_DS_RATE - 1);
-            ringbuffer_peek(&rbPpg1Sensor, &sample, 1);
-            ringbuffer_push(&rbPpg1Met, &sample, 1);
-            ringbuffer_push(&rbPpg1Tx, &sample, 1);
+            ringbuffer_peek(&rbPpg1Sensor, &sample1, 1);
+            ringbuffer_push(&rbPpg1Met, &sample1, 1);
+            ringbuffer_push(&rbPpg1Tx, &sample1, 1);
             ringbuffer_seek(&rbPpg1Sensor, 1);
+
+            ringbuffer_seek(&rbPpg2Sensor, PPG_DS_RATE - 1);
+            ringbuffer_peek(&rbPpg2Sensor, &sample2, 1);
+            ringbuffer_push(&rbPpg2Met, &sample2, 1);
+            ringbuffer_push(&rbPpg2Tx, &sample2, 1);
+            ringbuffer_seek(&rbPpg2Sensor, 1);
         }
 
-        if (ringbuffer_len(&rbPpg1Met) >= PPG_MET_WINDOW_LEN) {
+        if (MIN(ringbuffer_len(&rbPpg1Met), ringbuffer_len(&rbPpg2Met)) >= PPG_MET_WINDOW_LEN) {
             ringbuffer_peek(&rbPpg1Met, ppg1MetData, PPG_MET_WINDOW_LEN);
+            ringbuffer_peek(&rbPpg2Met, ppg2MetData, PPG_MET_WINDOW_LEN);
 
-            err = metrics_capture_ppg(&metricsCfg, ppg1MetData, ppg1MetData, PPG_MET_WINDOW_LEN, NULL, &ppgMetResults);
-            ppgMetResults.spo2 = 0.0f; /* n/a: single-wavelength profile, see store.h */
+            pSpo2Cfg = sensor_get_spo2_config(&spo2Cfg) ? &spo2Cfg : NULL;
+            err = metrics_capture_ppg(&metricsCfg, ppg1MetData, ppg2MetData, PPG_MET_WINDOW_LEN, pSpo2Cfg, &ppgMetResults);
 
             ringbuffer_seek(&rbPpg1Met, PPG_MET_VALID_LEN);
+            ringbuffer_seek(&rbPpg2Met, PPG_MET_VALID_LEN);
             send_ppg_metrics();
 #if EN_APP_TIMING_LOGS
             if (err != 0) {
@@ -878,19 +900,22 @@ ReportTask(void *pvParameters)
 {
     (void)pvParameters;
     while (true) {
-#if EN_APP_DEBUG_LOGS
+        /* Always-on sensor breadcrumbs (not gated behind EN_APP_DEBUG_LOGS):
+         * confirms the AS7058 INT ISR is firing and both PPG channels +
+         * ECG are actually flowing into their ringbuffers, useful for
+         * verifying sensor bring-up on new hardware/profile changes. */
         nsx_printf("[sensor] isr=%lu missed=%lu ppg(push=%lu drop=%lu) ecg(push=%lu drop=%lu) tio_drops=%lu\n",
                    (unsigned long)sensor_get_as7058_int_isr_count(), (unsigned long)sensor_get_irq_notify_missed_count(),
                    (unsigned long)sensor_get_ppg_push_count(), (unsigned long)sensor_get_ppg_drop_count(),
                    (unsigned long)sensor_get_ecg_push_count(), (unsigned long)sensor_get_ecg_drop_count(),
                    (unsigned long)g_tio_tx_queue_drops);
-#endif
         nsx_printf("[ecg] hr=%d.%02d bpm hrv=%d.%02d ms rhythm=%d qos=%d.%02d\n", (int)ecgMetResults.hr,
                    (int)(fabsf(ecgMetResults.hr - (int)ecgMetResults.hr) * 100), (int)ecgMetResults.hrv,
                    (int)(fabsf(ecgMetResults.hrv - (int)ecgMetResults.hrv) * 100), (int)ecgMetResults.arrhythmiaLabel,
                    (int)ecgMetResults.qos, (int)(fabsf(ecgMetResults.qos - (int)ecgMetResults.qos) * 100));
-        nsx_printf("[ppg] pr=%d.%02d bpm spo2=n/a qos=%d.%02d\n", (int)ppgMetResults.pr,
-                   (int)(fabsf(ppgMetResults.pr - (int)ppgMetResults.pr) * 100), (int)ppgMetResults.qos,
+        nsx_printf("[ppg] pr=%d.%02d bpm spo2=%d.%02d qos=%d.%02d\n", (int)ppgMetResults.pr,
+                   (int)(fabsf(ppgMetResults.pr - (int)ppgMetResults.pr) * 100), (int)ppgMetResults.spo2,
+                   (int)(fabsf(ppgMetResults.spo2 - (int)ppgMetResults.spo2) * 100), (int)ppgMetResults.qos,
                    (int)(fabsf(ppgMetResults.qos - (int)ppgMetResults.qos) * 100));
 
         vTaskDelay(pdMS_TO_TICKS(1000));

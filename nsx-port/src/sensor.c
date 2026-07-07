@@ -1,14 +1,23 @@
 /**
  * @file sensor.c
- * @brief AS7058 PPG+ECG sensor bring-up (NSX port, phase 2: raw streaming only).
+ * @brief AS7058 PPG+ECG sensor bring-up (NSX port).
  *
  * Adapted from legacy heartkit-vitals-demo src/sensor.c and from the
  * ppg-codec-demo NSX reference port. GPIO/IRQ wiring and transport setup
  * follow the nsx-gpio / nsx-as7058_{i2c,spi} pattern established in
- * ppg-codec-demo; the AS7058 callback is extended here to extract both the
- * PPG1_SUB1 and ECG_SEQ1_SUB1 sub-samples (using the "click_ppg_ecg"
- * profile) instead of PPG-only.
+ * ppg-codec-demo. Phase 6 fix: sensor_configure() previously hardcoded the
+ * simplified single-wavelength JSON-generated "click_ppg_ecg" profile
+ * (ppg1_sub_en=1, one LED only) instead of selecting the real dual-
+ * wavelength (Red PPG1_SUB1 + IR PPG1_SUB2) + ECG "click golden" profile
+ * via as7058_get_active_profile() (as legacy does) -- this silently drove
+ * the wrong/no visible LED and discarded the second wavelength entirely.
+ * Fixed here: profile now comes from as7058_get_active_profile()
+ * (AS7058_APP_PROFILE, constants.h -- defaults to CLICK_GOLDEN), with the
+ * same runtime LED sub1/sub2 override legacy applies, and the callback now
+ * extracts both PPG1_SUB1 (Red) and PPG1_SUB2 (IR) into separate
+ * ringbuffers plus ECG.
  */
+#include <stdbool.h>
 #include <string.h>
 
 #include "FreeRTOS.h"
@@ -29,17 +38,20 @@
 
 #include "as7058_profiles.h"
 #include "constants.h"
-#include "generated/as7058_profile_click_ppg_ecg.h"
 #include "ringbuffer.h"
 #include "sensor.h"
 
 #define SENSOR_RB_LEN (SENSOR_BUF_LEN)
 
 static float32_t s_ppg1_rb_buf[SENSOR_RB_LEN];
+static float32_t s_ppg2_rb_buf[SENSOR_RB_LEN];
 static float32_t s_ecg_rb_buf[SENSOR_RB_LEN];
 
 rb_config_t rbPpg1Sensor = {
     .buffer = s_ppg1_rb_buf, .dlen = sizeof(float32_t), .size = SENSOR_RB_LEN, .head = 0, .tail = 0,
+};
+rb_config_t rbPpg2Sensor = {
+    .buffer = s_ppg2_rb_buf, .dlen = sizeof(float32_t), .size = SENSOR_RB_LEN, .head = 0, .tail = 0,
 };
 rb_config_t rbEcgSensor = {
     .buffer = s_ecg_rb_buf, .dlen = sizeof(float32_t), .size = SENSOR_RB_LEN, .head = 0, .tail = 0,
@@ -59,6 +71,14 @@ static volatile uint32_t g_ecg_push_count = 0;
 static volatile uint32_t g_ecg_drop_count = 0;
 static TaskHandle_t g_sensor_irq_task_handle = NULL;
 static sensor_context_t *g_sensorCtx = NULL;
+
+/* SpO2 calibration coefficients from the active profile, captured at
+ * sensor_configure() time -- exposed via sensor_get_spo2_config() so
+ * metrics.c's ratiometric SpO2 formula (pk_ppg-based, no AMS on-chip
+ * algorithm needed) can use the profile's real a/b/c + dc_comp_red/ir
+ * values instead of metrics.c's built-in generic fallback coefficients. */
+static bio_spo2_a0_configuration_t g_spo2_config;
+static bool g_spo2_config_valid = false;
 
 /*
  * GPIO/IRQ wiring for the AS7058 INT pin. nsx-gpio owns pin config, IRQ
@@ -161,7 +181,7 @@ sensor_as7058_callback(err_code_t error,
         return;
     }
 
-    // PPG1_SUB1 (green PPG channel)
+    // PPG1_SUB1 (Red PPG channel)
     sample_cnt = (uint16_t)(sizeof(samples) / sizeof(samples[0]));
     result = as7058_extract_samples(AS7058_SUB_SAMPLE_ID_PPG1_SUB1, p_fifo_data, fifo_data_size, samples,
                                      &sample_cnt, (as7058_extract_metadata_t *)&g_extract_metadata);
@@ -170,6 +190,22 @@ sensor_as7058_callback(err_code_t error,
             samples_f32[i] = (float)samples[i];
         }
         pushed = ringbuffer_push(&rbPpg1Sensor, samples_f32, sample_cnt);
+        g_ppg_push_count += (uint32_t)pushed;
+        if (pushed < sample_cnt) {
+            g_ppg_drop_count += (uint32_t)(sample_cnt - pushed);
+        }
+    }
+
+    // PPG1_SUB2 (IR PPG channel) -- only present when the active profile
+    // enables a 2nd sub-sample (ppg1_sub_en bit 1); see sensor_configure().
+    sample_cnt = (uint16_t)(sizeof(samples) / sizeof(samples[0]));
+    result = as7058_extract_samples(AS7058_SUB_SAMPLE_ID_PPG1_SUB2, p_fifo_data, fifo_data_size, samples,
+                                     &sample_cnt, (as7058_extract_metadata_t *)&g_extract_metadata);
+    if (result == ERR_SUCCESS && sample_cnt > 0) {
+        for (uint16_t i = 0; i < sample_cnt; i++) {
+            samples_f32[i] = (float)samples[i];
+        }
+        pushed = ringbuffer_push(&rbPpg2Sensor, samples_f32, sample_cnt);
         g_ppg_push_count += (uint32_t)pushed;
         if (pushed < sample_cnt) {
             g_ppg_drop_count += (uint32_t)(sample_cnt - pushed);
@@ -231,6 +267,9 @@ sensor_init(sensor_context_t *ctx)
         return result;
     }
 
+    nsx_printf("AS7058 sensor_init OK (transport=%s addr/cs=%s)\n", AS7058_USE_SPI ? "SPI" : "I2C",
+               AS7058_USE_SPI ? "cs0" : "0x55");
+
     return result;
 }
 
@@ -238,19 +277,71 @@ err_code_t
 sensor_configure(void)
 {
     err_code_t result;
-    as7058_sensor_profile_t profile = g_as7058_profile_click_ppg_ecg;
+    const as7058_sensor_profile_t *p_active_profile;
+    as7058_sensor_profile_t profile;
+    bool spo2_profile_enabled;
+
+    p_active_profile = as7058_get_active_profile();
+    if (NULL == p_active_profile) {
+        nsx_printf("as7058_get_active_profile returned NULL.\n");
+        return ERR_CONFIG;
+    }
+    profile = *p_active_profile;
+    spo2_profile_enabled = (profile.spo2_present && profile.spo2_enabled) ? true : false;
+
+    g_spo2_config_valid = false;
+    memset(&g_spo2_config, 0, sizeof(g_spo2_config));
 
     profile.control.reg_vals.i2c_mode = AS7058_USE_I2C ? 1 : 0;
 
+    /* Match legacy sensor_configure(): force the LED-to-physical-position
+     * mapping (led_sub1/led_sub2) to the board-profile macros (constants.h
+     * AS7058_LED_SUB1_CFG/AS7058_LED_SUB2_CFG -- LED2/Red and LED3/IR on
+     * the click board) whenever not using a dedicated SpO2 profile. This
+     * is the fix for the "click_ppg_ecg" bring-up profile bug: that
+     * profile's raw JSON data hardcoded led_sub1=1 (a stale/incorrect
+     * physical LED index, not the click board's real Red LED position),
+     * so only one (possibly wrong or unlit) LED ever fired. The active
+     * profile is now as7058_get_active_profile() (AS7058_APP_PROFILE,
+     * default CLICK_GOLDEN -- dual-wavelength Red+IR PPG + ECG, see
+     * as7058_profiles.c) which already bakes in the correct mapping, but
+     * this override is applied unconditionally (as legacy does) so it
+     * stays correct regardless of which profile ends up selected. */
+    if (!spo2_profile_enabled) {
+        profile.led.reg_vals.led_sub1 = AS7058_LED_SUB1_CFG;
+        profile.led.reg_vals.led_sub2 = AS7058_LED_SUB2_CFG;
+    }
+
     result = as7058_apply_sensor_profile(&profile);
     if (result != ERR_SUCCESS) {
+        nsx_printf("as7058_apply_sensor_profile returned error code %d.\n", result);
         return result;
     }
 
-    nsx_printf("AS7058 PPG+ECG bring-up profile applied: ppg1_sub_en=%u ecg_subs=%u\n",
-               profile.seq.reg_vals.ppg1_sub_en, profile.seq.reg_vals.ecg_subs);
+    if (spo2_profile_enabled) {
+        g_spo2_config = profile.spo2_config;
+        g_spo2_config_valid = true;
+    }
+
+    nsx_printf("AS7058 profile applied: ppg1_sub_en=%u ecg_subs=%u led_sub1=0x%02X led_sub2=0x%02X "
+               "led1_ictrl=%u led2_ictrl=%u led3_ictrl=%u spo2=%d agc_channels=%u\n",
+               profile.seq.reg_vals.ppg1_sub_en, profile.seq.reg_vals.ecg_subs,
+               profile.led.reg_vals.led_sub1, profile.led.reg_vals.led_sub2,
+               profile.led.reg_vals.led1_ictrl, profile.led.reg_vals.led2_ictrl,
+               profile.led.reg_vals.led3_ictrl, (int)spo2_profile_enabled,
+               (unsigned)profile.agc_config_num);
 
     return result;
+}
+
+bool
+sensor_get_spo2_config(bio_spo2_a0_configuration_t *p_cfg)
+{
+    if (!g_spo2_config_valid || p_cfg == NULL) {
+        return false;
+    }
+    *p_cfg = g_spo2_config;
+    return true;
 }
 
 err_code_t
@@ -282,6 +373,7 @@ sensor_start(void)
         nsx_printf("as7058_start_measurement returned error code %d.\n", result);
         return result;
     }
+    nsx_printf("AS7058 sensor_start OK (measurement running)\n");
     return result;
 }
 

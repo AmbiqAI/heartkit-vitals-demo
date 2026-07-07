@@ -121,21 +121,21 @@ extern metrics_ecg_results_t ecgMetResults;
 // PPG Metrics Configuration
 ///////////////////////////////////////////////////////////////////////////////
 //
-// NOTE: the AS7058 "click_ppg_ecg" profile currently applied
-// (as7058_profiles.c) only enables one PPG wavelength (PPG1_SUB1,
-// ppg1_sub_en=1) -- there is no second wavelength to ratio against, so
-// SpO2 is not physiologically derivable from raw DSP here. metrics_capture_ppg()
-// is still called (with the single channel duplicated into both ppg1/ppg2
-// slots) to get pulse rate (PR) and signal quality (QoS), but its `spo2`
-// output is discarded/marked n/a by the caller. Real SpO2 requires either a
-// dual-wavelength profile (e.g. click_spo2, which has no ECG) or the AMS
-// on-chip bio_spo2_a0 algorithm (bundled in nsx-as7058, but currently only
-// packaged as an x86-64 Windows lib -- no Cortex-M lib shipped -- a gap to
-// revisit, similar in spirit to the helia-dsp arch-flags fix).
+// Phase 6 fix: sensor.c now applies the real dual-wavelength "click golden"
+// AS7058 profile (Red PPG1_SUB1 + IR PPG1_SUB2 + ECG) instead of the
+// earlier single-wavelength JSON bring-up profile (see sensor.c/
+// as7058_profiles.c) -- so metrics_capture_ppg() below now gets two real
+// channels and computes a genuine ratiometric SpO2 (via nsx-physiokit's own
+// pk_ppg math and the profile's a/b/c + dc_comp_red/ir calibration
+// coefficients, exposed via sensor_get_spo2_config() -- no AMS on-chip
+// bio_spo2_a0 algorithm needed; that stays a real Cortex-M packaging gap,
+// see sensor_get_spo2_config()'s doc comment in sensor.h).
 
-extern rb_config_t rbPpg1Met;
+extern rb_config_t rbPpg1Met; /* Red */
+extern rb_config_t rbPpg2Met; /* IR */
 
 extern float32_t ppg1MetData[PPG_MET_WINDOW_LEN];
+extern float32_t ppg2MetData[PPG_MET_WINDOW_LEN];
 
 extern metrics_ppg_results_t ppgMetResults;
 
@@ -145,17 +145,17 @@ extern metrics_ppg_results_t ppgMetResults;
 //
 // Separate from the metrics-stage ringbuffers above: these are lightweight
 // tap-offs of raw + denoised ECG + QRS mask (from EcgProcessTask's
-// preprocessing/segmentation stages) and downsampled PPG samples (from
-// PpgProcessTask), drained by TioProcessTask in main.cc to stream live
-// signals to a Tileio host dashboard over nsx-tileio-usb. ECG streams
-// raw+denoised+mask (3ch), matching legacy. PPG streams only the single
-// available wavelength (1ch), matching the single-wavelength sensor
-// profile limitation documented in the PPG metrics section above.
+// preprocessing/segmentation stages) and downsampled dual-wavelength PPG
+// samples (from PpgProcessTask), drained by TioProcessTask in main.cc to
+// stream live signals to a Tileio host dashboard over nsx-tileio-usb. ECG
+// streams raw+denoised+mask (3ch), PPG streams Red+IR (2ch) -- both match
+// legacy.
 
 extern rb_config_t rbEcgRawTx;
 extern rb_config_t rbEcgDenTx;
 extern rb_config_t rbEcgMaskTx;
-extern rb_config_t rbPpg1Tx;
+extern rb_config_t rbPpg1Tx; /* Red */
+extern rb_config_t rbPpg2Tx; /* IR */
 
 ///////////////////////////////////////////////////////////////////////////////
 // CPU Utilization TileIO Streaming Taps (slot 2)

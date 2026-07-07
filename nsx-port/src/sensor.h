@@ -1,19 +1,24 @@
 /**
  * @file sensor.h
- * @brief AS7058 PPG+ECG sensor bring-up (NSX port, phase 2: raw streaming only).
+ * @brief AS7058 PPG+ECG sensor bring-up (NSX port).
  *
- * Ported from legacy heartkit-vitals-demo src/sensor.c, stripped down (no
- * store.c/metrics.c/tio_usb.h integration yet) to validate raw dual-channel
- * (PPG1_SUB1 + ECG_SEQ1_SUB1) streaming on physical apollo510_evb hardware
- * before wiring the full DSP/AI/streaming pipeline (see plan phases 3+).
+ * Ported from legacy heartkit-vitals-demo src/sensor.c. Phase 6 update:
+ * sensor_configure() now applies the real dual-wavelength (Red PPG1_SUB1 +
+ * IR PPG1_SUB2) + ECG "click golden" profile via as7058_get_active_profile()
+ * (respecting AS7058_APP_PROFILE, constants.h), instead of the earlier
+ * single-wavelength JSON bring-up profile -- see as7058_profiles.c. The
+ * callback extracts both PPG wavelengths plus ECG.
  */
 #ifndef __APP_SENSOR_H
 #define __APP_SENSOR_H
+
+#include <stdbool.h>
 
 #include "FreeRTOS.h"
 #include "task.h"
 #include "error_codes.h"
 
+#include "bio_spo2_a0_typedefs.h"
 #include "ringbuffer.h"
 
 #ifdef __cplusplus
@@ -47,11 +52,22 @@ uint32_t sensor_get_ppg_drop_count(void);
 uint32_t sensor_get_ecg_push_count(void);
 uint32_t sensor_get_ecg_drop_count(void);
 
+/**
+ * @brief Get the SpO2 calibration coefficients (a/b/c + dc_comp_red/ir) from
+ * the active profile, if it has spo2_present && spo2_enabled set.
+ *
+ * @param p_cfg Output buffer for the config.
+ * @return true if the active profile has a valid SpO2 config (p_cfg filled),
+ * false otherwise (p_cfg untouched).
+ */
+bool sensor_get_spo2_config(bio_spo2_a0_configuration_t *p_cfg);
+
 void sensor_set_irq_task_handle(TaskHandle_t handle);
 void sensor_notify_irq_from_isr(BaseType_t *p_higher_priority_task_woken);
 void sensor_process_irq_events(void);
 
-extern rb_config_t rbPpg1Sensor;
+extern rb_config_t rbPpg1Sensor; /* Red (PPG1_SUB1) */
+extern rb_config_t rbPpg2Sensor; /* IR  (PPG1_SUB2) */
 extern rb_config_t rbEcgSensor;
 
 #ifdef __cplusplus
@@ -59,3 +75,4 @@ extern rb_config_t rbEcgSensor;
 #endif
 
 #endif // __APP_SENSOR_H
+
