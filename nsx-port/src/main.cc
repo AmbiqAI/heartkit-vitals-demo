@@ -1152,6 +1152,19 @@ ReportTask(void *pvParameters)
                    (unsigned long)sensor_get_ppg_push_count(), (unsigned long)sensor_get_ppg_drop_count(),
                    (unsigned long)sensor_get_ecg_push_count(), (unsigned long)sensor_get_ecg_drop_count(),
                    (unsigned long)g_tio_tx_queue_drops);
+        /* AS7058 INT ISR-to-ISR interval range over the last report period.
+         * A stable, uniform min/max close to the FIFO watermark's expected
+         * interval (e.g. ~125-130ms for a ~26-sample/200Hz ECG watermark, as
+         * observed on hardware) confirms the INT line is firing at a normal,
+         * expected cadence -- the "bursty" look of watermark-batched
+         * ringbuffer delivery is not itself a bug. A max interval that's a
+         * large multiple of the min would indicate real IRQ starvation/delay
+         * and is worth watching for after any change touching interrupt
+         * priorities, USB/BLE ISR paths, or critical sections. */
+        nsx_printf("[sensor] as7058 isr interval min=%lu ms max=%lu ms\n",
+                   (unsigned long)sensor_get_as7058_isr_min_interval_ms(),
+                   (unsigned long)sensor_get_as7058_isr_max_interval_ms());
+        sensor_reset_as7058_isr_interval_stats();
         /* TEMP diagnostic (tracking down ECG/PPG TileIO starvation): per
          * slot (0=ECG,1=PPG,2=CPU) nodata=numSamples==0 early-return count,
          * ok=successfully enqueued, fail=enqueue attempted but queue was

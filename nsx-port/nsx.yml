@@ -57,7 +57,7 @@ module_registry:
     helia-dsp:
       name: helia-dsp
       url: https://github.com/AmbiqAI/helia-dsp.git
-      revision: 5f344d5a94a8ef4263ea1bcf6f3e315d35d4b597
+      revision: 9c18599bf7a734f4d9952e891ae42c38010981b8
       path: modules/helia-dsp
   modules:
     nsx-as7058:
@@ -70,7 +70,7 @@ module_registry:
       metadata: modules/nsx-physiokit/nsx-module.yaml
     helia-dsp:
       project: helia-dsp
-      revision: 5f344d5a94a8ef4263ea1bcf6f3e315d35d4b597
+      revision: 9c18599bf7a734f4d9952e891ae42c38010981b8
       metadata: modules/helia-dsp/nsx-module.yaml
 tooling:
   nsx:

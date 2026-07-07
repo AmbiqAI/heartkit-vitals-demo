@@ -3,12 +3,12 @@
 schema_version: 4
 targets:
   apollo510b_evb:
-    generated_at: '2026-07-07T03:40:38+00:00'
+    generated_at: '2026-07-07T05:05:49+00:00'
     nsx_tool:
       version: 0.1.0
     manifest:
       path: nsx.yml
-      hash: sha256:8a613c7cff456c1b918ee22c61e30c2490f87799c6b335260755948317f37d1b
+      hash: sha256:b6e4994aa86efe32d13514e447e4df474365cd51a24c5292b4754e2fd6aff333
     target:
       board: apollo510b_evb
       soc: apollo510b
@@ -215,13 +215,13 @@ targets:
       helia-dsp:
         project: helia-dsp
         kind: git
-        constraint: 5f344d5a94a8ef4263ea1bcf6f3e315d35d4b597
+        constraint: 9c18599bf7a734f4d9952e891ae42c38010981b8
         resolved:
           url: https://github.com/AmbiqAI/helia-dsp.git
-          commit: 5f344d5a94a8ef4263ea1bcf6f3e315d35d4b597
+          commit: 9c18599bf7a734f4d9952e891ae42c38010981b8
           vendored_at: modules/helia-dsp
-          content_hash: sha256:40e2060a408f0b4a8c6cc8f3585d8a5823bd27d50bc9ecca7c0705dca637b766
-          acquired_at: '2026-07-07T02:51:14+00:00'
+          content_hash: sha256:27e12e5ad3e912d7b814bbc54e7e1d9710ae9a198bc9f66880b57a917ac19e3f
+          acquired_at: '2026-07-07T05:05:54+00:00'
       nsx-physiokit:
         project: nsx-physiokit
         kind: git
@@ -295,12 +295,12 @@ targets:
           content_hash: sha256:6291cc1591cddd3f16887b508bc08892c4804c33ecdfc26bdb08da95d0996378
           acquired_at: '2026-07-07T02:51:14+00:00'
   apollo510_evb:
-    generated_at: '2026-07-07T03:40:43+00:00'
+    generated_at: '2026-07-07T05:05:54+00:00'
     nsx_tool:
       version: 0.1.0
     manifest:
       path: nsx.yml
-      hash: sha256:8a613c7cff456c1b918ee22c61e30c2490f87799c6b335260755948317f37d1b
+      hash: sha256:b6e4994aa86efe32d13514e447e4df474365cd51a24c5292b4754e2fd6aff333
     target:
       board: apollo510_evb
       soc: apollo510
@@ -507,13 +507,13 @@ targets:
       helia-dsp:
         project: helia-dsp
         kind: git
-        constraint: 5f344d5a94a8ef4263ea1bcf6f3e315d35d4b597
+        constraint: 9c18599bf7a734f4d9952e891ae42c38010981b8
         resolved:
           url: https://github.com/AmbiqAI/helia-dsp.git
-          commit: 5f344d5a94a8ef4263ea1bcf6f3e315d35d4b597
+          commit: 9c18599bf7a734f4d9952e891ae42c38010981b8
           vendored_at: modules/helia-dsp
-          content_hash: sha256:40e2060a408f0b4a8c6cc8f3585d8a5823bd27d50bc9ecca7c0705dca637b766
-          acquired_at: '2026-07-07T02:51:15+00:00'
+          content_hash: sha256:27e12e5ad3e912d7b814bbc54e7e1d9710ae9a198bc9f66880b57a917ac19e3f
+          acquired_at: '2026-07-07T05:05:54+00:00'
       nsx-physiokit:
         project: nsx-physiokit
         kind: git
@@ -557,12 +557,12 @@ targets:
           content_hash: sha256:6291cc1591cddd3f16887b508bc08892c4804c33ecdfc26bdb08da95d0996378
           acquired_at: '2026-07-07T02:51:15+00:00'
   apollo330mP_evb:
-    generated_at: '2026-07-07T03:40:43+00:00'
+    generated_at: '2026-07-07T05:05:54+00:00'
     nsx_tool:
       version: 0.1.0
     manifest:
       path: nsx.yml
-      hash: sha256:8a613c7cff456c1b918ee22c61e30c2490f87799c6b335260755948317f37d1b
+      hash: sha256:b6e4994aa86efe32d13514e447e4df474365cd51a24c5292b4754e2fd6aff333
     target:
       board: apollo330mP_evb
       soc: apollo330P
@@ -769,13 +769,13 @@ targets:
       helia-dsp:
         project: helia-dsp
         kind: git
-        constraint: 5f344d5a94a8ef4263ea1bcf6f3e315d35d4b597
+        constraint: 9c18599bf7a734f4d9952e891ae42c38010981b8
         resolved:
           url: https://github.com/AmbiqAI/helia-dsp.git
-          commit: 5f344d5a94a8ef4263ea1bcf6f3e315d35d4b597
+          commit: 9c18599bf7a734f4d9952e891ae42c38010981b8
           vendored_at: modules/helia-dsp
-          content_hash: sha256:40e2060a408f0b4a8c6cc8f3585d8a5823bd27d50bc9ecca7c0705dca637b766
-          acquired_at: '2026-07-07T02:51:16+00:00'
+          content_hash: sha256:27e12e5ad3e912d7b814bbc54e7e1d9710ae9a198bc9f66880b57a917ac19e3f
+          acquired_at: '2026-07-07T05:05:54+00:00'
       nsx-physiokit:
         project: nsx-physiokit
         kind: git

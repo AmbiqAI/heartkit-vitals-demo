@@ -41,6 +41,9 @@ err_code_t sensor_start(void);
 err_code_t sensor_stop(void);
 
 uint32_t sensor_get_as7058_int_isr_count(void);
+uint32_t sensor_get_as7058_isr_min_interval_ms(void);
+uint32_t sensor_get_as7058_isr_max_interval_ms(void);
+void sensor_reset_as7058_isr_interval_stats(void);
 uint32_t sensor_get_irq_notify_missed_count(void);
 uint32_t sensor_get_ppg_push_count(void);
 uint32_t sensor_get_ppg_drop_count(void);

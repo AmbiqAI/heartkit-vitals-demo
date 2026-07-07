@@ -73,6 +73,18 @@ static volatile uint32_t g_ecg_drop_count = 0;
 static TaskHandle_t g_sensor_irq_task_handle = NULL;
 static sensor_context_t *g_sensorCtx = NULL;
 
+/* AS7058 INT GPIO ISR-to-ISR interval tracking, exposed via ReportTask's
+ * once/sec breadcrumb: confirms whether the sensor's INT line is firing at
+ * a uniform, expected cadence (normal FIFO-watermark batching -- e.g. one
+ * INT per ~26 ECG samples at 200 Hz is exactly the configured watermark,
+ * not a bug) versus genuinely irregular/starved (would show large
+ * max-interval outliers relative to the min). Useful ongoing health check
+ * after any change touching interrupt priorities, USB/BLE ISR paths, or
+ * critical sections that could starve the sensor's edge-triggered INT. */
+static volatile uint32_t g_as7058_isr_last_tick = 0;
+static volatile uint32_t g_as7058_isr_min_interval_ticks = 0xFFFFFFFFu;
+static volatile uint32_t g_as7058_isr_max_interval_ticks = 0;
+
 /* SpO2 calibration coefficients from the active profile, captured at
  * sensor_configure() time -- exposed via sensor_get_spo2_config() so
  * metrics.c's ratiometric SpO2 formula (pk_ppg-based, no AMS on-chip
@@ -191,10 +203,27 @@ static void
 as7058_int_gpio_irq_handler(uint32_t pin, void *ctx)
 {
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    uint32_t nowTick;
+    uint32_t lastTick;
+    uint32_t deltaTicks;
     (void)pin;
     (void)ctx;
 
     g_as7058_int_isr_count++;
+
+    nowTick = xTaskGetTickCountFromISR();
+    lastTick = g_as7058_isr_last_tick;
+    g_as7058_isr_last_tick = nowTick;
+    if (g_as7058_int_isr_count > 1u) {
+        deltaTicks = nowTick - lastTick;
+        if (deltaTicks < g_as7058_isr_min_interval_ticks) {
+            g_as7058_isr_min_interval_ticks = deltaTicks;
+        }
+        if (deltaTicks > g_as7058_isr_max_interval_ticks) {
+            g_as7058_isr_max_interval_ticks = deltaTicks;
+        }
+    }
+
     sensor_notify_irq_from_isr(&xHigherPriorityTaskWoken);
     portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
@@ -478,6 +507,14 @@ sensor_start(void)
         nsx_printf("PPG sample period %lu us (~%lu Hz)\n", (uint32_t)meas_config.ppg_sample_period_us,
                    (uint32_t)(1000000u / meas_config.ppg_sample_period_us));
     }
+    if (meas_config.ecg_seq1_sample_period_us > 0u) {
+        nsx_printf("ECG seq1 sample period %lu us (~%lu Hz)\n", (uint32_t)meas_config.ecg_seq1_sample_period_us,
+                   (uint32_t)(1000000u / meas_config.ecg_seq1_sample_period_us));
+    }
+    if (meas_config.ecg_seq2_sample_period_us > 0u) {
+        nsx_printf("ECG seq2 sample period %lu us (~%lu Hz)\n", (uint32_t)meas_config.ecg_seq2_sample_period_us,
+                   (uint32_t)(1000000u / meas_config.ecg_seq2_sample_period_us));
+    }
 
     g_extract_metadata.copy_recent_to_current = FALSE;
     g_extract_metadata.fifo_map = meas_config.fifo_map;
@@ -518,6 +555,26 @@ uint32_t
 sensor_get_as7058_int_isr_count(void)
 {
     return g_as7058_int_isr_count;
+}
+
+uint32_t
+sensor_get_as7058_isr_min_interval_ms(void)
+{
+    uint32_t ticks = g_as7058_isr_min_interval_ticks;
+    return (ticks == 0xFFFFFFFFu) ? 0u : (ticks * (1000u / configTICK_RATE_HZ));
+}
+
+uint32_t
+sensor_get_as7058_isr_max_interval_ms(void)
+{
+    return g_as7058_isr_max_interval_ticks * (1000u / configTICK_RATE_HZ);
+}
+
+void
+sensor_reset_as7058_isr_interval_stats(void)
+{
+    g_as7058_isr_min_interval_ticks = 0xFFFFFFFFu;
+    g_as7058_isr_max_interval_ticks = 0;
 }
 
 uint32_t
