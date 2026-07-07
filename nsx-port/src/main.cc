@@ -387,7 +387,12 @@ send_uio_state(void)
     uioBuffer[TIO_UIO_DEN_MODE_IDX] = appState.denoiseMode;
     uioBuffer[TIO_UIO_SEG_MODE_IDX] = appState.segMode;
     uioBuffer[TIO_UIO_ARR_MODE_IDX] = appState.arrMode;
-    tio_usb_send_uio_state(uioBuffer, sizeof(uioBuffer));
+    /* Enqueue (slot 0, type 2 = UIO) via the ISR-safe TX queue rather than
+     * calling tio_usb_send_uio_state() directly -- the direct call blocks in
+     * retry loops, which is unacceptable from any context TioProcessTask
+     * shares with time-critical work (and fatal from ISR context; see
+     * received_uio_state below). Matches legacy's send_uio_state(). */
+    pack_and_enqueue_tio_packet(0, 2, uioBuffer, sizeof(uioBuffer));
 }
 
 static void
@@ -400,18 +405,54 @@ received_slot_data(uint8_t slot, uint8_t slot_type, const uint8_t *data, uint32_
     (void)length;
 }
 
+/*
+ * ROOT-CAUSE NOTE (AS7058 ISR freeze on host connect): nsx-tileio-usb
+ * dispatches this callback from the NSX_TIMER_USB timer *ISR* (its vendor
+ * RX handler runs inside usb_timer_callback). An earlier revision applied
+ * the UIO state and called send_uio_state() -> tio_usb_send_uio_state()
+ * directly here -- a blocking send that can spin in am_util_delay_ms(1)
+ * retry loops (plus perf-mode switching and printfs), all in ISR context.
+ * That stalls same/lower-priority IRQs long enough to blow the AS7058's
+ * bounded INT-service window; with its edge-triggered INT line stuck high
+ * and never re-armed, the sensor stops interrupting permanently -- observed
+ * as isr/push counters freezing at the exact "host connected" moment.
+ *
+ * Fix: do nothing here but copy the 8 bytes and set a flag; TioProcessTask
+ * applies the settings and enqueues the echo in task context (echo goes
+ * through the ISR-safe TX queue like every other packet, matching legacy's
+ * enqueue-based send_uio_state()).
+ */
+static volatile uint8_t g_uio_pending = 0;
+static uint8_t g_uio_rx_buf[8];
+
 static void
 received_uio_state(const uint8_t *data, uint32_t length)
 {
     if (length < 8) {
         return;
     }
-    set_input_source(data[TIO_UIO_INPUT_SEL_IDX]);
-    set_noise_inputs(data[TIO_UIO_BW_NOISE_IDX], data[TIO_UIO_MA_NOISE_IDX], data[TIO_UIO_EM_NOISE_IDX]);
-    set_speed_mode(data[TIO_UIO_SPEED_MODE_IDX]);
-    set_denoise_mode(data[TIO_UIO_DEN_MODE_IDX]);
-    set_segmentation_mode(data[TIO_UIO_SEG_MODE_IDX]);
-    set_arrhythmia_mode(data[TIO_UIO_ARR_MODE_IDX]);
+    memcpy(g_uio_rx_buf, data, 8);
+    __asm volatile("" ::: "memory");
+    g_uio_pending = 1;
+}
+
+/* Runs in TioProcessTask context. */
+static void
+apply_pending_uio_state(void)
+{
+    uint8_t local[8];
+    if (!g_uio_pending) {
+        return;
+    }
+    memcpy(local, g_uio_rx_buf, 8);
+    g_uio_pending = 0;
+
+    set_input_source(local[TIO_UIO_INPUT_SEL_IDX]);
+    set_noise_inputs(local[TIO_UIO_BW_NOISE_IDX], local[TIO_UIO_MA_NOISE_IDX], local[TIO_UIO_EM_NOISE_IDX]);
+    set_speed_mode(local[TIO_UIO_SPEED_MODE_IDX]);
+    set_denoise_mode(local[TIO_UIO_DEN_MODE_IDX]);
+    set_segmentation_mode(local[TIO_UIO_SEG_MODE_IDX]);
+    set_arrhythmia_mode(local[TIO_UIO_ARR_MODE_IDX]);
     send_uio_state();
 }
 
@@ -957,6 +998,9 @@ TioProcessTask(void *pvParameters)
     uint8_t packet[TIO_USB_PACKET_LEN];
     while (true) {
         check_tio_state();
+        /* Host UIO writes are only latched (flag+copy) in the ISR-context
+         * callback; apply them here in task context. */
+        apply_pending_uio_state();
         if (g_tioTxQueue == NULL) {
             vTaskDelay(pdMS_TO_TICKS(1));
             continue;
