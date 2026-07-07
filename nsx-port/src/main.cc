@@ -229,6 +229,10 @@ flush_pipeline(void)
     }
 }
 
+static volatile uint32_t g_tio_enqueue_ok[3] = {0};
+static volatile uint32_t g_tio_enqueue_fail[3] = {0};
+static volatile uint32_t g_tio_pack_fail[3] = {0};
+
 static bool
 enqueue_tio_packet(const uint8_t packet[TIO_USB_PACKET_LEN])
 {
@@ -259,10 +263,22 @@ static bool
 pack_and_enqueue_tio_packet(uint8_t slot, uint8_t slot_type, const void *payload, uint32_t payload_len)
 {
     uint8_t packet[TIO_USB_PACKET_LEN];
+    bool ok;
     if (tio_usb_pack_slot_data(slot, slot_type, (const uint8_t *)payload, payload_len, packet) != 0) {
+        if (slot < 3) {
+            g_tio_pack_fail[slot]++;
+        }
         return false;
     }
-    return enqueue_tio_packet(packet);
+    ok = enqueue_tio_packet(packet);
+    if (slot < 3) {
+        if (ok) {
+            g_tio_enqueue_ok[slot]++;
+        } else {
+            g_tio_enqueue_fail[slot]++;
+        }
+    }
+    return ok;
 }
 
 static volatile bool g_tio_available = false;
@@ -291,7 +307,20 @@ set_input_source(uint8_t source)
     if (appState.inputSource != source) {
         appState.inputSource = source;
         sensorCtx.inputSource = source;
-        nsx_printf("[app] input source: %d\n", (int)sensorCtx.inputSource);
+        if (source < NUM_INPUT_PTS) {
+            /* Real, documented gap (sensor.h/main.cc file header): sensor.c
+             * does not yet implement legacy's canned-stimulus-substitution
+             * ISR path, so this selection has no effect on the sampled
+             * data -- the pipeline keeps consuming live AS7058 sensor data
+             * regardless. Flagged loudly here so "canned data looks wrong"
+             * is understood as "canned data isn't wired up yet", not a
+             * silent mislabeling. */
+            nsx_printf("[app] input source: %d (WARNING: canned/stimulus playback not implemented -- "
+                       "still streaming LIVE sensor data)\n",
+                       (int)sensorCtx.inputSource);
+        } else {
+            nsx_printf("[app] input source: %d (live sensor)\n", (int)sensorCtx.inputSource);
+        }
     }
 }
 
@@ -390,6 +419,8 @@ received_uio_state(const uint8_t *data, uint32_t length)
 // TIO packet senders
 ///////////////////////////////////////////////////////////////////////////////
 
+static volatile uint32_t g_tio_nodata[3] = {0};
+
 static void
 send_ecg_signals(void)
 {
@@ -400,6 +431,7 @@ send_ecg_signals(void)
     uint32_t length;
     size_t numSamples = MIN3(ringbuffer_len(&rbEcgRawTx), ringbuffer_len(&rbEcgDenTx), ringbuffer_len(&rbEcgMaskTx));
     if (numSamples == 0) {
+        g_tio_nodata[0]++;
         return;
     }
     numSamples = MIN(numSamples, sizeof(buffer) / (3 * sizeof(int16_t)));
@@ -443,12 +475,20 @@ send_ppg_signals(void)
 {
     uint8_t buffer[240];
     float32_t val1, val2;
-    int16_t txVal;
+    float32_t txVal1, txVal2;
+    int16_t txValI16;
     uint32_t length;
     uint8_t qos = (uint8_t)(ppgMetResults.qos / 25);
     uint16_t mask = (uint16_t)(qos << SIG_MASK_QOS_OFFSET);
+    /* Re-center for display: sensor.c's callback already clips raw AS7058
+     * counts to [PPG_AGC_MIN, PPG_AGC_MAX] and rescales to [0, (MAX-MIN)/16]
+     * (matches legacy). Subtracting the midpoint here (TX-only, doesn't
+     * affect metrics) centers the waveform around 0 for a nicer display,
+     * matching legacy's send_ppg_signals() TX compatibility mapping. */
+    const float32_t ppg_tx_center = ((float32_t)(PPG_AGC_MAX - PPG_AGC_MIN) / 16.0f) * 0.5f;
     size_t numSamples = MIN(ringbuffer_len(&rbPpg1Tx), ringbuffer_len(&rbPpg2Tx));
     if (numSamples == 0) {
+        g_tio_nodata[1]++;
         return;
     }
     numSamples = MIN(numSamples, sizeof(buffer) / (sizeof(uint16_t) + 2 * sizeof(int16_t)));
@@ -457,12 +497,14 @@ send_ppg_signals(void)
         memcpy(&buffer[length], &mask, sizeof(uint16_t));
         length += sizeof(uint16_t);
         ringbuffer_pop(&rbPpg1Tx, &val1, 1);
-        txVal = (int16_t)CLIP(val1, -32768.0f, 32767.0f);
-        memcpy(&buffer[length], &txVal, sizeof(int16_t));
+        txVal1 = CLIP((val1 - ppg_tx_center) * PPG_TX_GAIN, -32768.0f, 32767.0f);
+        txValI16 = (int16_t)txVal1;
+        memcpy(&buffer[length], &txValI16, sizeof(int16_t));
         length += sizeof(int16_t);
         ringbuffer_pop(&rbPpg2Tx, &val2, 1);
-        txVal = (int16_t)CLIP(val2, -32768.0f, 32767.0f);
-        memcpy(&buffer[length], &txVal, sizeof(int16_t));
+        txVal2 = CLIP((val2 - ppg_tx_center) * PPG_TX_GAIN, -32768.0f, 32767.0f);
+        txValI16 = (int16_t)txVal2;
+        memcpy(&buffer[length], &txValI16, sizeof(int16_t));
         length += sizeof(int16_t);
     }
     pack_and_enqueue_tio_packet(1, 0, buffer, length);
@@ -487,6 +529,7 @@ send_cpu_signals(void)
     uint16_t mask = (uint16_t)(SIG_QOS_GOOD << SIG_MASK_QOS_OFFSET);
     size_t numSamples = MIN3(ringbuffer_len(&rbEcgCpuTx), ringbuffer_len(&rbPpgCpuTx), ringbuffer_len(&rbTotalCpuTx));
     if (numSamples == 0) {
+        g_tio_nodata[2]++;
         return;
     }
     numSamples = MIN(numSamples, sizeof(buffer) / (sizeof(uint16_t) + 3 * sizeof(float32_t)));
@@ -541,6 +584,8 @@ SensorIrqTask(void *pvParameters)
 // legacy's EcgProcessTask 1:1 modulo the sensor.c stimulus-substitution gap
 // documented at the top of this file.
 
+static volatile uint32_t g_ecg_seg_runs = 0;
+
 void
 EcgProcessTask(void *pvParameters)
 {
@@ -549,9 +594,11 @@ EcgProcessTask(void *pvParameters)
     uint32_t tickStart;
     uint32_t numPeaks;
     size_t numSamples;
+    uint32_t loopTickStart;
 
     while (true) {
         err = 0;
+        loopTickStart = dwt_cycles();
 
         ///////////////////////////////////////////////////////////////////
         // ECG PREPROCESSING: downsample sensor rate to target rate.
@@ -619,6 +666,7 @@ EcgProcessTask(void *pvParameters)
         ///////////////////////////////////////////////////////////////////
         else if (ringbuffer_len(&rbEcgSeg) >= ECG_SEG_WINDOW_LEN) {
             tickStart = dwt_cycles();
+            g_ecg_seg_runs++;
             ringbuffer_peek(&rbEcgSeg, ecgSegInout, ECG_SEG_WINDOW_LEN);
 
             if (appState.segMode == SegmentationModeDsp) {
@@ -690,6 +738,22 @@ EcgProcessTask(void *pvParameters)
 
         send_ecg_signals();
         (void)err;
+
+        /* Rate-limit the whole loop to ~100ms, matching legacy's "Try to
+         * maintain 100ms loop" -- without this, the loop free-runs at raw
+         * sample rate whenever data is flowing, calling send_ecg_signals()
+         * far more often than useful (each call only finds 1-3 fresh TX
+         * samples, producing tiny/mostly-overhead packets that starve the
+         * TileIO queue instead of a few well-filled ~40-sample packets/sec).
+         * This was a real regression from the phase 6 port -- confirmed via
+         * SWO diagnostics showing near-zero ECG/PPG TileIO throughput
+         * despite the pipeline computing correct metrics internally. */
+        {
+            uint32_t loopDeltaUs = dwt_delta_us(loopTickStart);
+            if (loopDeltaUs < 100000u) {
+                vTaskDelay(pdMS_TO_TICKS((100000u - loopDeltaUs) / 1000u));
+            }
+        }
     }
 }
 
@@ -704,6 +768,9 @@ EcgProcessTask(void *pvParameters)
 // (Phase 6 fix: previously ran single-wavelength only because sensor.c
 // applied the wrong AS7058 profile -- see sensor.c/store.h.)
 
+static volatile uint32_t g_ppg_loop_iters = 0;
+static volatile uint32_t g_ppg_samples_pushed = 0;
+
 void
 PpgProcessTask(void *pvParameters)
 {
@@ -711,8 +778,11 @@ PpgProcessTask(void *pvParameters)
     uint32_t err;
     bio_spo2_a0_configuration_t spo2Cfg;
     const bio_spo2_a0_configuration_t *pSpo2Cfg;
+    uint32_t loopTickStart;
 
     while (true) {
+        g_ppg_loop_iters++;
+        loopTickStart = dwt_cycles();
         size_t numSamples = MIN(ringbuffer_len(&rbPpg1Sensor), ringbuffer_len(&rbPpg2Sensor));
         for (size_t i = 0; i < numSamples / PPG_DS_RATE; i++) {
             float32_t sample1, sample2;
@@ -727,6 +797,7 @@ PpgProcessTask(void *pvParameters)
             ringbuffer_push(&rbPpg2Met, &sample2, 1);
             ringbuffer_push(&rbPpg2Tx, &sample2, 1);
             ringbuffer_seek(&rbPpg2Sensor, 1);
+            g_ppg_samples_pushed++;
         }
 
         if (MIN(ringbuffer_len(&rbPpg1Met), ringbuffer_len(&rbPpg2Met)) >= PPG_MET_WINDOW_LEN) {
@@ -749,6 +820,15 @@ PpgProcessTask(void *pvParameters)
         }
 
         send_ppg_signals();
+
+        /* Rate-limit to ~100ms, matching legacy and the same fix applied to
+         * EcgProcessTask above -- see its comment for why this matters. */
+        {
+            uint32_t loopDeltaUs = dwt_delta_us(loopTickStart);
+            if (loopDeltaUs < 100000u) {
+                vTaskDelay(pdMS_TO_TICKS((100000u - loopDeltaUs) / 1000u));
+            }
+        }
     }
 }
 
@@ -909,6 +989,35 @@ ReportTask(void *pvParameters)
                    (unsigned long)sensor_get_ppg_push_count(), (unsigned long)sensor_get_ppg_drop_count(),
                    (unsigned long)sensor_get_ecg_push_count(), (unsigned long)sensor_get_ecg_drop_count(),
                    (unsigned long)g_tio_tx_queue_drops);
+        /* TEMP diagnostic (tracking down ECG/PPG TileIO starvation): per
+         * slot (0=ECG,1=PPG,2=CPU) nodata=numSamples==0 early-return count,
+         * ok=successfully enqueued, fail=enqueue attempted but queue was
+         * full, packfail=tio_usb_pack_slot_data() itself rejected the call. */
+        nsx_printf("[tio] ecg(nodata=%lu ok=%lu fail=%lu packfail=%lu) ppg(nodata=%lu ok=%lu fail=%lu packfail=%lu) "
+                   "cpu(nodata=%lu ok=%lu fail=%lu packfail=%lu)\n",
+                   (unsigned long)g_tio_nodata[0], (unsigned long)g_tio_enqueue_ok[0], (unsigned long)g_tio_enqueue_fail[0],
+                   (unsigned long)g_tio_pack_fail[0], (unsigned long)g_tio_nodata[1], (unsigned long)g_tio_enqueue_ok[1],
+                   (unsigned long)g_tio_enqueue_fail[1], (unsigned long)g_tio_pack_fail[1], (unsigned long)g_tio_nodata[2],
+                   (unsigned long)g_tio_enqueue_ok[2], (unsigned long)g_tio_enqueue_fail[2], (unsigned long)g_tio_pack_fail[2]);
+        /* TEMP diagnostic: instantaneous ring-buffer occupancy at the exact
+         * moment ReportTask samples it -- if these are chronically 0, the
+         * producer (EcgProcessTask/PpgProcessTask segmentation/downsample
+         * stage) isn't feeding the TX taps; if they're large/climbing, the
+         * TX taps are filling but not being drained (queue/consumer side). */
+        nsx_printf("[ppg-task] loop_iters=%lu samples_pushed=%lu rbPpg1Sensor_len=%u rbPpg2Sensor_len=%u "
+                   "rbPpg1Met_len=%u rbPpg2Met_len=%u\n",
+                   (unsigned long)g_ppg_loop_iters, (unsigned long)g_ppg_samples_pushed,
+                   (unsigned)ringbuffer_len(&rbPpg1Sensor), (unsigned)ringbuffer_len(&rbPpg2Sensor),
+                   (unsigned)ringbuffer_len(&rbPpg1Met), (unsigned)ringbuffer_len(&rbPpg2Met));
+        nsx_printf("[tio-len] ecgRawTx=%u ecgDenTx=%u ecgMaskTx=%u ppg1Tx=%u ppg2Tx=%u qdepth=%u\n",
+                   (unsigned)ringbuffer_len(&rbEcgRawTx), (unsigned)ringbuffer_len(&rbEcgDenTx),
+                   (unsigned)ringbuffer_len(&rbEcgMaskTx), (unsigned)ringbuffer_len(&rbPpg1Tx),
+                   (unsigned)ringbuffer_len(&rbPpg2Tx), (unsigned)uxQueueMessagesWaiting(g_tioTxQueue));
+        nsx_printf("[ecg-len] rbEcgSensor=%u rbEcgDen=%u rbEcgRawSeg=%u rbEcgSeg=%u rbEcgMet=%u rbEcgMaskMet=%u seg_runs=%lu\n",
+                   (unsigned)ringbuffer_len(&rbEcgSensor), (unsigned)ringbuffer_len(&rbEcgDen),
+                   (unsigned)ringbuffer_len(&rbEcgRawSeg), (unsigned)ringbuffer_len(&rbEcgSeg),
+                   (unsigned)ringbuffer_len(&rbEcgMet), (unsigned)ringbuffer_len(&rbEcgMaskMet),
+                   (unsigned long)g_ecg_seg_runs);
         nsx_printf("[ecg] hr=%d.%02d bpm hrv=%d.%02d ms rhythm=%d qos=%d.%02d\n", (int)ecgMetResults.hr,
                    (int)(fabsf(ecgMetResults.hr - (int)ecgMetResults.hr) * 100), (int)ecgMetResults.hrv,
                    (int)(fabsf(ecgMetResults.hrv - (int)ecgMetResults.hrv) * 100), (int)ecgMetResults.arrhythmiaLabel,

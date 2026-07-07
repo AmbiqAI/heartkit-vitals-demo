@@ -187,7 +187,18 @@ sensor_as7058_callback(err_code_t error,
                                      &sample_cnt, (as7058_extract_metadata_t *)&g_extract_metadata);
     if (result == ERR_SUCCESS && sample_cnt > 0) {
         for (uint16_t i = 0; i < sample_cnt; i++) {
-            samples_f32[i] = (float)samples[i];
+            /* Raw AS7058 PPG counts run ~10^5-10^6 (PPG_AGC_MIN..PPG_AGC_MAX,
+             * constants.h). Clip to the AGC operating range and rescale down
+             * to a small int16-friendly span -- matches legacy sensor.c's
+             * per-sample CLIP/-=/ /=16 exactly. Without this, raw counts
+             * blow past int16 range downstream (TX packing, DSP windows),
+             * which is what made the live PPG waveform look flat/dead
+             * except for large step artifacts on full cover/uncover. */
+            float32_t val = (float32_t)samples[i];
+            val = CLIP(val, PPG_AGC_MIN, PPG_AGC_MAX);
+            val -= PPG_AGC_MIN;
+            val /= 16.0f;
+            samples_f32[i] = val;
         }
         pushed = ringbuffer_push(&rbPpg1Sensor, samples_f32, sample_cnt);
         g_ppg_push_count += (uint32_t)pushed;
@@ -203,7 +214,11 @@ sensor_as7058_callback(err_code_t error,
                                      &sample_cnt, (as7058_extract_metadata_t *)&g_extract_metadata);
     if (result == ERR_SUCCESS && sample_cnt > 0) {
         for (uint16_t i = 0; i < sample_cnt; i++) {
-            samples_f32[i] = (float)samples[i];
+            float32_t val = (float32_t)samples[i];
+            val = CLIP(val, PPG_AGC_MIN, PPG_AGC_MAX);
+            val -= PPG_AGC_MIN;
+            val /= 16.0f;
+            samples_f32[i] = val;
         }
         pushed = ringbuffer_push(&rbPpg2Sensor, samples_f32, sample_cnt);
         g_ppg_push_count += (uint32_t)pushed;
