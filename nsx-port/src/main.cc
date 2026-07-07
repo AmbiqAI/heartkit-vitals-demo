@@ -11,17 +11,11 @@
  * streaming (nsx-tileio-usb) with a full 3-channel ECG / metrics / CPU
  * packet layout matching legacy, plus host->device UIO mode control.
  *
- * Known, documented scope gaps vs legacy (see plan.md phase 6 notes and
- * sensor.h):
- *  - sensor.c does not yet implement legacy's canned-stimulus-substitution
- *    ISR path (playing back ecg_stimulus/ppg1_stimulus/ppg2_stimulus in
- *    place of live AS7058 FIFO data when appState.inputSource selects a
- *    non-live slot) -- setting a non-live input source via UIO currently
- *    has no effect on the sampled data (always live). Noise injection
- *    (nstdb_add_*_noise) and denoise-quality cosine-similarity, which
- *    legacy only computes in non-live/synthetic mode, are wired the same
- *    way here for API parity but are effectively inert while
- *    sensorCtx.inputSource stays at its LIVE_INPUT_MODE default.
+ * Notes vs legacy (see plan.md phase 6 notes and sensor.h):
+ *  - Canned-stimulus patient playback (load_patient_data, sensor.c) is now
+ *    implemented: selecting a non-live input source via UIO substitutes the
+ *    canned ecg/ppg1/ppg2 stimulus for live AS7058 FIFO data, enabling the
+ *    noise-injection and denoise-quality cosine-similarity paths below.
  *  - True dual-wavelength PPG/SpO2: FIXED in this revision. sensor.c
  *    previously hardcoded the simplified single-wavelength JSON-generated
  *    "click_ppg_ecg" profile (one LED, wrong physical LED mapping baked
@@ -377,20 +371,8 @@ set_input_source(uint8_t source)
     if (appState.inputSource != source) {
         appState.inputSource = source;
         sensorCtx.inputSource = source;
-        if (source < NUM_INPUT_PTS) {
-            /* Real, documented gap (sensor.h/main.cc file header): sensor.c
-             * does not yet implement legacy's canned-stimulus-substitution
-             * ISR path, so this selection has no effect on the sampled
-             * data -- the pipeline keeps consuming live AS7058 sensor data
-             * regardless. Flagged loudly here so "canned data looks wrong"
-             * is understood as "canned data isn't wired up yet", not a
-             * silent mislabeling. */
-            nsx_printf("[app] input source: %d (WARNING: canned/stimulus playback not implemented -- "
-                       "still streaming LIVE sensor data)\n",
-                       (int)sensorCtx.inputSource);
-        } else {
-            nsx_printf("[app] input source: %d (live sensor)\n", (int)sensorCtx.inputSource);
-        }
+        nsx_printf("[app] input source: %d (%s)\n", (int)sensorCtx.inputSource,
+                   source < NUM_INPUT_PTS ? "canned patient playback" : "live sensor");
     }
 }
 

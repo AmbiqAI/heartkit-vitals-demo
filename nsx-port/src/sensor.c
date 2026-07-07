@@ -40,6 +40,7 @@
 #include "constants.h"
 #include "ringbuffer.h"
 #include "sensor.h"
+#include "stimulus.h"
 
 #define SENSOR_RB_LEN (SENSOR_BUF_LEN)
 
@@ -79,6 +80,94 @@ static sensor_context_t *g_sensorCtx = NULL;
  * values instead of metrics.c's built-in generic fallback coefficients. */
 static bio_spo2_a0_configuration_t g_spo2_config;
 static bool g_spo2_config_valid = false;
+
+/* Small LCG PRNG + gaussian approximation for adding synthetic noise to the
+ * canned PPG stimulus (ported verbatim from legacy sensor.c) -- keeps the
+ * playback waveform from being unnaturally clean. */
+static uint32_t g_ppg_stim_prng_state = 0x13579BDFu;
+
+static inline float32_t
+ppg_stim_uniform_0_1(void)
+{
+    g_ppg_stim_prng_state = (1664525u * g_ppg_stim_prng_state) + 1013904223u;
+    return (float32_t)(g_ppg_stim_prng_state >> 8) * (1.0f / 16777216.0f);
+}
+
+static float32_t
+ppg_stim_gaussian_noise(float32_t stddev)
+{
+    float32_t z = 0.0f;
+    for (uint32_t i = 0; i < 12u; i++) {
+        z += ppg_stim_uniform_0_1();
+    }
+    z -= 6.0f;
+    return z * stddev;
+}
+
+/*
+ * Canned patient-data playback (ported from legacy sensor.c
+ * load_patient_data). When appState/sensorCtx.inputSource selects a
+ * pre-recorded patient (< NUM_INPUT_PTS), the live AS7058 FIFO samples are
+ * discarded and the same NUMBER of samples is substituted from the canned
+ * stimulus arrays (stimulus.c) -- so playback is paced by the real sensor's
+ * sample clock and flows through the identical downstream pipeline.
+ * inputSource 0 cycles through all patients back-to-back; 1..NUM_INPUT_PTS-1
+ * select a single patient's segment (looped). Stimulus values are already
+ * pipeline-scale: they bypass the live-path AGC clip/rescale.
+ */
+static uint32_t
+load_patient_data(uint32_t reqSamples, uint32_t slot)
+{
+    static size_t _stimulus_slot_idxs[20] = {0};
+    uint32_t numSamples = reqSamples;
+    uint32_t ptSel = (g_sensorCtx != NULL) ? g_sensorCtx->inputSource : 0;
+    float32_t val_f32;
+    size_t ptStart = 0;
+    size_t ptEnd = 0;
+    size_t stimulusIdx = 0;
+
+    for (size_t i = 0; i < numSamples; i++) {
+        stimulusIdx = _stimulus_slot_idxs[slot];
+        // ECG slot
+        if (slot == AS7058_SUB_SAMPLE_ID_ECG_SEQ1_SUB1) {
+            ptStart = ptSel > 0 ? PTS_ECG_DATA_LEN * (ptSel - 1) : 0;
+            ptEnd = ptSel > 0 ? ptStart + PTS_ECG_DATA_LEN : (NUM_INPUT_PTS - 1) * PTS_ECG_DATA_LEN;
+            if (stimulusIdx < ptStart || stimulusIdx >= ptEnd) {
+                stimulusIdx = ptStart;
+            }
+            val_f32 = ecg_stimulus[stimulusIdx];
+            ringbuffer_push(&rbEcgSensor, &val_f32, 1);
+            g_ecg_push_count++;
+        }
+        // PPG slots
+        else if (slot == AS7058_SUB_SAMPLE_ID_PPG1_SUB1 || slot == AS7058_SUB_SAMPLE_ID_PPG1_SUB2) {
+            ptStart = ptSel > 0 ? PTS_PPG_DATA_LEN * (ptSel - 1) : 0;
+            ptEnd = ptSel > 0 ? ptStart + PTS_PPG_DATA_LEN : (NUM_INPUT_PTS - 1) * PTS_PPG_DATA_LEN;
+            if (stimulusIdx < ptStart || stimulusIdx >= ptEnd) {
+                stimulusIdx = ptStart;
+            }
+            if (slot == AS7058_SUB_SAMPLE_ID_PPG1_SUB1) {
+                val_f32 = ppg1_stimulus[stimulusIdx];
+                val_f32 += ppg_stim_gaussian_noise(PPG_STIM_GAUSS_STD);
+                ringbuffer_push(&rbPpg1Sensor, &val_f32, 1);
+            } else {
+                val_f32 = ppg2_stimulus[stimulusIdx];
+                val_f32 += ppg_stim_gaussian_noise(PPG_STIM_GAUSS_STD);
+                ringbuffer_push(&rbPpg2Sensor, &val_f32, 1);
+            }
+            g_ppg_push_count++;
+        }
+        stimulusIdx++;
+        _stimulus_slot_idxs[slot] = stimulusIdx;
+    }
+    return numSamples;
+}
+
+static inline bool
+sensor_live_mode(void)
+{
+    return (g_sensorCtx == NULL) || (g_sensorCtx->inputSource == LIVE_INPUT_MODE);
+}
 
 /*
  * GPIO/IRQ wiring for the AS7058 INT pin. nsx-gpio owns pin config, IRQ
@@ -186,24 +275,30 @@ sensor_as7058_callback(err_code_t error,
     result = as7058_extract_samples(AS7058_SUB_SAMPLE_ID_PPG1_SUB1, p_fifo_data, fifo_data_size, samples,
                                      &sample_cnt, (as7058_extract_metadata_t *)&g_extract_metadata);
     if (result == ERR_SUCCESS && sample_cnt > 0) {
-        for (uint16_t i = 0; i < sample_cnt; i++) {
-            /* Raw AS7058 PPG counts run ~10^5-10^6 (PPG_AGC_MIN..PPG_AGC_MAX,
-             * constants.h). Clip to the AGC operating range and rescale down
-             * to a small int16-friendly span -- matches legacy sensor.c's
-             * per-sample CLIP/-=/ /=16 exactly. Without this, raw counts
-             * blow past int16 range downstream (TX packing, DSP windows),
-             * which is what made the live PPG waveform look flat/dead
-             * except for large step artifacts on full cover/uncover. */
-            float32_t val = (float32_t)samples[i];
-            val = CLIP(val, PPG_AGC_MIN, PPG_AGC_MAX);
-            val -= PPG_AGC_MIN;
-            val /= 16.0f;
-            samples_f32[i] = val;
-        }
-        pushed = ringbuffer_push(&rbPpg1Sensor, samples_f32, sample_cnt);
-        g_ppg_push_count += (uint32_t)pushed;
-        if (pushed < sample_cnt) {
-            g_ppg_drop_count += (uint32_t)(sample_cnt - pushed);
+        if (!sensor_live_mode()) {
+            /* Canned patient mode: substitute the same number of samples from
+             * the stimulus arrays (paced by the live sensor's sample clock). */
+            load_patient_data(sample_cnt, AS7058_SUB_SAMPLE_ID_PPG1_SUB1);
+        } else {
+            for (uint16_t i = 0; i < sample_cnt; i++) {
+                /* Raw AS7058 PPG counts run ~10^5-10^6 (PPG_AGC_MIN..PPG_AGC_MAX,
+                 * constants.h). Clip to the AGC operating range and rescale down
+                 * to a small int16-friendly span -- matches legacy sensor.c's
+                 * per-sample CLIP/-=/ /=16 exactly. Without this, raw counts
+                 * blow past int16 range downstream (TX packing, DSP windows),
+                 * which is what made the live PPG waveform look flat/dead
+                 * except for large step artifacts on full cover/uncover. */
+                float32_t val = (float32_t)samples[i];
+                val = CLIP(val, PPG_AGC_MIN, PPG_AGC_MAX);
+                val -= PPG_AGC_MIN;
+                val /= 16.0f;
+                samples_f32[i] = val;
+            }
+            pushed = ringbuffer_push(&rbPpg1Sensor, samples_f32, sample_cnt);
+            g_ppg_push_count += (uint32_t)pushed;
+            if (pushed < sample_cnt) {
+                g_ppg_drop_count += (uint32_t)(sample_cnt - pushed);
+            }
         }
     }
 
@@ -213,17 +308,21 @@ sensor_as7058_callback(err_code_t error,
     result = as7058_extract_samples(AS7058_SUB_SAMPLE_ID_PPG1_SUB2, p_fifo_data, fifo_data_size, samples,
                                      &sample_cnt, (as7058_extract_metadata_t *)&g_extract_metadata);
     if (result == ERR_SUCCESS && sample_cnt > 0) {
-        for (uint16_t i = 0; i < sample_cnt; i++) {
-            float32_t val = (float32_t)samples[i];
-            val = CLIP(val, PPG_AGC_MIN, PPG_AGC_MAX);
-            val -= PPG_AGC_MIN;
-            val /= 16.0f;
-            samples_f32[i] = val;
-        }
-        pushed = ringbuffer_push(&rbPpg2Sensor, samples_f32, sample_cnt);
-        g_ppg_push_count += (uint32_t)pushed;
-        if (pushed < sample_cnt) {
-            g_ppg_drop_count += (uint32_t)(sample_cnt - pushed);
+        if (!sensor_live_mode()) {
+            load_patient_data(sample_cnt, AS7058_SUB_SAMPLE_ID_PPG1_SUB2);
+        } else {
+            for (uint16_t i = 0; i < sample_cnt; i++) {
+                float32_t val = (float32_t)samples[i];
+                val = CLIP(val, PPG_AGC_MIN, PPG_AGC_MAX);
+                val -= PPG_AGC_MIN;
+                val /= 16.0f;
+                samples_f32[i] = val;
+            }
+            pushed = ringbuffer_push(&rbPpg2Sensor, samples_f32, sample_cnt);
+            g_ppg_push_count += (uint32_t)pushed;
+            if (pushed < sample_cnt) {
+                g_ppg_drop_count += (uint32_t)(sample_cnt - pushed);
+            }
         }
     }
 
@@ -232,13 +331,17 @@ sensor_as7058_callback(err_code_t error,
     result = as7058_extract_samples(AS7058_SUB_SAMPLE_ID_ECG_SEQ1_SUB1, p_fifo_data, fifo_data_size, samples,
                                      &sample_cnt, (as7058_extract_metadata_t *)&g_extract_metadata);
     if (result == ERR_SUCCESS && sample_cnt > 0) {
-        for (uint16_t i = 0; i < sample_cnt; i++) {
-            samples_f32[i] = (float)samples[i];
-        }
-        pushed = ringbuffer_push(&rbEcgSensor, samples_f32, sample_cnt);
-        g_ecg_push_count += (uint32_t)pushed;
-        if (pushed < sample_cnt) {
-            g_ecg_drop_count += (uint32_t)(sample_cnt - pushed);
+        if (!sensor_live_mode()) {
+            load_patient_data(sample_cnt, AS7058_SUB_SAMPLE_ID_ECG_SEQ1_SUB1);
+        } else {
+            for (uint16_t i = 0; i < sample_cnt; i++) {
+                samples_f32[i] = (float)samples[i];
+            }
+            pushed = ringbuffer_push(&rbEcgSensor, samples_f32, sample_cnt);
+            g_ecg_push_count += (uint32_t)pushed;
+            if (pushed < sample_cnt) {
+                g_ecg_drop_count += (uint32_t)(sample_cnt - pushed);
+            }
         }
     }
 }
