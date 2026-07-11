@@ -509,27 +509,18 @@ ble_bringup_uio_update_cb(const uint8_t *data, uint32_t length)
  * enqueue-based send_uio_state()).
  */
 static volatile uint8_t g_uio_pending = 0;
+static volatile uint32_t g_uio_rx_count = 0;
 static uint8_t g_uio_rx_buf[8];
 
 static void
 received_uio_state(const uint8_t *data, uint32_t length)
 {
-    /* Always-on breadcrumb confirming host UIO writes actually reach and
-     * are correctly framed by the time they get here -- this is the ISR
-     * callback nsx-tileio-usb invokes once it has reconstructed a full,
-     * CRC-valid UIO packet from the host's raw byte stream (see tio_usb.c),
-     * so seeing this fire is proof positive the write was received intact.
-     * Useful for diagnosing "web app selections don't seem to take effect"
-     * reports without needing a hardware protocol analyzer. */
-    nsx_printf("[uio-rx] received_uio_state len=%lu bytes=%02x %02x %02x %02x %02x %02x %02x %02x\n",
-               (unsigned long)length, length > 0 ? data[0] : 0, length > 1 ? data[1] : 0,
-               length > 2 ? data[2] : 0, length > 3 ? data[3] : 0, length > 4 ? data[4] : 0,
-               length > 5 ? data[5] : 0, length > 6 ? data[6] : 0, length > 7 ? data[7] : 0);
     if (length < 8) {
         return;
     }
     memcpy(g_uio_rx_buf, data, 8);
     __asm volatile("" ::: "memory");
+    g_uio_rx_count++;
     g_uio_pending = 1;
 }
 
@@ -1180,8 +1171,9 @@ ReportTask(void *pvParameters)
          * slot (0=ECG,1=PPG,2=CPU) nodata=numSamples==0 early-return count,
          * ok=successfully enqueued, fail=enqueue attempted but queue was
          * full, packfail=tio_usb_pack_slot_data() itself rejected the call. */
-        nsx_printf("[tio] ecg(nodata=%lu ok=%lu fail=%lu packfail=%lu) ppg(nodata=%lu ok=%lu fail=%lu packfail=%lu) "
+        nsx_printf("[tio] uio_rx=%lu ecg(nodata=%lu ok=%lu fail=%lu packfail=%lu) ppg(nodata=%lu ok=%lu fail=%lu packfail=%lu) "
                    "cpu(nodata=%lu ok=%lu fail=%lu packfail=%lu)\n",
+                   (unsigned long)g_uio_rx_count,
                    (unsigned long)g_tio_nodata[0], (unsigned long)g_tio_enqueue_ok[0], (unsigned long)g_tio_enqueue_fail[0],
                    (unsigned long)g_tio_pack_fail[0], (unsigned long)g_tio_nodata[1], (unsigned long)g_tio_enqueue_ok[1],
                    (unsigned long)g_tio_enqueue_fail[1], (unsigned long)g_tio_pack_fail[1], (unsigned long)g_tio_nodata[2],
