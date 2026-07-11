@@ -30,9 +30,10 @@ Protocol: modules/nsx-tileio/modules/nsx-tileio-usb/src/tio_usb.c
     rather than teaching the firmware to parse it.)
 
 IMPORTANT: the device only starts streaming (tio_usb_tx_available()) once it
-has received at least one vendor OUT write from the host -- this tool
-writes a "kick" packet (a UIO-state echo request) before reading, exactly
-like a real dashboard connecting.
+has received at least one vendor OUT write from the host -- this tool writes a
+zero-length UIO state-request packet before reading, exactly like a real
+dashboard connecting. An eight-byte all-zero UIO packet is a state update, not
+a request.
 
 Requires: pip install pyusb, and a libusb backend (libusb-1.0) installed.
 On macOS: brew install libusb
@@ -209,14 +210,12 @@ def main():
     usb.util.claim_interface(dev, intf_num)
     try:
         if not args.no_kick:
-            # Wake up TileIO TX: the device only marks the vendor channel
-            # "connected" (and starts streaming) after it observes any
-            # vendor OUT traffic. Send a harmless UIO-state echo request
-            # (slot 0, type 2, 8 zero bytes) as a single raw write, exactly
-            # like a real host dashboard write.
-            kick = pack_packet(0, 2, bytes(8))
+            # Wake up TileIO TX and request its current state. A zero-length
+            # UIO frame is a request; an eight-byte all-zero frame would
+            # overwrite the device state.
+            kick = pack_packet(0, 2, bytes())
             ep_out.write(kick, timeout=args.timeout_ms)
-            print("sent wake-up UIO packet")
+            print("sent UIO state request")
 
         rx_buf = bytearray()
         packet_count = 0

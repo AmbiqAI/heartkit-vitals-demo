@@ -503,19 +503,24 @@ ble_bringup_uio_update_cb(const uint8_t *data, uint32_t length)
  * and never re-armed, the sensor stops interrupting permanently -- observed
  * as isr/push counters freezing at the exact "host connected" moment.
  *
- * Fix: do nothing here but copy the 8 bytes and set a flag; TioProcessTask
- * applies the settings and enqueues the echo in task context (echo goes
- * through the ISR-safe TX queue like every other packet, matching legacy's
- * enqueue-based send_uio_state()).
+ * Fix: do nothing here but latch a state update or state-request flag;
+ * TioProcessTask applies settings and enqueues replies in task context.
  */
 static volatile uint8_t g_uio_pending = 0;
+static volatile uint8_t g_uio_state_request_pending = 0;
 static volatile uint32_t g_uio_rx_count = 0;
 static uint8_t g_uio_rx_buf[8];
 
 static void
 received_uio_state(const uint8_t *data, uint32_t length)
 {
-    if (length < 8) {
+    /* A zero-length UIO frame asks for the current state. It is distinct from
+     * a valid all-zero eight-byte state update. */
+    if (length == 0) {
+        g_uio_state_request_pending = 1;
+        return;
+    }
+    if (length != 8) {
         return;
     }
     memcpy(g_uio_rx_buf, data, 8);
@@ -1093,6 +1098,10 @@ TioProcessTask(void *pvParameters)
     uint8_t packet[TIO_USB_PACKET_LEN];
     while (true) {
         check_tio_state();
+        if (g_uio_state_request_pending) {
+            g_uio_state_request_pending = 0;
+            send_uio_state();
+        }
         /* Host UIO writes are only latched (flag+copy) in the ISR-context
          * callback; apply them here in task context. */
         apply_pending_uio_state();
