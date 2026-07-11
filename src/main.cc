@@ -1190,7 +1190,8 @@ ReportTask(void *pvParameters)
 {
     (void)pvParameters;
     while (true) {
-        /* Always-on sensor breadcrumbs (not gated behind EN_APP_DEBUG_LOGS):
+#if EN_APP_DEBUG_LOGS
+        /* Debug sensor breadcrumbs:
          * confirms the AS7058 INT ISR is firing and both PPG channels +
          * ECG are actually flowing into their ringbuffers, useful for
          * verifying sensor bring-up on new hardware/profile changes. */
@@ -1250,6 +1251,7 @@ ReportTask(void *pvParameters)
                    (int)(fabsf(ppgMetResults.pr - (int)ppgMetResults.pr) * 100), (int)ppgMetResults.spo2,
                    (int)(fabsf(ppgMetResults.spo2 - (int)ppgMetResults.spo2) * 100), (int)ppgMetResults.qos,
                    (int)(fabsf(ppgMetResults.qos - (int)ppgMetResults.qos) * 100));
+#endif
 
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
