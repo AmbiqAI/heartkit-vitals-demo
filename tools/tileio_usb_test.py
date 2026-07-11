@@ -64,7 +64,11 @@ CRC_INIT = 0xEF4A
 CRC_POLY = 0x1021
 
 SLOT_NAMES = {0: "ECG", 1: "PPG", 2: "CPU"}
-TYPE_NAMES = {0: "signal", 1: "metrics", 2: "uio"}
+TYPE_NAMES = {0: "signal", 1: "metrics", 2: "uio", 3: "timed-signal"}
+
+TIMED_SIGNAL_MAGIC = b"TS"
+TIMED_SIGNAL_VERSION = 1
+TIMED_SIGNAL_HEADER_LEN = 12
 
 ECG_METRICS_FMT = "<11f"  # hr, hrv, denoiseCossim, arrLabel, denoiseIps, segmentIps,
                           # arrhythmiaIps, qos, denoiseuIpspw, segmentuIpspw, arrhythmiaIpspw
@@ -156,6 +160,20 @@ def describe_metrics(slot: int, data: bytes) -> str:
     return f"{len(data)} raw bytes: {data[:16].hex()}..."
 
 
+def describe_timed_signal(data: bytes) -> str:
+    """Return source-clock metadata for a version-1 timed signal frame."""
+    if len(data) < TIMED_SIGNAL_HEADER_LEN:
+        return f"invalid header: {len(data)} bytes"
+    if data[:2] != TIMED_SIGNAL_MAGIC or data[2] != TIMED_SIGNAL_VERSION:
+        return f"unknown timed-signal format: {data[:16].hex()}"
+    source_ms, sequence, sample_len = struct.unpack_from("<IHH", data, 4)
+    actual_len = len(data) - TIMED_SIGNAL_HEADER_LEN
+    if sample_len != actual_len:
+        return (f"invalid payload: source_ms={source_ms} seq={sequence} "
+                f"declared={sample_len} actual={actual_len}")
+    return f"source_ms={source_ms} seq={sequence} sample_bytes={sample_len}"
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--vid", type=lambda x: int(x, 0), default=VENDOR_ID, help="USB vendor ID (default 0xCAFE)")
@@ -165,6 +183,8 @@ def main():
     parser.add_argument("--duration", type=float, default=10.0, help="seconds to read (0 = run forever)")
     parser.add_argument("--no-kick", action="store_true",
                          help="don't send the wake-up packet first (device will likely stay silent)")
+    parser.add_argument("--uio-state", metavar="HEX", default=None,
+                        help="send an eight-byte UIO state after wake-up, for example 0600000000020202 for live input")
     parser.add_argument("--timeout-ms", type=int, default=2000, help="bulk read timeout in ms")
     parser.add_argument("--raw", action="store_true", help="print every packet's raw slot/type/data")
     args = parser.parse_args()
@@ -216,6 +236,15 @@ def main():
             kick = pack_packet(0, 2, bytes())
             ep_out.write(kick, timeout=args.timeout_ms)
             print("sent UIO state request")
+        if args.uio_state is not None:
+            try:
+                state = bytes.fromhex(args.uio_state)
+            except ValueError as exc:
+                parser.error(f"invalid --uio-state hex: {exc}")
+            if len(state) != 8:
+                parser.error("--uio-state must encode exactly eight bytes")
+            ep_out.write(pack_packet(0, 2, state), timeout=args.timeout_ms)
+            print(f"sent UIO state update: {state.hex()}")
 
         rx_buf = bytearray()
         packet_count = 0
@@ -260,7 +289,9 @@ def main():
                     print(f"#{packet_count} {slot_name} metrics: {describe_metrics(slot, data)}")
                 elif slot_type == 2:  # uio echo
                     print(f"#{packet_count} uio echo: {data.hex()}")
-                # signal (type 0) frames arrive at high rate -- summarized in the footer only.
+                elif slot_type == 3:  # timed signal
+                    print(f"#{packet_count} {slot_name} timed signal: {describe_timed_signal(data)}")
+                # Legacy signal (type 0) frames arrive at high rate -- summarized in the footer only.
 
         print(f"\ndone: packets={packet_count} bad={bad_count}")
         for (slot, slot_type), count in sorted(slot_counts.items()):
