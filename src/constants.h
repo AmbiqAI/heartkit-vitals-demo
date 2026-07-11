@@ -148,8 +148,10 @@ extern "C" {
 // Click-board AGC bring-up tuning: narrower/lower target band to reduce oscillation and clipping swings.
 #define PPG_AGC_MIN (180000)
 #define PPG_AGC_MAX (620000)
-// PPG TX gain after centering in send_ppg_signals(); keep at 1.0 for no extra amplification.
+// PPG display conditioning is TX-only; metrics retain the unmodified samples.
 #define PPG_TX_GAIN (1.0f)
+#define PPG_TX_BASELINE_ALPHA (0.01f)
+#define PPG_TX_STEP_THRESHOLD (750.0f)
 // Additional synthetic Gaussian noise (std-dev in ADC counts) for non-live PPG playback.
 #define PPG_STIM_GAUSS_STD (50.0f)
 

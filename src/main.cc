@@ -647,6 +647,36 @@ send_ecg_metrics(void)
     pack_and_enqueue_tio_packet(0, 1, buffer, 11 * sizeof(float32_t));
 }
 
+typedef struct {
+    float32_t baseline;
+    float32_t previous;
+    bool initialized;
+} ppg_tx_display_state_t;
+
+static ppg_tx_display_state_t g_ppg_tx_display[2] = {0};
+
+/* Remove DC drift from the display only. A large single-sample change is an
+ * AGC LED-current step, so rebase immediately instead of drawing it as a
+ * discontinuity in the browser waveform. */
+static float32_t
+ppg_display_sample(ppg_tx_display_state_t *state, float32_t sample)
+{
+    if (!state->initialized) {
+        state->baseline = sample;
+        state->previous = sample;
+        state->initialized = true;
+        return 0.0f;
+    }
+
+    float32_t delta = sample - state->previous;
+    if (fabsf(delta) > PPG_TX_STEP_THRESHOLD) {
+        state->baseline += delta;
+    }
+    state->baseline += PPG_TX_BASELINE_ALPHA * (sample - state->baseline);
+    state->previous = sample;
+    return (sample - state->baseline) * PPG_TX_GAIN;
+}
+
 static void
 send_ppg_signals(void)
 {
@@ -657,12 +687,6 @@ send_ppg_signals(void)
     uint32_t length;
     uint8_t qos = (uint8_t)(ppgMetResults.qos / 25);
     uint16_t mask = (uint16_t)(qos << SIG_MASK_QOS_OFFSET);
-    /* Re-center for display: sensor.c's callback already clips raw AS7058
-     * counts to [PPG_AGC_MIN, PPG_AGC_MAX] and rescales to [0, (MAX-MIN)/16]
-     * (matches legacy). Subtracting the midpoint here (TX-only, doesn't
-     * affect metrics) centers the waveform around 0 for a nicer display,
-     * matching legacy's send_ppg_signals() TX compatibility mapping. */
-    const float32_t ppg_tx_center = ((float32_t)(PPG_AGC_MAX - PPG_AGC_MIN) / 16.0f) * 0.5f;
     size_t numSamples = MIN(ringbuffer_len(&rbPpg1Tx), ringbuffer_len(&rbPpg2Tx));
     if (numSamples == 0) {
         g_tio_nodata[1]++;
@@ -674,12 +698,12 @@ send_ppg_signals(void)
         memcpy(&buffer[length], &mask, sizeof(uint16_t));
         length += sizeof(uint16_t);
         ringbuffer_pop(&rbPpg1Tx, &val1, 1);
-        txVal1 = CLIP((val1 - ppg_tx_center) * PPG_TX_GAIN, -32768.0f, 32767.0f);
+        txVal1 = CLIP(ppg_display_sample(&g_ppg_tx_display[0], val1), -32768.0f, 32767.0f);
         txValI16 = (int16_t)txVal1;
         memcpy(&buffer[length], &txValI16, sizeof(int16_t));
         length += sizeof(int16_t);
         ringbuffer_pop(&rbPpg2Tx, &val2, 1);
-        txVal2 = CLIP((val2 - ppg_tx_center) * PPG_TX_GAIN, -32768.0f, 32767.0f);
+        txVal2 = CLIP(ppg_display_sample(&g_ppg_tx_display[1], val2), -32768.0f, 32767.0f);
         txValI16 = (int16_t)txVal2;
         memcpy(&buffer[length], &txValI16, sizeof(int16_t));
         length += sizeof(int16_t);

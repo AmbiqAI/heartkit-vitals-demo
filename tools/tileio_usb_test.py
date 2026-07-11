@@ -169,6 +169,8 @@ def main():
                         help="send an eight-byte UIO state after wake-up, for example 0600000000020202 for live input")
     parser.add_argument("--timeout-ms", type=int, default=2000, help="bulk read timeout in ms")
     parser.add_argument("--raw", action="store_true", help="print every packet's raw slot/type/data")
+    parser.add_argument("--ppg-stats", action="store_true",
+                        help="summarize PPG signal range, clip-rail hits, and sample-to-sample steps")
     args = parser.parse_args()
 
     if args.list_devices:
@@ -232,6 +234,7 @@ def main():
         packet_count = 0
         bad_count = 0
         slot_counts = {}
+        ppg_samples = [[], []]
         start = time.monotonic()
 
         print("reading... (Ctrl-C to stop)")
@@ -265,6 +268,11 @@ def main():
 
                 slot_name = SLOT_NAMES.get(slot, f"slot{slot}")
                 type_name = TYPE_NAMES.get(slot_type, f"type{slot_type}")
+                if args.ppg_stats and slot == 1 and slot_type == 0:
+                    for offset in range(0, len(data) - 5, 6):
+                        _, red, ir = struct.unpack_from("<Hhh", data, offset)
+                        ppg_samples[0].append(red)
+                        ppg_samples[1].append(ir)
                 if args.raw:
                     print(f"#{packet_count} {slot_name}/{type_name} len={len(data)} data={data.hex()}")
                 elif slot_type == 1:  # metrics
@@ -276,6 +284,18 @@ def main():
         print(f"\ndone: packets={packet_count} bad={bad_count}")
         for (slot, slot_type), count in sorted(slot_counts.items()):
             print(f"  {SLOT_NAMES.get(slot, slot)}/{TYPE_NAMES.get(slot_type, slot_type)}: {count}")
+        if args.ppg_stats:
+            for name, samples in zip(("red", "ir"), ppg_samples):
+                if not samples:
+                    print(f"  PPG {name}: no samples")
+                    continue
+                steps = [abs(b - a) for a, b in zip(samples, samples[1:])]
+                rail_hits = sum(sample in (-13750, 13750) for sample in samples)
+                max_step = max(steps, default=0)
+                mean_step = sum(steps) / len(steps) if steps else 0.0
+                print(f"  PPG {name}: n={len(samples)} range=[{min(samples)}, {max(samples)}] "
+                      f"rail_hits={rail_hits} ({100.0 * rail_hits / len(samples):.1f}%) "
+                      f"mean_step={mean_step:.1f} max_step={max_step}")
     finally:
         usb.util.release_interface(dev, intf_num)
         usb.util.dispose_resources(dev)
