@@ -327,6 +327,30 @@ enqueue_tio_packet(const uint8_t packet[TIO_USB_PACKET_LEN])
     return true;
 }
 
+/* UIO responses unblock host controls. They are only queued from task
+ * context, so put them ahead of waveform backlog and discard one stale
+ * packet if the bounded queue is full. */
+static bool
+enqueue_tio_packet_priority(const uint8_t packet[TIO_USB_PACKET_LEN])
+{
+    uint8_t dropped_packet[TIO_USB_PACKET_LEN];
+
+    if (g_tioTxQueue == NULL) {
+        g_tio_tx_queue_drops++;
+        return false;
+    }
+    if (xQueueSendToFront(g_tioTxQueue, packet, 0) == pdTRUE) {
+        return true;
+    }
+    if (xQueueReceive(g_tioTxQueue, dropped_packet, 0) != pdTRUE ||
+        xQueueSendToFront(g_tioTxQueue, packet, 0) != pdTRUE) {
+        g_tio_tx_queue_drops++;
+        return false;
+    }
+    g_tio_tx_queue_drops++;
+    return true;
+}
+
 static bool
 pack_and_enqueue_tio_packet(uint8_t slot, uint8_t slot_type, const void *payload, uint32_t payload_len)
 {
@@ -347,6 +371,17 @@ pack_and_enqueue_tio_packet(uint8_t slot, uint8_t slot_type, const void *payload
         }
     }
     return ok;
+}
+
+static bool
+pack_and_enqueue_tio_packet_priority(uint8_t slot, uint8_t slot_type, const void *payload, uint32_t payload_len)
+{
+    uint8_t packet[TIO_USB_PACKET_LEN];
+
+    if (tio_usb_pack_slot_data(slot, slot_type, (const uint8_t *)payload, payload_len, packet) != 0) {
+        return false;
+    }
+    return enqueue_tio_packet_priority(packet);
 }
 
 static volatile bool g_tio_available = false;
@@ -455,7 +490,7 @@ send_uio_state(void)
      * retry loops, which is unacceptable from any context TioProcessTask
      * shares with time-critical work (and fatal from ISR context; see
      * received_uio_state below). Matches legacy's send_uio_state(). */
-    pack_and_enqueue_tio_packet(0, 2, uioBuffer, sizeof(uioBuffer));
+    pack_and_enqueue_tio_packet_priority(0, 2, uioBuffer, sizeof(uioBuffer));
 }
 
 static void
