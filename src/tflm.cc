@@ -29,7 +29,15 @@ tflm_init() {
 
     static TflmOpResolver resolver;
 
-    // Add all the ops to the resolver
+    // Add all the general-purpose ops to the resolver (everything the
+    // legacy 113-op resolver registered except the tflm_signal audio
+    // feature-extraction ops -- FilterBank*, Framer, Stacker, PCAN,
+    // OverlapAdd, (I)Rfft, FftAutoScale, Delay, Energy, Window -- and
+    // EthosU (NPU offload), which helia-rt does not build/link for this
+    // CPU-only inference target. None of our ECG models (conv/dense-only
+    // networks) use them; omitting them avoids "undefined reference to
+    // tflite::tflm_signal::Register_*()"/"tflite::Register_ETHOSU()"
+    // link errors.
     resolver.AddAbs();
     resolver.AddAdd();
     resolver.AddAddN();
@@ -49,29 +57,20 @@ tflm_init() {
     resolver.AddConv2D();
     resolver.AddCos();
     resolver.AddCumSum();
-    resolver.AddDelay();
     resolver.AddDepthToSpace();
     resolver.AddDepthwiseConv2D();
     resolver.AddDequantize();
     resolver.AddDetectionPostprocess();
     resolver.AddDiv();
     resolver.AddEmbeddingLookup();
-    resolver.AddEnergy();
     resolver.AddElu();
     resolver.AddEqual();
-    resolver.AddEthosU();
     resolver.AddExp();
     resolver.AddExpandDims();
-    resolver.AddFftAutoScale();
     resolver.AddFill();
-    resolver.AddFilterBank();
-    resolver.AddFilterBankLog();
-    resolver.AddFilterBankSquareRoot();
-    resolver.AddFilterBankSpectralSubtraction();
     resolver.AddFloor();
     resolver.AddFloorDiv();
     resolver.AddFloorMod();
-    resolver.AddFramer();
     resolver.AddFullyConnected();
     resolver.AddGather();
     resolver.AddGatherNd();
@@ -79,7 +78,6 @@ tflm_init() {
     resolver.AddGreaterEqual();
     resolver.AddHardSwish();
     resolver.AddIf();
-    resolver.AddIrfft();
     resolver.AddL2Normalization();
     resolver.AddL2Pool2D();
     resolver.AddLeakyRelu();
@@ -99,11 +97,9 @@ tflm_init() {
     resolver.AddMul();
     resolver.AddNeg();
     resolver.AddNotEqual();
-    resolver.AddOverlapAdd();
     resolver.AddPack();
     resolver.AddPad();
     resolver.AddPadV2();
-    resolver.AddPCAN();
     resolver.AddPrelu();
     resolver.AddQuantize();
     resolver.AddReadVariable();
@@ -113,7 +109,6 @@ tflm_init() {
     resolver.AddReshape();
     resolver.AddResizeBilinear();
     resolver.AddResizeNearestNeighbor();
-    resolver.AddRfft();
     resolver.AddRound();
     resolver.AddRsqrt();
     resolver.AddSelectV2();
@@ -130,7 +125,6 @@ tflm_init() {
     resolver.AddSquare();
     resolver.AddSquaredDifference();
     resolver.AddStridedSlice();
-    resolver.AddStacker();
     resolver.AddSub();
     resolver.AddSum();
     resolver.AddSvdf();
@@ -141,7 +135,6 @@ tflm_init() {
     resolver.AddUnidirectionalSequenceLSTM();
     resolver.AddVarHandle();
     resolver.AddWhile();
-    resolver.AddWindow();
     resolver.AddZerosLike();
 
     appOpResolver = &resolver;

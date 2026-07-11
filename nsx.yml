@@ -1,0 +1,101 @@
+schema_version: 2
+project:
+  name: heartkit-vitals-demo
+target:
+  board: apollo510b_evb
+  soc: apollo510b
+# Explicit multi-target manifest (see neuralspotx docs/architecture/
+# multi-target-portability.md): this app builds identically for all 3
+# Apollo5 EVB variants, but only apollo510b_evb has the EM9305 BLE radio.
+# An explicit `targets:` block (rather than the legacy singular `target:`
+# above, kept for backward compat) is REQUIRED for `nsx build/lock/configure
+# --board <sibling>` to resolve a per-board module closure -- without it,
+# `--board` only changes the CMake board/SoC selection while module
+# resolution silently keeps using the singular `target.board` above for
+# every board, defeating the `modules[].boards:` scoping used below to
+# board-gate nsx-tileio-ble/nsx-ble/nsx-cordio to apollo510b_evb only.
+targets:
+  default: apollo510b_evb
+  supported:
+    apollo510_evb:
+      soc: apollo510
+    apollo510b_evb:
+      soc: apollo510b
+    apollo330mP_evb:
+      soc: apollo330P
+toolchain: arm-none-eabi-gcc
+channel: stable
+profile: apollo510_evb_minimal
+profile_status: active
+modules:
+- name: nsx-freertos
+- name: nsx-usb
+- name: nsx-i2c
+- name: nsx-spi
+- name: nsx-sensors
+- name: nsx-gpio
+- name: nsx-power
+- name: nsx-as7058
+- name: nsx-physiokit
+- name: nsx-helia-rt
+- name: nsx-tileio-usb
+- name: nsx-tileio-ble
+  boards:
+  - apollo510b_evb
+features: {}
+module_registry:
+  projects:
+    nsx-as7058:
+      name: nsx-as7058
+      url: https://github.com/AmbiqAI/nsx-as7058.git
+      revision: main
+      path: modules/nsx-as7058
+    nsx-sensors:
+      name: nsx-sensors
+      url: https://github.com/AmbiqAI/nsx-sensors.git
+      revision: 9a73d590fee7b377011af0b998a7563571acc228
+      path: modules/nsx-sensors
+    nsx-physiokit:
+      name: nsx-physiokit
+      url: https://github.com/AmbiqAI/nsx-physiokit.git
+      revision: main
+      path: modules/nsx-physiokit
+    helia-dsp:
+      name: helia-dsp
+      url: https://github.com/AmbiqAI/helia-dsp.git
+      revision: 9c18599bf7a734f4d9952e891ae42c38010981b8
+      path: modules/helia-dsp
+    nsx-tileio:
+      name: nsx-tileio
+      url: https://github.com/AmbiqAI/nsx-tileio.git
+      revision: 07837ff4ac677dbb902ae4300e4608b81a446c50
+      path: modules/nsx-tileio
+  modules:
+    nsx-as7058:
+      project: nsx-as7058
+      revision: main
+      metadata: modules/nsx-as7058/nsx-module.yaml
+    nsx-sensors:
+      project: nsx-sensors
+      revision: 9a73d590fee7b377011af0b998a7563571acc228
+      metadata: modules/nsx-sensors/nsx-module.yaml
+    nsx-physiokit:
+      project: nsx-physiokit
+      revision: main
+      metadata: modules/nsx-physiokit/nsx-module.yaml
+    helia-dsp:
+      project: helia-dsp
+      revision: 9c18599bf7a734f4d9952e891ae42c38010981b8
+      metadata: modules/helia-dsp/nsx-module.yaml
+    nsx-tileio-usb:
+      project: nsx-tileio
+      revision: 07837ff4ac677dbb902ae4300e4608b81a446c50
+      metadata: modules/nsx-tileio/modules/nsx-tileio-usb/nsx-module.yaml
+    nsx-tileio-ble:
+      project: nsx-tileio
+      revision: 07837ff4ac677dbb902ae4300e4608b81a446c50
+      metadata: modules/nsx-tileio/modules/nsx-tileio-ble/nsx-module.yaml
+tooling:
+  nsx:
+    version: 0.7.3
+    major: 0

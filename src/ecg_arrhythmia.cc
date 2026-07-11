@@ -15,8 +15,8 @@
 #include <cstring>
 // Modules
 #include "pk_ecg.h"
-// neuralSPOT
-#include "ns_ambiqsuite_harness.h"
+// NSX runtime
+#include "nsx_core.h"
 // TFLM
 #include "tensorflow/lite/micro/micro_interpreter.h"
 #include "tensorflow/lite/micro/tflite_bridge/micro_error_reporter.h"
@@ -70,7 +70,7 @@ ecg_arrhythmia_init() {
 
     // Check arena size
     bytesUsed = ctx->interpreter->arena_used_bytes();
-    ns_lp_printf("[ARR] Arena used: %d bytes\n", bytesUsed);
+    nsx_printf("[ARR] Arena used: %d bytes\n", bytesUsed);
     if (bytesUsed > ctx->arenaSize) {
         TF_LITE_REPORT_ERROR(ctx->reporter, "Arena mismatch: given=%d < expected=%d bytes.", ctx->arenaSize, bytesUsed);
         return 1;
@@ -117,7 +117,7 @@ ecg_arrhythmia_inference(float32_t *ecgIn, float32_t threshold) {
     }
     // We use 0 to represent inconclusive
 #if EN_MODEL_VERBOSE_LOGS
-    ns_lp_printf("yMax=%f, yMaxIdx=%d\n", yMax, yMaxIdx);
+    nsx_printf("yMax=%f, yMaxIdx=%d\n", yMax, yMaxIdx);
 #endif
     yMaxIdx = yMax > threshold ? yMaxIdx + 1 : 0;
     return yMaxIdx;

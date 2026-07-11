@@ -328,6 +328,19 @@ extern "C" {
 
 #define RTOS_TIMER (4)
 
+///////////////////////////////////////////////////////////////////////////////
+// App Mode Enums (input source, denoise/segmentation/arrhythmia mode select)
+///////////////////////////////////////////////////////////////////////////////
+
+enum DenoiseMode { DenoiseModeOff, DenoiseModeDsp, DenoiseModeAi };
+typedef enum DenoiseMode DenoiseMode;
+
+enum SegmentationMode { SegmentationModeOff, SegmentationModeDsp, SegmentationModeAi };
+typedef enum SegmentationMode SegmentationMode;
+
+enum ArrhythmiaMode { ArrhythmiaModeOff, ArrhythmiaModeDsp, ArrhythmiaModeAi };
+typedef enum ArrhythmiaMode ArrhythmiaMode;
+
 #ifndef MIN
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #endif
