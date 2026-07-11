@@ -68,7 +68,7 @@ module_registry:
     nsx-tileio:
       name: nsx-tileio
       url: https://github.com/AmbiqAI/nsx-tileio.git
-      revision: 0841c75baab7418ae94e7774651ce1221f076040
+      revision: 013df3ed1b192bee6910d8d09a768e4e0394e1a5
       path: modules/nsx-tileio
   modules:
     nsx-as7058:
@@ -89,11 +89,11 @@ module_registry:
       metadata: modules/helia-dsp/nsx-module.yaml
     nsx-tileio-usb:
       project: nsx-tileio
-      revision: 0841c75baab7418ae94e7774651ce1221f076040
+      revision: 013df3ed1b192bee6910d8d09a768e4e0394e1a5
       metadata: modules/nsx-tileio/modules/nsx-tileio-usb/nsx-module.yaml
     nsx-tileio-ble:
       project: nsx-tileio
-      revision: 0841c75baab7418ae94e7774651ce1221f076040
+      revision: 013df3ed1b192bee6910d8d09a768e4e0394e1a5
       metadata: modules/nsx-tileio/modules/nsx-tileio-ble/nsx-module.yaml
 tooling:
   nsx:

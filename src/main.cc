@@ -299,24 +299,7 @@ service_cpu_flush_request(void)
 static volatile uint32_t g_tio_enqueue_ok[3] = {0};
 static volatile uint32_t g_tio_enqueue_fail[3] = {0};
 static volatile uint32_t g_tio_pack_fail[3] = {0};
-static volatile uint32_t g_tio_stale_drop[3] = {0};
 
-#define TIO_SLOT_TYPE_SIGNAL 0u
-#define TIO_SLOT_TYPE_TIMED_SIGNAL 3u
-#define TIO_TIMED_SIGNAL_MAGIC0 0x54u
-#define TIO_TIMED_SIGNAL_MAGIC1 0x53u
-#define TIO_TIMED_SIGNAL_VERSION 1u
-#define TIO_TIMED_SIGNAL_HEADER_LEN 12u
-#define TIO_TIMED_SIGNAL_MAX_SAMPLE_BYTES (240u - TIO_TIMED_SIGNAL_HEADER_LEN)
-/* Allow a short post-connect producer backlog. The host re-anchors its
- * playout clock from the first accepted source timestamp, so accepting a
- * frame up to two seconds old never renders stale wall-clock data. */
-#define TIO_TIMED_SIGNAL_STALE_MS 2000u
-#define TIO_PACKET_TYPE_IDX 2u
-#define TIO_PACKET_DLEN_IDX 3u
-#define TIO_PACKET_DATA_IDX 5u
-
-static uint16_t g_tio_signal_sequence[3] = {0};
 
 static bool
 enqueue_tio_packet(const uint8_t packet[TIO_USB_PACKET_LEN])
@@ -364,31 +347,6 @@ pack_and_enqueue_tio_packet(uint8_t slot, uint8_t slot_type, const void *payload
         }
     }
     return ok;
-}
-
-static bool
-pack_and_enqueue_timed_signal_packet(uint8_t slot, const void *samples, uint16_t sample_len)
-{
-    uint8_t payload[240];
-    uint32_t source_ms;
-    uint16_t sequence;
-
-    if (slot >= 3 || samples == NULL || sample_len > TIO_TIMED_SIGNAL_MAX_SAMPLE_BYTES) {
-        return false;
-    }
-
-    source_ms = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
-    sequence = g_tio_signal_sequence[slot]++;
-    payload[0] = TIO_TIMED_SIGNAL_MAGIC0;
-    payload[1] = TIO_TIMED_SIGNAL_MAGIC1;
-    payload[2] = TIO_TIMED_SIGNAL_VERSION;
-    payload[3] = 0u;
-    memcpy(payload + 4u, &source_ms, sizeof(source_ms));
-    memcpy(payload + 8u, &sequence, sizeof(sequence));
-    memcpy(payload + 10u, &sample_len, sizeof(sample_len));
-    memcpy(payload + TIO_TIMED_SIGNAL_HEADER_LEN, samples, sample_len);
-    return pack_and_enqueue_tio_packet(slot, TIO_SLOT_TYPE_TIMED_SIGNAL, payload,
-                                       TIO_TIMED_SIGNAL_HEADER_LEN + sample_len);
 }
 
 static volatile bool g_tio_available = false;
@@ -618,7 +576,7 @@ send_ecg_signals(void)
         g_tio_nodata[0]++;
         return;
     }
-    numSamples = MIN(numSamples, TIO_TIMED_SIGNAL_MAX_SAMPLE_BYTES / (3 * sizeof(int16_t)));
+    numSamples = MIN(numSamples, sizeof(buffer) / (3 * sizeof(int16_t)));
     length = 0;
     for (size_t i = 0; i < numSamples; i++) {
         ringbuffer_pop(&rbEcgMaskTx, &maskVal, 1);
@@ -633,7 +591,7 @@ send_ecg_signals(void)
         memcpy(&buffer[length], &txVal, sizeof(int16_t));
         length += sizeof(int16_t);
     }
-    pack_and_enqueue_timed_signal_packet(0, buffer, (uint16_t)length);
+    pack_and_enqueue_tio_packet(0, 0, buffer, length);
 }
 
 static void
@@ -675,7 +633,7 @@ send_ppg_signals(void)
         g_tio_nodata[1]++;
         return;
     }
-    numSamples = MIN(numSamples, TIO_TIMED_SIGNAL_MAX_SAMPLE_BYTES / (sizeof(uint16_t) + 2 * sizeof(int16_t)));
+    numSamples = MIN(numSamples, sizeof(buffer) / (sizeof(uint16_t) + 2 * sizeof(int16_t)));
     length = 0;
     for (size_t i = 0; i < numSamples; i++) {
         memcpy(&buffer[length], &mask, sizeof(uint16_t));
@@ -691,7 +649,7 @@ send_ppg_signals(void)
         memcpy(&buffer[length], &txValI16, sizeof(int16_t));
         length += sizeof(int16_t);
     }
-    pack_and_enqueue_timed_signal_packet(1, buffer, (uint16_t)length);
+    pack_and_enqueue_tio_packet(1, 0, buffer, length);
 }
 
 static void
@@ -716,7 +674,7 @@ send_cpu_signals(void)
         g_tio_nodata[2]++;
         return;
     }
-    numSamples = MIN(numSamples, TIO_TIMED_SIGNAL_MAX_SAMPLE_BYTES / (sizeof(uint16_t) + 3 * sizeof(float32_t)));
+    numSamples = MIN(numSamples, sizeof(buffer) / (sizeof(uint16_t) + 3 * sizeof(float32_t)));
     length = 0;
     for (size_t i = 0; i < numSamples; i++) {
         memcpy(&buffer[length], &mask, sizeof(uint16_t));
@@ -731,37 +689,7 @@ send_cpu_signals(void)
         memcpy(&buffer[length], &val, sizeof(float32_t));
         length += sizeof(float32_t);
     }
-    pack_and_enqueue_timed_signal_packet(2, buffer, (uint16_t)length);
-}
-
-static bool
-tio_timed_signal_is_stale(const uint8_t packet[TIO_USB_PACKET_LEN])
-{
-    uint16_t length;
-    uint32_t source_ms;
-    uint32_t now_ms;
-    uint8_t slot;
-
-    if (packet[TIO_PACKET_TYPE_IDX] != TIO_SLOT_TYPE_TIMED_SIGNAL) {
-        return false;
-    }
-    length = (uint16_t)packet[TIO_PACKET_DLEN_IDX] |
-             ((uint16_t)packet[TIO_PACKET_DLEN_IDX + 1u] << 8);
-    if (length < TIO_TIMED_SIGNAL_HEADER_LEN ||
-        packet[TIO_PACKET_DATA_IDX] != TIO_TIMED_SIGNAL_MAGIC0 ||
-        packet[TIO_PACKET_DATA_IDX + 1u] != TIO_TIMED_SIGNAL_MAGIC1) {
-        return false;
-    }
-    memcpy(&source_ms, packet + TIO_PACKET_DATA_IDX + 4u, sizeof(source_ms));
-    now_ms = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
-    if ((uint32_t)(now_ms - source_ms) <= TIO_TIMED_SIGNAL_STALE_MS) {
-        return false;
-    }
-    slot = packet[1u];
-    if (slot < 3u) {
-        g_tio_stale_drop[slot]++;
-    }
-    return true;
+    pack_and_enqueue_tio_packet(2, 0, buffer, length);
 }
 
 static void
@@ -1204,9 +1132,6 @@ TioProcessTask(void *pvParameters)
             continue;
         }
         if (xQueueReceive(g_tioTxQueue, packet, kTioTxTaskPollTicks) == pdTRUE) {
-            if (tio_timed_signal_is_stale(packet)) {
-                continue;
-            }
             if (usbReady) {
                 tio_usb_send_slot_packet(packet, TIO_USB_PACKET_LEN);
             }
@@ -1217,11 +1142,6 @@ TioProcessTask(void *pvParameters)
                 ble_bringup_send_slot_packet(packet, TIO_USB_PACKET_LEN);
             }
 #endif
-            if (packet[TIO_PACKET_TYPE_IDX] == TIO_SLOT_TYPE_TIMED_SIGNAL) {
-                /* Smooth producer-aligned 100 ms bursts without delaying
-                 * UIO or metric packets. */
-                vTaskDelay(pdMS_TO_TICKS(5));
-            }
         }
     }
 }
@@ -1261,14 +1181,13 @@ ReportTask(void *pvParameters)
          * slot (0=ECG,1=PPG,2=CPU) nodata=numSamples==0 early-return count,
          * ok=successfully enqueued, fail=enqueue attempted but queue was
          * full, packfail=tio_usb_pack_slot_data() itself rejected the call. */
-        nsx_printf("[tio] uio_rx=%lu ecg(nodata=%lu ok=%lu fail=%lu packfail=%lu stale=%lu) ppg(nodata=%lu ok=%lu fail=%lu packfail=%lu stale=%lu) "
-                   "cpu(nodata=%lu ok=%lu fail=%lu packfail=%lu stale=%lu)\n",
+        nsx_printf("[tio] uio_rx=%lu ecg(nodata=%lu ok=%lu fail=%lu packfail=%lu) ppg(nodata=%lu ok=%lu fail=%lu packfail=%lu) "
+                   "cpu(nodata=%lu ok=%lu fail=%lu packfail=%lu)\n",
                    (unsigned long)g_uio_rx_count,
                    (unsigned long)g_tio_nodata[0], (unsigned long)g_tio_enqueue_ok[0], (unsigned long)g_tio_enqueue_fail[0],
-                   (unsigned long)g_tio_pack_fail[0], (unsigned long)g_tio_stale_drop[0], (unsigned long)g_tio_nodata[1],
-                   (unsigned long)g_tio_enqueue_ok[1], (unsigned long)g_tio_enqueue_fail[1], (unsigned long)g_tio_pack_fail[1],
-                   (unsigned long)g_tio_stale_drop[1], (unsigned long)g_tio_nodata[2], (unsigned long)g_tio_enqueue_ok[2],
-                   (unsigned long)g_tio_enqueue_fail[2], (unsigned long)g_tio_pack_fail[2], (unsigned long)g_tio_stale_drop[2]);
+                   (unsigned long)g_tio_pack_fail[0], (unsigned long)g_tio_nodata[1], (unsigned long)g_tio_enqueue_ok[1],
+                   (unsigned long)g_tio_enqueue_fail[1], (unsigned long)g_tio_pack_fail[1], (unsigned long)g_tio_nodata[2],
+                   (unsigned long)g_tio_enqueue_ok[2], (unsigned long)g_tio_enqueue_fail[2], (unsigned long)g_tio_pack_fail[2]);
         /* TEMP diagnostic: instantaneous ring-buffer occupancy at the exact
          * moment ReportTask samples it -- if these are chronically 0, the
          * producer (EcgProcessTask/PpgProcessTask segmentation/downsample

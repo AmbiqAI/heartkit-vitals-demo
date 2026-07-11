@@ -3,12 +3,12 @@
 schema_version: 4
 targets:
   apollo510b_evb:
-    generated_at: '2026-07-11T22:05:17+00:00'
+    generated_at: '2026-07-11T22:13:37+00:00'
     nsx_tool:
       version: 0.1.0
     manifest:
       path: nsx.yml
-      hash: sha256:500fa2d3b8043f4d6cbf0cf40e24fadb0e7bce695f2abca2682b5f6a6cf9e67b
+      hash: sha256:fc05bee6eda364a101b4a38e0735c4f072df5586064082db89eaf11008938f59
     target:
       board: apollo510b_evb
       soc: apollo510b
@@ -267,13 +267,13 @@ targets:
       nsx-tileio-usb:
         project: nsx-tileio
         kind: git
-        constraint: 0841c75baab7418ae94e7774651ce1221f076040
+        constraint: 013df3ed1b192bee6910d8d09a768e4e0394e1a5
         resolved:
           url: https://github.com/AmbiqAI/nsx-tileio.git
-          commit: 0841c75baab7418ae94e7774651ce1221f076040
+          commit: 013df3ed1b192bee6910d8d09a768e4e0394e1a5
           vendored_at: modules/nsx-tileio
-          content_hash: sha256:02b146ced0931eb3b011ee69979a10a184e77ae7ef4f2430655af660b4dd75ab
-          acquired_at: '2026-07-11T22:05:18+00:00'
+          content_hash: sha256:552e952f2869f1c6a552077a2f3cbccbb4bf304e8f9a949a2839244b1edd6c92
+          acquired_at: '2026-07-11T22:13:39+00:00'
       nsx-cordio:
         project: nsx-ambiq-sdk
         kind: git
@@ -297,20 +297,20 @@ targets:
       nsx-tileio-ble:
         project: nsx-tileio
         kind: git
-        constraint: 0841c75baab7418ae94e7774651ce1221f076040
+        constraint: 013df3ed1b192bee6910d8d09a768e4e0394e1a5
         resolved:
           url: https://github.com/AmbiqAI/nsx-tileio.git
-          commit: 0841c75baab7418ae94e7774651ce1221f076040
+          commit: 013df3ed1b192bee6910d8d09a768e4e0394e1a5
           vendored_at: modules/nsx-tileio
-          content_hash: sha256:02b146ced0931eb3b011ee69979a10a184e77ae7ef4f2430655af660b4dd75ab
-          acquired_at: '2026-07-11T22:05:18+00:00'
+          content_hash: sha256:552e952f2869f1c6a552077a2f3cbccbb4bf304e8f9a949a2839244b1edd6c92
+          acquired_at: '2026-07-11T22:13:39+00:00'
   apollo510_evb:
-    generated_at: '2026-07-11T22:05:18+00:00'
+    generated_at: '2026-07-11T22:13:39+00:00'
     nsx_tool:
       version: 0.1.0
     manifest:
       path: nsx.yml
-      hash: sha256:500fa2d3b8043f4d6cbf0cf40e24fadb0e7bce695f2abca2682b5f6a6cf9e67b
+      hash: sha256:fc05bee6eda364a101b4a38e0735c4f072df5586064082db89eaf11008938f59
     target:
       board: apollo510_evb
       soc: apollo510
@@ -569,20 +569,20 @@ targets:
       nsx-tileio-usb:
         project: nsx-tileio
         kind: git
-        constraint: 0841c75baab7418ae94e7774651ce1221f076040
+        constraint: 013df3ed1b192bee6910d8d09a768e4e0394e1a5
         resolved:
           url: https://github.com/AmbiqAI/nsx-tileio.git
-          commit: 0841c75baab7418ae94e7774651ce1221f076040
+          commit: 013df3ed1b192bee6910d8d09a768e4e0394e1a5
           vendored_at: modules/nsx-tileio
-          content_hash: sha256:02b146ced0931eb3b011ee69979a10a184e77ae7ef4f2430655af660b4dd75ab
-          acquired_at: '2026-07-11T22:05:18+00:00'
+          content_hash: sha256:552e952f2869f1c6a552077a2f3cbccbb4bf304e8f9a949a2839244b1edd6c92
+          acquired_at: '2026-07-11T22:13:39+00:00'
   apollo330mP_evb:
-    generated_at: '2026-07-11T22:05:19+00:00'
+    generated_at: '2026-07-11T22:13:39+00:00'
     nsx_tool:
       version: 0.1.0
     manifest:
       path: nsx.yml
-      hash: sha256:500fa2d3b8043f4d6cbf0cf40e24fadb0e7bce695f2abca2682b5f6a6cf9e67b
+      hash: sha256:fc05bee6eda364a101b4a38e0735c4f072df5586064082db89eaf11008938f59
     target:
       board: apollo330mP_evb
       soc: apollo330P
@@ -841,10 +841,10 @@ targets:
       nsx-tileio-usb:
         project: nsx-tileio
         kind: git
-        constraint: 0841c75baab7418ae94e7774651ce1221f076040
+        constraint: 013df3ed1b192bee6910d8d09a768e4e0394e1a5
         resolved:
           url: https://github.com/AmbiqAI/nsx-tileio.git
-          commit: 0841c75baab7418ae94e7774651ce1221f076040
+          commit: 013df3ed1b192bee6910d8d09a768e4e0394e1a5
           vendored_at: modules/nsx-tileio
-          content_hash: sha256:02b146ced0931eb3b011ee69979a10a184e77ae7ef4f2430655af660b4dd75ab
-          acquired_at: '2026-07-11T22:05:19+00:00'
+          content_hash: sha256:552e952f2869f1c6a552077a2f3cbccbb4bf304e8f9a949a2839244b1edd6c92
+          acquired_at: '2026-07-11T22:13:39+00:00'

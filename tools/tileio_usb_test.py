@@ -64,11 +64,7 @@ CRC_INIT = 0xEF4A
 CRC_POLY = 0x1021
 
 SLOT_NAMES = {0: "ECG", 1: "PPG", 2: "CPU"}
-TYPE_NAMES = {0: "signal", 1: "metrics", 2: "uio", 3: "timed-signal"}
-
-TIMED_SIGNAL_MAGIC = b"TS"
-TIMED_SIGNAL_VERSION = 1
-TIMED_SIGNAL_HEADER_LEN = 12
+TYPE_NAMES = {0: "signal", 1: "metrics", 2: "uio"}
 
 ECG_METRICS_FMT = "<11f"  # hr, hrv, denoiseCossim, arrLabel, denoiseIps, segmentIps,
                           # arrhythmiaIps, qos, denoiseuIpspw, segmentuIpspw, arrhythmiaIpspw
@@ -158,20 +154,6 @@ def describe_metrics(slot: int, data: bytes) -> str:
     except struct.error:
         pass
     return f"{len(data)} raw bytes: {data[:16].hex()}..."
-
-
-def describe_timed_signal(data: bytes) -> str:
-    """Return source-clock metadata for a version-1 timed signal frame."""
-    if len(data) < TIMED_SIGNAL_HEADER_LEN:
-        return f"invalid header: {len(data)} bytes"
-    if data[:2] != TIMED_SIGNAL_MAGIC or data[2] != TIMED_SIGNAL_VERSION:
-        return f"unknown timed-signal format: {data[:16].hex()}"
-    source_ms, sequence, sample_len = struct.unpack_from("<IHH", data, 4)
-    actual_len = len(data) - TIMED_SIGNAL_HEADER_LEN
-    if sample_len != actual_len:
-        return (f"invalid payload: source_ms={source_ms} seq={sequence} "
-                f"declared={sample_len} actual={actual_len}")
-    return f"source_ms={source_ms} seq={sequence} sample_bytes={sample_len}"
 
 
 def main():
@@ -289,9 +271,7 @@ def main():
                     print(f"#{packet_count} {slot_name} metrics: {describe_metrics(slot, data)}")
                 elif slot_type == 2:  # uio echo
                     print(f"#{packet_count} uio echo: {data.hex()}")
-                elif slot_type == 3:  # timed signal
-                    print(f"#{packet_count} {slot_name} timed signal: {describe_timed_signal(data)}")
-                # Legacy signal (type 0) frames arrive at high rate -- summarized in the footer only.
+                # Signal (type 0) frames arrive at high rate -- summarized in the footer only.
 
         print(f"\ndone: packets={packet_count} bad={bad_count}")
         for (slot, slot_type), count in sorted(slot_counts.items()):
