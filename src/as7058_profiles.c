@@ -2,7 +2,7 @@
 
 #include "as7058_chiplib.h"
 #include "constants.h"
-#include "ns_ambiqsuite_harness.h"
+#include "nsx_core.h"
 
 #include "generated/as7058_profile_click_ppg_ecg.h"
 #include "generated/as7058_profile_click_spo2.h"
@@ -39,7 +39,7 @@ validate_profile_for_board(const as7058_sensor_profile_t *p_profile)
     led_ictrl_mask = led_mask_from_ictrl(p_led);
     invalid_led_mask = (led_sub_mask | led_ictrl_mask) & (uint8_t)(~AS7058_BOARD_ALLOWED_LED_MASK);
     if (invalid_led_mask) {
-        ns_lp_printf("AS7058 profile invalid for board: LED mask 0x%02X not allowed (allowed=0x%02X)\n",
+        nsx_printf("AS7058 profile invalid for board: LED mask 0x%02X not allowed (allowed=0x%02X)\n",
                      invalid_led_mask, AS7058_BOARD_ALLOWED_LED_MASK);
         return ERR_CONFIG;
     }
@@ -62,7 +62,7 @@ validate_profile_for_board(const as7058_sensor_profile_t *p_profile)
     invalid_pd_mask |= p_pd->reg_vals.ppg2_pdsel7 & (uint8_t)(~AS7058_BOARD_ALLOWED_PD_MASK);
     invalid_pd_mask |= p_pd->reg_vals.ppg2_pdsel8 & (uint8_t)(~AS7058_BOARD_ALLOWED_PD_MASK);
     if (invalid_pd_mask) {
-        ns_lp_printf("AS7058 profile invalid for board: PD mask 0x%02X not allowed (allowed=0x%02X)\n",
+        nsx_printf("AS7058 profile invalid for board: PD mask 0x%02X not allowed (allowed=0x%02X)\n",
                      invalid_pd_mask, AS7058_BOARD_ALLOWED_PD_MASK);
         return ERR_CONFIG;
     }
@@ -604,81 +604,81 @@ as7058_apply_sensor_profile(const as7058_sensor_profile_t *p_profile)
 
     result = apply_group(AS7058_REG_GROUP_ID_PWR, p_profile->power.reg_buffer, sizeof(as7058_reg_group_power_t));
     if (result != ERR_SUCCESS) {
-        ns_lp_printf("Writing register group AS7058_REG_GROUP_ID_PWR returned error %d.\n", result);
+        nsx_printf("Writing register group AS7058_REG_GROUP_ID_PWR returned error %d.\n", result);
         return result;
     }
 
     result = apply_group(AS7058_REG_GROUP_ID_CTRL, p_profile->control.reg_buffer, sizeof(as7058_reg_group_control_t));
     if (result != ERR_SUCCESS) {
-        ns_lp_printf("Writing register group AS7058_REG_GROUP_ID_CTRL returned error %d.\n", result);
+        nsx_printf("Writing register group AS7058_REG_GROUP_ID_CTRL returned error %d.\n", result);
         return result;
     }
 
     result = apply_group(AS7058_REG_GROUP_ID_LED, p_profile->led.reg_buffer, sizeof(as7058_reg_group_led_t));
     if (result != ERR_SUCCESS) {
-        ns_lp_printf("Writing register group AS7058_REG_GROUP_ID_LED returned error %d.\n", result);
+        nsx_printf("Writing register group AS7058_REG_GROUP_ID_LED returned error %d.\n", result);
         return result;
     }
 
     result = apply_group(AS7058_REG_GROUP_ID_PD, p_profile->pd.reg_buffer, sizeof(as7058_reg_group_pd_t));
     if (result != ERR_SUCCESS) {
-        ns_lp_printf("Writing register group AS7058_REG_GROUP_ID_PD returned error %d.\n", result);
+        nsx_printf("Writing register group AS7058_REG_GROUP_ID_PD returned error %d.\n", result);
         return result;
     }
 
     result = apply_group(AS7058_REG_GROUP_ID_IOS, p_profile->ios.reg_buffer, sizeof(as7058_reg_group_ios_t));
     if (result != ERR_SUCCESS) {
-        ns_lp_printf("Writing register group AS7058_REG_GROUP_ID_IOS returned error %d.\n", result);
+        nsx_printf("Writing register group AS7058_REG_GROUP_ID_IOS returned error %d.\n", result);
         return result;
     }
 
     result = apply_group(AS7058_REG_GROUP_ID_PPG, p_profile->ppg.reg_buffer, sizeof(as7058_reg_group_ppg_t));
     if (result != ERR_SUCCESS) {
-        ns_lp_printf("Writing register group AS7058_REG_GROUP_ID_PPG returned error %d.\n", result);
+        nsx_printf("Writing register group AS7058_REG_GROUP_ID_PPG returned error %d.\n", result);
         return result;
     }
 
     result = apply_group(AS7058_REG_GROUP_ID_ECG, p_profile->ecg.reg_buffer, sizeof(as7058_reg_group_ecg_t));
     if (result != ERR_SUCCESS) {
-        ns_lp_printf("Writing register group AS7058_REG_GROUP_ID_ECG returned error %d.\n", result);
+        nsx_printf("Writing register group AS7058_REG_GROUP_ID_ECG returned error %d.\n", result);
         return result;
     }
 
     result = apply_group(AS7058_REG_GROUP_ID_SINC, p_profile->sinc.reg_buffer, sizeof(as7058_reg_group_sinc_t));
     if (result != ERR_SUCCESS) {
-        ns_lp_printf("Writing register group AS7058_REG_GROUP_ID_SINC returned error %d.\n", result);
+        nsx_printf("Writing register group AS7058_REG_GROUP_ID_SINC returned error %d.\n", result);
         return result;
     }
 
     if (p_profile->iir_present && p_profile->iir_enabled && EN_AS7058_IIR) {
         result = apply_group(AS7058_REG_GROUP_ID_IIR, p_profile->iir.reg_buffer, sizeof(as7058_reg_group_iir_t));
         if (result != ERR_SUCCESS) {
-            ns_lp_printf("Writing register group AS7058_REG_GROUP_ID_IIR returned error %d.\n", result);
+            nsx_printf("Writing register group AS7058_REG_GROUP_ID_IIR returned error %d.\n", result);
             return result;
         }
     }
 
     result = apply_group(AS7058_REG_GROUP_ID_SEQ, p_profile->seq.reg_buffer, sizeof(as7058_reg_group_seq_t));
     if (result != ERR_SUCCESS) {
-        ns_lp_printf("Writing register group AS7058_REG_GROUP_ID_SEQ returned error %d.\n", result);
+        nsx_printf("Writing register group AS7058_REG_GROUP_ID_SEQ returned error %d.\n", result);
         return result;
     }
 
     result = apply_group(AS7058_REG_GROUP_ID_PP, p_profile->pp.reg_buffer, sizeof(as7058_reg_group_pp_t));
     if (result != ERR_SUCCESS) {
-        ns_lp_printf("Writing register group AS7058_REG_GROUP_ID_PP returned error %d.\n", result);
+        nsx_printf("Writing register group AS7058_REG_GROUP_ID_PP returned error %d.\n", result);
         return result;
     }
 
     result = apply_group(AS7058_REG_GROUP_ID_FIFO, p_profile->fifo.reg_buffer, sizeof(as7058_reg_group_fifo_t));
     if (result != ERR_SUCCESS) {
-        ns_lp_printf("Writing register group AS7058_REG_GROUP_ID_FIFO returned error %d.\n", result);
+        nsx_printf("Writing register group AS7058_REG_GROUP_ID_FIFO returned error %d.\n", result);
         return result;
     }
 
     result = as7058_set_agc_config(p_profile->agc_config, p_profile->agc_config_num);
     if (result != ERR_SUCCESS) {
-        ns_lp_printf("as7058_set_agc_config returned error %d.\n", result);
+        nsx_printf("as7058_set_agc_config returned error %d.\n", result);
         return result;
     }
 

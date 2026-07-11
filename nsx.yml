@@ -1,6 +1,6 @@
 schema_version: 2
 project:
-  name: nsx-port
+  name: heartkit-vitals-demo
 target:
   board: apollo510b_evb
   soc: apollo510b
@@ -32,6 +32,7 @@ modules:
 - name: nsx-usb
 - name: nsx-i2c
 - name: nsx-spi
+- name: nsx-sensors
 - name: nsx-gpio
 - name: nsx-power
 - name: nsx-as7058
@@ -49,6 +50,11 @@ module_registry:
       url: https://github.com/AmbiqAI/nsx-as7058.git
       revision: main
       path: modules/nsx-as7058
+    nsx-sensors:
+      name: nsx-sensors
+      url: https://github.com/AmbiqAI/nsx-sensors.git
+      revision: 9a73d590fee7b377011af0b998a7563571acc228
+      path: modules/nsx-sensors
     nsx-physiokit:
       name: nsx-physiokit
       url: https://github.com/AmbiqAI/nsx-physiokit.git
@@ -69,6 +75,10 @@ module_registry:
       project: nsx-as7058
       revision: main
       metadata: modules/nsx-as7058/nsx-module.yaml
+    nsx-sensors:
+      project: nsx-sensors
+      revision: 9a73d590fee7b377011af0b998a7563571acc228
+      metadata: modules/nsx-sensors/nsx-module.yaml
     nsx-physiokit:
       project: nsx-physiokit
       revision: main

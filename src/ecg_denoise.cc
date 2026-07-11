@@ -13,8 +13,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-// neuralSPOT
-#include "ns_ambiqsuite_harness.h"
+// NSX runtime
+#include "nsx_core.h"
 // TFLM
 #include "tensorflow/lite/micro/micro_interpreter.h"
 #include "tensorflow/lite/micro/tflite_bridge/micro_error_reporter.h"
@@ -68,7 +68,7 @@ ecg_denoise_init() {
 
     // Check arena size
     bytesUsed = ctx->interpreter->arena_used_bytes();
-    ns_lp_printf("[DEN] Arena used: %d bytes\n", bytesUsed);
+    nsx_printf("[DEN] Arena used: %d bytes\n", bytesUsed);
     if (bytesUsed > ctx->arenaSize) {
         TF_LITE_REPORT_ERROR(ctx->reporter, "Arena mismatch: given=%d < expected=%d bytes.", ctx->arenaSize, bytesUsed);
         return 1;

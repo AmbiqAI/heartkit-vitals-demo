@@ -10,5 +10,6 @@ nsx-board-apollo510-evb/
 nsx-board-apollo510b-evb/
 nsx-physiokit/
 nsx-pmu-armv8m/
+nsx-sensors/
 nsx-tileio/
 nsx-tooling/

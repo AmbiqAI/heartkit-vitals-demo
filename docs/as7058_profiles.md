@@ -4,7 +4,6 @@
 This repo uses compile-time AS7058 sensor profiles to keep `sensor_configure()` small and make profile selection explicit.
 
 `src/as7058_profiles.c` contains:
-- legacy/default profile (`g_as7058_profile_legacy_default`) matching prior hardcoded values.
 - profile selection via `as7058_get_active_profile()`.
 - deterministic apply order via `as7058_apply_sensor_profile()`.
 - firmware-side board sanity validation before applying a profile (rejects unsupported LED/PD usage).
@@ -17,7 +16,6 @@ This repo uses compile-time AS7058 sensor profiles to keep `sensor_configure()` 
 
 ## Profile Selection
 In `src/constants.h`:
-- `AS7058_APP_PROFILE_LEGACY_DEFAULT`
 - `AS7058_APP_PROFILE_CLICK_PPG_ECG`
 - `AS7058_APP_PROFILE_CLICK_SPO2`
 - `AS7058_APP_PROFILE_CLICK_GOLDEN`
@@ -93,10 +91,8 @@ IIR register group (`AS7058_REG_GROUP_ID_IIR`) is applied only when all are true
 - `profile.iir_enabled == 1` (from JSON `sensor.iir_enabled`; defaults to `0` if omitted)
 - `EN_AS7058_IIR == 1` (compile-time gate in `src/constants.h`, default `0`)
 
-Enable at build time (example):
-```bash
-make DEFINES+=EN_AS7058_IIR=1
-```
+Set `EN_AS7058_IIR` to `1` in `src/constants.h` only when the selected sensor
+profile includes valid IIR coefficients.
 
 ## Validation Rules
 Generator validates:

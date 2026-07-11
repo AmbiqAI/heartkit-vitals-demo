@@ -1,13 +1,16 @@
-
 /**
  * @file store.h
- * @author Adam Page (adam.page@ambiq.com)
- * @brief Act as central store for app
- * @version 1.0
- * @date 2023-03-27
+ * @brief Central store for the NSX port (phase 6: full app orchestration).
  *
- * @copyright Copyright (c) 2023
- *
+ * Extends the phase 3 DSP-only store with the pieces needed for full parity
+ * with legacy heartkit-vitals-demo's main.cc: app_state_t runtime mode
+ * switches (input source, denoise/segmentation/arrhythmia mode, noise
+ * levels, CPU speed mode), the app-level CPU/battery metrics struct, the
+ * raw+noisy ECG segmentation staging buffers, and the CPU-utilization
+ * TileIO TX taps. AI-mode denoise/segmentation/arrhythmia model buffers
+ * live in ecg_denoise.h/ecg_segmentation.h/ecg_arrhythmia.h (already
+ * ported in phase 4) -- only the orchestration-level globals are added
+ * here.
  */
 #ifndef __APP_STORE_H
 #define __APP_STORE_H
@@ -17,52 +20,28 @@ extern "C" {
 #endif
 
 #include <arm_math.h>
-// Modules
-#include "tio_usb.h"
-#include "pk_ppg.h"
-#include "pk_hrv.h"
+
+#include "nsx_i2c.h"
+#include "nsx_power.h"
+#include "nsx_spi.h"
+
 #include "pk_ecg.h"
-#include "ina228.h"
-// neuralSPOT
-#include "ns_ambiqsuite_harness.h"
-#include "ns_i2c.h"
-#include "ns_spi.h"
-// #include "ns_peripherals_button.h"
-#include "ns_peripherals_power.h"
-// Locals
+#include "pk_hrv.h"
+#include "pk_ppg.h"
+
 #include "constants.h"
-#include "sensor.h"
 #include "metrics.h"
-#include "ringbuffer.h"
-#include "pmic.h"
+#include "sensor.h"
 
-enum HeartRhythm { HeartRhythmNormal, HeartRhythmAfib, HeartRhythmAfut };
-typedef enum HeartRhythm HeartRhythm;
-
-enum HeartBeat { HeartBeatNormal, HeartBeatPac, HeartBeatPvc, HeartBeatNoise };
-typedef enum HeartBeat HeartBeat;
-
-enum HeartRate { HeartRateNormal, HeartRateTachycardia, HeartRateBradycardia };
-typedef enum HeartRate HeartRate;
-
-enum HeartSegment { HeartSegmentNormal, HeartSegmentPWave, HeartSegmentQrs, HeartSegmentTWave };
-typedef enum HeartSegment HeartSegment;
-
-enum DenoiseMode { DenoiseModeOff, DenoiseModeDsp, DenoiseModeAi };
-typedef enum DenoiseMode DenoiseMode;
-
-enum SegmentationMode { SegmentationModeOff, SegmentationModeDsp, SegmentationModeAi };
-typedef enum SegmentationMode SegmentationMode;
-
-enum ArrhythmiaMode { ArrhythmiaModeOff, ArrhythmiaModeDsp, ArrhythmiaModeAi };
-typedef enum ArrhythmiaMode ArrhythmiaMode;
+///////////////////////////////////////////////////////////////////////////////
+// App State
+///////////////////////////////////////////////////////////////////////////////
 
 typedef struct {
     float32_t cpuPercUtil;
     float32_t batteryDays;
     float32_t avgAiIps;
 } metrics_app_results_t;
-
 
 typedef struct {
     uint8_t inputSource;
@@ -75,69 +54,45 @@ typedef struct {
     uint8_t arrMode;  // 0-2
 } app_state_t;
 
-///////////////////////////////////////////////////////////////////////////////
-// EVB Configuration
-///////////////////////////////////////////////////////////////////////////////
+extern app_state_t appState;
+extern metrics_app_results_t appMetResults;
 
-extern ns_power_config_t nsPwrCfg;
-extern ns_core_config_t nsCoreCfg;
-extern ns_i2c_config_t nsI2cCfg;
-extern ns_spi_config_t nsSpiCfg;
-// extern ns_button_config_t nsBtnCfg;
-
-
-///////////////////////////////////////////////////////////////////////////////
-// Sensor Configuration
-///////////////////////////////////////////////////////////////////////////////
+extern nsx_power_config_t nsxPwrCfg;
+extern nsx_i2c_config_t nsxI2cCfg;
+extern nsx_spi_config_t nsxSpiCfg;
 
 extern sensor_context_t sensorCtx;
-extern rb_config_t rbEcgSensor;
-extern rb_config_t rbPpg1Sensor;
-extern rb_config_t rbPpg2Sensor;
 
 ///////////////////////////////////////////////////////////////////////////////
-// Preprocess Configuration
+// ECG Preprocess Configuration
 ///////////////////////////////////////////////////////////////////////////////
 
 extern arm_biquad_casd_df1_inst_f32 ecgFilterCtx;
 
-
 ///////////////////////////////////////////////////////////////////////////////
-// ECG Denoise Configuration
+// ECG Denoise Configuration (DSP-only: biquad bandpass filtfilt)
 ///////////////////////////////////////////////////////////////////////////////
 
 extern float32_t ecgDenScratch[ECG_DEN_WINDOW_LEN];
 extern float32_t ecgDenInout[ECG_DEN_WINDOW_LEN];
+// Noise-free copy of the denoise input window, kept so EcgProcessTask can
+// compute a cosine-similarity "denoise quality" score against the noisy/
+// AI-denoised output when running in synthetic (non-live) input mode --
+// mirrors legacy's ecgDenNoise.
 extern float32_t ecgDenNoise[ECG_DEN_WINDOW_LEN];
 extern rb_config_t rbEcgDen;
-
-extern float32_t ppg1DenInout[PPG_DEN_WINDOW_LEN];
-extern float32_t ppg2DenInout[PPG_DEN_WINDOW_LEN];
-extern rb_config_t rbPpg1Den;
-extern rb_config_t rbPpg2Den;
+// Parallel (non-filtered) raw+noise staging ringbuffer, teed alongside
+// rbEcgDen -- feeds the "raw" channel of the 3ch ECG TileIO TX packet.
+extern rb_config_t rbEcgRawSeg;
 
 ///////////////////////////////////////////////////////////////////////////////
-// ECG Arrhythmia Configuration
+// ECG Segmentation Configuration (DSP-only: pk_ecg_find_peaks_f32)
 ///////////////////////////////////////////////////////////////////////////////
 
-extern float32_t ecgArrScratch[ECG_ARR_WINDOW_LEN];
-extern float32_t ecgArrInout[ECG_ARR_WINDOW_LEN];
-
-///////////////////////////////////////////////////////////////////////////////
-// ECG Segmentation Configuration
-///////////////////////////////////////////////////////////////////////////////
-
-extern float32_t ecgSegScratch[ECG_SEG_WINDOW_LEN];
 extern float32_t ecgSegInout[ECG_SEG_WINDOW_LEN];
 extern uint16_t ecgSegMask[ECG_SEG_WINDOW_LEN];
-extern rb_config_t rbEcgRawSeg;
 extern rb_config_t rbEcgSeg;
 extern ecg_peak_f32_t ecgPkPeakCtx;
-
-extern float32_t ppg1SegInout[PPG_SEG_WINDOW_LEN];
-extern float32_t ppg2SegInout[PPG_SEG_WINDOW_LEN];
-extern rb_config_t rbPpg1Seg;
-extern rb_config_t rbPpg2Seg;
 
 ///////////////////////////////////////////////////////////////////////////////
 // Shared Metrics Configuration
@@ -147,7 +102,6 @@ extern metrics_config_t metricsCfg;
 extern uint32_t peaksMetrics[MAX_RR_PEAKS];
 extern uint32_t rriMetrics[MAX_RR_PEAKS];
 extern uint8_t rriMask[MAX_RR_PEAKS];
-
 
 ///////////////////////////////////////////////////////////////////////////////
 // ECG Metrics Configuration
@@ -163,44 +117,60 @@ extern hrv_td_metrics_t ecgHrvMetrics;
 
 extern metrics_ecg_results_t ecgMetResults;
 
-extern rb_config_t rbPpg1Met;
-extern rb_config_t rbPpg2Met;
+///////////////////////////////////////////////////////////////////////////////
+// PPG Metrics Configuration
+///////////////////////////////////////////////////////////////////////////////
+//
+// Phase 6 fix: sensor.c now applies the real dual-wavelength "click golden"
+// AS7058 profile (Red PPG1_SUB1 + IR PPG1_SUB2 + ECG) instead of the
+// earlier single-wavelength JSON bring-up profile (see sensor.c/
+// as7058_profiles.c) -- so metrics_capture_ppg() below now gets two real
+// channels and computes a genuine ratiometric SpO2 (via nsx-physiokit's own
+// pk_ppg math and the profile's a/b/c + dc_comp_red/ir calibration
+// coefficients, exposed via sensor_get_spo2_config() -- no AMS on-chip
+// bio_spo2_a0 algorithm needed; that stays a real Cortex-M packaging gap,
+// see sensor_get_spo2_config()'s doc comment in sensor.h).
+
+extern rb_config_t rbPpg1Met; /* Red */
+extern rb_config_t rbPpg2Met; /* IR */
 
 extern float32_t ppg1MetData[PPG_MET_WINDOW_LEN];
 extern float32_t ppg2MetData[PPG_MET_WINDOW_LEN];
 
-
 extern metrics_ppg_results_t ppgMetResults;
 
 ///////////////////////////////////////////////////////////////////////////////
-// TILEIO Configuration
+// TileIO Streaming Taps
 ///////////////////////////////////////////////////////////////////////////////
+//
+// Separate from the metrics-stage ringbuffers above: these are lightweight
+// tap-offs of raw + denoised ECG + QRS mask (from EcgProcessTask's
+// preprocessing/segmentation stages) and downsampled dual-wavelength PPG
+// samples (from PpgProcessTask), drained by TioProcessTask in main.cc to
+// stream live signals to a Tileio host dashboard over nsx-tileio-usb. ECG
+// streams raw+denoised+mask (3ch), PPG streams Red+IR (2ch) -- both match
+// legacy.
 
 extern rb_config_t rbEcgRawTx;
 extern rb_config_t rbEcgDenTx;
-extern uint16_t ecgMaskTxBuffer[ECG_TX_BUF_LEN];
 extern rb_config_t rbEcgMaskTx;
+extern rb_config_t rbPpg1Tx; /* Red */
+extern rb_config_t rbPpg2Tx; /* IR */
 
-extern rb_config_t rbPpg1Tx;
-extern rb_config_t rbPpg2Tx;
+///////////////////////////////////////////////////////////////////////////////
+// CPU Utilization TileIO Streaming Taps (slot 2)
+///////////////////////////////////////////////////////////////////////////////
+//
+// Per-second ECG/PPG task CPU utilization percentages plus the combined
+// total, sampled by CpuProcessTask (main.cc) from FreeRTOS runtime stats
+// and streamed to the host dashboard as slot 2. Requires
+// configGENERATE_RUN_TIME_STATS=1 (see FreeRTOSConfig.h) and the
+// RTOS_AppConfigureTimerForRuntimeStats/GetRuntimeCounterValueFromISR hooks
+// (main.cc) backed by an am_hal_timer instance (RTOS_TIMER, constants.h).
 
 extern rb_config_t rbEcgCpuTx;
 extern rb_config_t rbPpgCpuTx;
 extern rb_config_t rbTotalCpuTx;
-
-///////////////////////////////////////////////////////////////////////////////
-// APP Configuration
-///////////////////////////////////////////////////////////////////////////////
-
-extern metrics_app_results_t appMetResults;
-
-// extern uint8_t LED_COLORS[10][4];
-extern ns_timer_config_t ecgTimerCfg;
-extern ns_timer_config_t ppgTimerCfg;
-extern app_state_t appState;
-
-extern pmic_metrics_results_t g_pmicMetrics;
-extern ina228_context_t g_ina228Ctx;
 
 #ifdef __cplusplus
 }

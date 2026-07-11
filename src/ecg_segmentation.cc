@@ -16,8 +16,8 @@
 // Modules
 #include "pk_ecg.h"
 #include "pk_hrv.h"
-// neuralSPOT
-#include "ns_ambiqsuite_harness.h"
+// NSX runtime
+#include "nsx_core.h"
 // TFLM
 #include "tensorflow/lite/micro/kernels/micro_ops.h"
 #include "tensorflow/lite/micro/micro_interpreter.h"
@@ -76,7 +76,7 @@ ecg_segmentation_init() {
 
     // Check arena size
     bytesUsed = ctx->interpreter->arena_used_bytes();
-    ns_lp_printf("[SEG] Arena used: %d bytes\n", bytesUsed);
+    nsx_printf("[SEG] Arena used: %d bytes\n", bytesUsed);
     if (bytesUsed > ctx->arenaSize) {
         TF_LITE_REPORT_ERROR(ctx->reporter, "Arena mismatch: given=%d < expected=%d bytes.", ctx->arenaSize, bytesUsed);
         return 1;
@@ -97,9 +97,9 @@ ecg_physiokit_segmentation_inference(float32_t *data, uint16_t *segMask, uint32_
         segMask[i] = segMask[i] > 0 ? ECG_SEG_QRS : ECG_SEG_NONE;
         segMask[i] |= ((qosMask & SIG_MASK_QOS_MASK) << SIG_MASK_QOS_OFFSET);
     }
-    ns_lp_printf("ECG SEG PK numPeaks: %d\n", numPeaks);
+    nsx_printf("ECG SEG PK numPeaks: %d\n", numPeaks);
     for (size_t i = 0; i < numPeaks; i++) {
-        ns_lp_printf("ECG SEG PK %d: %d\n", i, peaksMetrics[i]);
+        nsx_printf("ECG SEG PK %d: %d\n", i, peaksMetrics[i]);
         segMask[peaksMetrics[i]] |= (ECG_FID_PEAK_QRS << ECG_MASK_FID_PEAK_OFFSET);
     }
     // ecg_segmentation_extract_fiducials(segMask, data);
@@ -147,7 +147,7 @@ ecg_segmentation_inference(float32_t *data, uint16_t *segMask, uint32_t padLen, 
         qosMask = yMax > ECG_QOS_GOOD_THRESH ? 3 : yMax > ECG_QOS_FAIR_THRESH ? 2 : yMax > ECG_QOS_POOR_THRESH ? 1 : 0;
         avgQos += yMax;
         if (false && yMaxIdx > 0) {
-            ns_lp_printf("Segment (%d, %d): QoS (%d, %f)\n", yMaxIdx, i, qosMask, yMax);
+            nsx_printf("Segment (%d, %d): QoS (%d, %f)\n", yMaxIdx, i, qosMask, yMax);
         }
         segMask[i] = yMax >= threshold ? yMaxIdx : 0;
         segMask[i] |= ((qosMask & SIG_MASK_QOS_MASK) << SIG_MASK_QOS_OFFSET);
@@ -193,7 +193,7 @@ ecg_segmentation_extract_fiducials(uint16_t *segMask, float32_t *data)
             {
                 // Fiducial peak value (e.g p-peak) will be same as segmentation value (e.g. p-wave)
                 segMask[maxIdx] |= (prevSegVal << ECG_MASK_FID_PEAK_OFFSET);
-                // ns_lp_printf("Segment (%d, %d, %d): Fiducial (%d, %f)\n", segMask[maxIdx], startIdx, i, maxIdx, maxVal);
+                // nsx_printf("Segment (%d, %d, %d): Fiducial (%d, %f)\n", segMask[maxIdx], startIdx, i, maxIdx, maxVal);
             }
             startIdx = -1;
         }

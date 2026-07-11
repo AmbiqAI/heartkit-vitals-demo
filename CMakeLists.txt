@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright (c) 2026, Ambiq
 cmake_minimum_required(VERSION 3.24)
-project(nsx-port LANGUAGES C CXX ASM)
+project(heartkit-vitals-demo LANGUAGES C CXX ASM)
 
 set(NSX_BOARD "apollo510b_evb" CACHE STRING "Target board")
 
@@ -23,7 +23,7 @@ nsx_bootstrap_app(
     MODULES ${NSX_APP_MODULES}
 )
 
-add_executable(nsx-port
+add_executable(heartkit-vitals-demo
     src/main.cc
     src/sensor.c
     src/store.c
@@ -48,20 +48,23 @@ add_executable(nsx-port
 # nsx.yml's `modules[].boards: [apollo510b_evb]` scoping), so tio_ble.h
 # wouldn't even resolve for those targets.
 if(NSX_BOARD STREQUAL "apollo510b_evb")
-    target_sources(nsx-port PRIVATE src/ble_bringup.c)
+    target_sources(heartkit-vitals-demo PRIVATE src/ble_bringup.c)
 endif()
 
-target_include_directories(nsx-port PRIVATE
+target_include_directories(heartkit-vitals-demo PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/src
 )
 
-target_link_libraries(nsx-port PRIVATE
+target_link_libraries(heartkit-vitals-demo PRIVATE
     nsx::board
     nsx::runtime_core
     nsx::freertos
     nsx::usb
     nsx::i2c
     nsx::spi
+    # Linked for module/build coverage only. INA228 and LED-stick runtime
+    # integration remains intentionally deferred.
+    nsx::sensors
     nsx::gpio
     nsx::power
     nsx::as7058
@@ -73,10 +76,10 @@ target_link_libraries(nsx-port PRIVATE
 )
 
 if(NSX_BOARD STREQUAL "apollo510b_evb")
-    target_link_libraries(nsx-port PRIVATE
+    target_link_libraries(heartkit-vitals-demo PRIVATE
         nsx::ble
         nsx::tileio_ble
     )
 endif()
 
-nsx_finalize_app(nsx-port)
+nsx_finalize_app(heartkit-vitals-demo)

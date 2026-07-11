@@ -85,7 +85,7 @@ extern uint32_t SystemCoreClock;
 #define configUSE_COUNTING_SEMAPHORES                   1
 #define configUSE_TASK_NOTIFICATIONS                    1
 #define configUSE_QUEUE_SETS                            0
-/* Runtime stats: app-level CpuProcessTask (nsx-port/src/main.cc) reads
+/* Runtime stats: app-level CpuProcessTask (src/main.cc) reads
  * per-task run-time counters via uxTaskGetSystemState(), which requires
  * configGENERATE_RUN_TIME_STATS + configUSE_TRACE_FACILITY. The app
  * supplies the timer hooks below (RTOS_AppConfigureTimerForRuntimeStats /
@@ -152,7 +152,7 @@ extern uint32_t SystemCoreClock;
 #define INCLUDE_eTaskGetState                           1
 #define INCLUDE_xTimerPendFunctionCall                  1
 
-/* Run-time stats timer hooks (app-supplied, see nsx-port/src/main.cc). Must
+/* Run-time stats timer hooks (app-supplied, see src/main.cc). Must
  * be declared before use here since FreeRTOSConfig.h is included ahead of
  * the app's own headers. This header is included from both plain-C
  * FreeRTOS sources and main.cc (C++, since heliaRT/TFLM types force main
