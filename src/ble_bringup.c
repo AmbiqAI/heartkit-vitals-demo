@@ -64,6 +64,7 @@ static ns_ble_pool_config_t g_bleBringupWsfBuffers = {
 extern void ble_bringup_slot_update_cb(
     uint8_t slot, uint8_t slot_type, const uint8_t *data, uint32_t length);
 extern void ble_bringup_uio_update_cb(const uint8_t *data, uint32_t length);
+extern void ble_bringup_uio_read_cb(uint8_t *data, uint32_t length);
 
 /* ---- BLE service objects ----------------------------------------------- */
 static ns_ble_pool_config_t *const g_bleBringupPoolConfig = &g_bleBringupWsfBuffers;
@@ -118,6 +119,7 @@ ble_bringup_event_handler(const ns_ble_event_t *event, void *context)
 
 static tio_ble_context_t g_bleBringupCtx = {
     .uio_update_cb = &ble_bringup_uio_update_cb,
+    .uio_read_cb = &ble_bringup_uio_read_cb,
     .slot_update_cb = &ble_bringup_slot_update_cb,
     .pool_config = NULL, /* set in ble_bringup_init(): needs &g_bleBringupWsfBuffers */
     .service_name = BLE_BRINGUP_ADV_NAME,

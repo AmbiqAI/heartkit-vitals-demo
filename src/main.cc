@@ -216,7 +216,9 @@ static tio_usb_context_t tioUsbCtx = {
     .serial = "NSX-HKV-0001",
     .cdc_interface = "NSX CDC",
     .vendor_interface = "TileIO Vendor",
-    .webusb_url = "tileio.local",
+    /* nsx-usb encodes WebUSB scheme 1 (HTTPS) separately, so this must be
+     * the host/path only, not a full URL. */
+    .webusb_url = "ambiqai.github.io/tileio/",
     .vid = TIO_USB_VENDOR_ID,
     .pid = TIO_USB_PRODUCT_ID,
 };
@@ -474,9 +476,8 @@ set_speed_mode(uint8_t mode)
 }
 
 static void
-send_uio_state(void)
+snapshot_uio_state(uint8_t uioBuffer[8])
 {
-    uint8_t uioBuffer[8];
     uioBuffer[TIO_UIO_INPUT_SEL_IDX] = appState.inputSource;
     uioBuffer[TIO_UIO_BW_NOISE_IDX] = appState.bwNoiseLevel;
     uioBuffer[TIO_UIO_MA_NOISE_IDX] = appState.maNoiseLevel;
@@ -485,6 +486,13 @@ send_uio_state(void)
     uioBuffer[TIO_UIO_DEN_MODE_IDX] = appState.denoiseMode;
     uioBuffer[TIO_UIO_SEG_MODE_IDX] = appState.segMode;
     uioBuffer[TIO_UIO_ARR_MODE_IDX] = appState.arrMode;
+}
+
+static void
+send_uio_state(void)
+{
+    uint8_t uioBuffer[8];
+    snapshot_uio_state(uioBuffer);
     /* Enqueue (slot 0, type 2 = UIO) via the ISR-safe TX queue rather than
      * calling tio_usb_send_uio_state() directly -- the direct call blocks in
      * retry loops, which is unacceptable from any context TioProcessTask
@@ -524,6 +532,16 @@ extern "C" void
 ble_bringup_uio_update_cb(const uint8_t *data, uint32_t length)
 {
     received_uio_state(data, length);
+}
+
+extern "C" void
+ble_bringup_uio_read_cb(uint8_t *data, uint32_t length)
+{
+    /* Invoked in the BLE stack's GATT read-handler context.  Keep this as a
+     * bounded snapshot only: no queues, logging, mode changes, or BLE sends. */
+    if (data != nullptr && length == 8u) {
+        snapshot_uio_state(data);
+    }
 }
 #endif
 
