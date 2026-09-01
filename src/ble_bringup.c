@@ -163,10 +163,20 @@ ble_bringup_event_handler(const ns_ble_event_t *event, void *context)
  * WSF_MS_PER_TICK (10), giving 6553 ticks with nothing near an overflow
  * (wsf_timer.h:37/45, wsf_timer.c:39).
  *
- * 0 is NOT the disable value and must not be used here: WSF_TIMER_MS_TO_TICKS
- * would yield 0 ticks and WsfTimerUpdate() expires a 0-tick timer on the very
- * next tick (wsf_timer.c:254-264), turning the dead poll into a 100 Hz one
- * per characteristic. That is the pathological opposite of the intent.
+ * 0 is NOT the disable value and must not be used here, but the trap is
+ * quieter than it looks. tio_ble_notify_period_ms() (nsx-tileio-ble
+ * src/tio_ble.c:100-104) maps a 0 in this context field to
+ * TIO_BLE_DEFAULT_NOTIFY_PERIOD_MS before it ever reaches ns_ble, so writing
+ * 0 here does not reach WSF as 0 ticks -- it silently restores TileIO's
+ * default poll period and puts the ~45 dead wakes/s back, with nothing in
+ * this file changing to show it. A zero that reads as "off" and behaves as
+ * "default" is the failure mode to watch for here.
+ *
+ * (The 0-tick behaviour one layer down -- WSF_TIMER_MS_TO_TICKS yielding 0
+ * and WsfTimerUpdate() expiring a 0-tick timer on the very next tick,
+ * wsf_timer.c:254-264 -- is real, but it is the module-level rationale for
+ * why tio_ble.c does that clamping at all, not something reachable from this
+ * file. See AmbiqAI/nsx-ambiq-sdk#71.)
  *
  * THIS IS A WORKAROUND, NOT THE FIX. The fix is for ns_ble.c to not arm the
  * timer at all when async == true (a characteristic that has declared its
@@ -223,6 +233,30 @@ BleRadioTask(void *pvParameters)
     if (status != NS_STATUS_SUCCESS) {
         nsx_printf("[ble] tio_ble_init failed (status=%ld)\n", (long)status);
         g_bleBringupInitStatus = (int32_t)status;
+        /* Clear the handle BEFORE self-deleting, or the NULL guard in
+         * ble_bringup_radio_stack_free_words() is decorative and that
+         * accessor dereferences a dangling TaskHandle_t once per second
+         * forever from ReportTask. This path is reachable on real hardware
+         * (EM9305 unpopulated, SPI fault, radio FW not loaded):
+         * ble_bringup_init() only creates the task, so it returns success and
+         * the scheduler starts regardless. Once the idle task's prvDeleteTCB
+         * runs, the TCB and the 16 KB stack are freed;
+         * uxTaskGetStackHighWaterMark() does no validation, so it would read
+         * pxStack out of freed heap and byte-walk from whatever address that
+         * block later holds. With the handle cleared, `ble_hwm=0` means "the
+         * radio task is gone" and `ble_init` on the same report line says
+         * why.
+         *
+         * RESIDUAL RACE (accepted, sub-tick): ReportTask (prio 1) can load a
+         * non-NULL handle and be preempted here by BleRadioTask (prio 3)
+         * before it dereferences it. The airtight alternative is
+         * vTaskSuspend(NULL) instead of vTaskDelete(NULL) -- the TCB stays
+         * valid, the watermark stays meaningful, and no dangling handle can
+         * exist -- at the cost of never reclaiming this task's 16 KB stack.
+         * Not taken unilaterally: 16 KB is worth more on this part than
+         * closing a one-shot window during a failed bring-up. Owner's call if
+         * that trade changes. */
+        g_bleBringupRadioTaskHandle = NULL;
         vTaskDelete(NULL);
         return;
     }
@@ -247,6 +281,12 @@ ble_bringup_radio_stack_free_words(void)
         return 0;
     }
     return (uint32_t)uxTaskGetStackHighWaterMark(g_bleBringupRadioTaskHandle);
+}
+
+int32_t
+ble_bringup_init_status(void)
+{
+    return g_bleBringupInitStatus;
 }
 
 uint32_t
@@ -377,6 +417,12 @@ ble_bringup_send_slot_packet(const uint8_t *packet, uint32_t length)
 
 uint32_t
 ble_bringup_radio_stack_free_words(void)
+{
+    return 0;
+}
+
+int32_t
+ble_bringup_init_status(void)
 {
     return 0;
 }

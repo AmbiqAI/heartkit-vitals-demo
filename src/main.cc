@@ -2101,6 +2101,14 @@ report_extra_ppgmet(void)
     hkv_log_fx2("qos", ppgMetResults.qos);
 }
 
+#if defined(AM_PART_APOLLO510B) && TIO_BLE_ENABLED
+/* Written by ReportTask immediately before it emits the `cpu` line, read by
+ * report_extra_cpu() while the log mutex is held. Single writer, single
+ * reader, same task -- the split exists purely to keep the ~1 ms stack walk
+ * outside the mutex, not for cross-task safety. */
+static uint32_t g_cpu_ble_hwm = 0;
+#endif
+
 static void
 report_extra_cpu(void)
 {
@@ -2112,21 +2120,32 @@ report_extra_cpu(void)
     hkv_log_fx2("util", appMetResults.cpuPercUtil);
     hkv_log_fx2("batt_days", appMetResults.batteryDays);
     hkv_log_fx2("avg_ips", appMetResults.avgAiIps);
-    /* Free stack words on the BLE radio dispatcher task. Sampled HERE, once
-     * per second, and nowhere else: the call is a byte-at-a-time walk of
-     * ~14.9 KB of untouched stack fill (~1 ms), which is exactly why it is no
-     * longer in the dispatcher loop where it cost 15 CPU points (issue #19).
-     * See ble_bringup_radio_stack_free_words().
+    /* Free stack words on the BLE radio dispatcher task, and the tio_ble_init()
+     * status that explains a zero. Both are CACHED VALUES -- the ~1 ms stack
+     * walk happens in ReportTask before hkv_report_subsystem() takes the log
+     * mutex (see g_cpu_ble_hwm), never from inside this callback. Emitting the
+     * scan from here would extend the global log-mutex hold by ~1 ms on top of
+     * the ~2 ms of ITM this line already costs, and with EN_APP_TRACE on that
+     * blocks every equal-priority pump task's trace call for the duration --
+     * measuring the pipeline would perturb it, which is the thing obs.h exists
+     * to avoid. See ble_bringup_radio_stack_free_words() for what the scan
+     * costs and why it is once per second.
      *
-     * Read it against BLE_BRINGUP_RADIO_STACK_WORDS (4096); the measured
+     * Read ble_hwm against BLE_BRINGUP_RADIO_STACK_WORDS (4096); the measured
      * steady-state figure is ~3714, i.e. the stack is ~9% used. `ble_wake_ps`
      * on this same line is the other half of the BLE CPU picture.
+     *
+     * ble_hwm=0 now means "the radio task is gone" -- BleRadioTask clears its
+     * own handle before self-deleting on a tio_ble_init() failure -- and
+     * ble_init carries the status code that says why. ble_init=0 with a
+     * plausible ble_hwm is the healthy case.
      *
      * OMITTED, not zero-filled, on the two boards with no radio -- same gate
      * as the ble_bringup.h include above. A `ble_hwm=0` would read as a stack
      * about to overflow, which is the opposite of "there is no BLE task". */
 #if defined(AM_PART_APOLLO510B) && TIO_BLE_ENABLED
-    hkv_log_u32("ble_hwm", ble_bringup_radio_stack_free_words());
+    hkv_log_u32("ble_hwm", g_cpu_ble_hwm);
+    hkv_log_u32("ble_init", (uint32_t)ble_bringup_init_status());
 #endif
 }
 
@@ -2178,6 +2197,16 @@ ReportTask(void *pvParameters)
         /* vTaskDelayUntil, so a long line does not push the rotation late and
          * turn the `_ps` deltas into something other than per-second. */
         vTaskDelayUntil(&lastWake, pdMS_TO_TICKS(HKV_REPORT_SLOT_MS));
+#if defined(AM_PART_APOLLO510B) && TIO_BLE_ENABLED
+        /* Sample the ~1 ms BLE stack walk here, OUTSIDE hkv_report_subsystem()
+         * and therefore outside the global log mutex it holds for the whole
+         * line including extra(). Once per rotation (the cpu slot only), so
+         * the cost is unchanged -- what changes is that no other task's trace
+         * call waits on it. */
+        if (kReportLines[idx].extra == report_extra_cpu) {
+            g_cpu_ble_hwm = ble_bringup_radio_stack_free_words();
+        }
+#endif
         hkv_report_subsystem(kReportLines[idx].subsystem, kReportLines[idx].extra);
         idx = (idx + 1u) % HKV_REPORT_LINE_COUNT;
     }

@@ -85,7 +85,9 @@ uint32_t ble_bringup_send_slot_packet(const uint8_t *packet, uint32_t length);
 /**
  * @brief Minimum free stack ever observed on the BLE radio dispatcher task,
  *        in WORDS (FreeRTOS StackType_t units), or 0 if the task does not
- *        exist (non-510B build, or bring-up failed before xTaskCreate).
+ *        exist (non-510B build, bring-up failed before xTaskCreate, or the
+ *        task self-deleted after tio_ble_init() failed -- see
+ *        ble_bringup_init_status() for the status code in that last case).
  *
  * CALL THIS AT MOST ONCE PER SECOND, FROM A REPORTING CONTEXT ONLY.
  *
@@ -106,6 +108,21 @@ uint32_t ble_bringup_send_slot_packet(const uint8_t *packet, uint32_t length);
  * Reported as `ble_hwm` on the `cpu` report line.
  */
 uint32_t ble_bringup_radio_stack_free_words(void);
+
+/**
+ * @brief Status returned by tio_ble_init() on the radio task, or
+ *        NS_STATUS_SUCCESS (0) if bring-up has not failed.
+ *
+ * Reported as `ble_init` on the `cpu` report line, next to `ble_hwm`. The two
+ * are read together: a failed tio_ble_init() makes BleRadioTask self-delete,
+ * so `ble_hwm` drops to 0 ("the radio task is gone") and this value is the
+ * only thing that says why. Always 0 on a board with no radio, where the line
+ * omits both fields entirely.
+ *
+ * Non-zero and non-latching in the other direction: nothing resets it, so a
+ * non-zero value means bring-up failed once and BLE is down for this boot.
+ */
+int32_t ble_bringup_init_status(void);
 
 #ifdef __cplusplus
 }
