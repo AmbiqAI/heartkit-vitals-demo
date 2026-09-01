@@ -782,12 +782,22 @@ static_assert(TIO_ECG_TX_HIGH_WATER - TIO_ECG_SAMPLES_PER_PKT + TIO_ECG_TX_BLOCK
 static_assert(TIO_PPG_TX_HIGH_WATER - TIO_PPG_SAMPLES_PER_PKT + TIO_PPG_TX_BLOCK_SAMPLES <= PPG_TX_BUF_LEN,
               "PPG TX peak occupancy (H - pkt + block) exceeds ring capacity");
 
-/* A full structural block landing on the target trough must still fit under H,
- * or the trim fires on the very next tick and discards fresh signal. */
-static_assert(TIO_ECG_TX_TROUGH_TARGET + TIO_ECG_TX_BLOCK_SAMPLES <= TIO_ECG_TX_HIGH_WATER,
-              "ECG trough target + block must fit under H");
-static_assert(TIO_PPG_TX_TROUGH_TARGET + TIO_PPG_TX_BLOCK_SAMPLES <= TIO_PPG_TX_HIGH_WATER,
-              "PPG trough target + block must fit under H");
+/* A full structural block landing on the trough must still fit under H, or the
+ * trim fires on the very next tick and discards fresh signal.
+ *
+ * The trough is NOT the target: it settles up to PULL_DIV above it (the
+ * position term's deadband) and alternates a further samplesPerPkt with the
+ * block-period quantisation. Both are included, because the naive
+ * target + block form passed comfortably at a target of 30 while the actual
+ * peak sat at 248 against an H of 250. */
+static_assert(TIO_ECG_TX_TROUGH_TARGET + TIO_TX_SERVO_PULL_DIV + TIO_ECG_SAMPLES_PER_PKT +
+                      TIO_ECG_TX_BLOCK_SAMPLES <=
+                  TIO_ECG_TX_HIGH_WATER,
+              "ECG worst-case trough + block must fit under H");
+static_assert(TIO_PPG_TX_TROUGH_TARGET + TIO_TX_SERVO_PULL_DIV + TIO_PPG_SAMPLES_PER_PKT +
+                      TIO_PPG_TX_BLOCK_SAMPLES <=
+                  TIO_PPG_TX_HIGH_WATER,
+              "PPG worst-case trough + block must fit under H");
 
 /* The trough must leave a whole packet in hand, or the pump would skip on
  * every tick that sits at target -- which is the emission gap this exists to
@@ -795,12 +805,17 @@ static_assert(TIO_PPG_TX_TROUGH_TARGET + TIO_PPG_TX_BLOCK_SAMPLES <= TIO_PPG_TX_
 static_assert(TIO_ECG_TX_TROUGH_TARGET > TIO_ECG_SAMPLES_PER_PKT, "ECG trough target must exceed one packet");
 static_assert(TIO_PPG_TX_TROUGH_TARGET > TIO_PPG_SAMPLES_PER_PKT, "PPG trough target must exceed one packet");
 
-/* The servo window must span at least one whole producer block, or the
- * per-window minimum is a point on the sawtooth rather than its trough and the
- * servo would chase the block structure instead of the drift. ECG is the
- * binding case: block/samplesPerPkt ticks to drain one block. */
-static_assert(TIO_TX_SERVO_WINDOW_TICKS >= (TIO_ECG_TX_BLOCK_SAMPLES / TIO_ECG_SAMPLES_PER_PKT),
-              "servo window must span at least one ECG producer block");
+/* The servo window must span at least THREE whole producer blocks.
+ *
+ * One block is not enough, which cost a bench iteration to learn. The block
+ * period is a non-integer number of pump ticks, so the true trough alternates
+ * by ~samplesPerPkt from block to block; a window spanning 1-2 blocks catches
+ * that alternation in its minimum and the servo's rate term differentiates the
+ * artifact rather than the drift. Three blocks guarantees the minimum is taken
+ * over enough troughs to land consistently at the bottom of the alternation.
+ * ECG is the binding case: block/samplesPerPkt ticks to drain one block. */
+static_assert(TIO_TX_SERVO_WINDOW_TICKS >= (3 * TIO_ECG_TX_BLOCK_SAMPLES / TIO_ECG_SAMPLES_PER_PKT),
+              "servo window must span at least three ECG producer blocks");
 
 /* Payload must stay within what the TileIO slot framing accepts (240 B was the
  * bound the pre-fix senders were written against). */
@@ -877,7 +892,26 @@ tio_tx_group_avail(const tio_tx_group_t *group)
  *  - It settles from both directions. Producer fast: trough rises, budget
  *    rises, extra draining. Producer slow: trough falls, budget falls to 0 and
  *    the pump self-throttles by skipping, which is the correct response since
- *    samples cannot be manufactured. */
+ *    samples cannot be manufactured.
+ *
+ * RESIDUAL BEHAVIOUR, measured and accepted. The trough does not sit exactly
+ * on target and the budget does not sit exactly still:
+ *
+ *  - The trough settles ABOVE target, by up to PULL_DIV, because the position
+ *    term's integer division has no restoring force inside its deadband.
+ *  - It alternates a further ~samplesPerPkt because the producer block period
+ *    is a non-integer number of pump ticks; the window is sized so the
+ *    measured minimum is stable despite it, but the underlying occupancy still
+ *    alternates.
+ *  - The budget therefore dithers by a sample or two window to window.
+ *
+ * None of this is a defect to chase. Both bounds are accounted for in the peak
+ * static_assert above, so the trim cannot fire; the trough stays a full packet
+ * clear of empty, so emission stays at 10 pkt/s; and the dither is a fraction
+ * of a sample per second of rate error. An earlier 32-tick window turned this
+ * same quantisation into a genuine 0<->10 budget slam -- see
+ * TIO_TX_SERVO_WINDOW_TICKS for why the window length is the fix and damping
+ * the gain would have been treating the symptom. */
 static void
 tio_tx_group_servo(tio_tx_group_t *group)
 {

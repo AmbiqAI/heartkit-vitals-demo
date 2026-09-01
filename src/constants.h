@@ -449,51 +449,69 @@ extern "C" {
 /* TARGET TROUGH: the TX occupancy the pump aims to sit at between producer
  * blocks. This is the servo's reference, not a trigger threshold.
  *
- * Three samples' worth of packet = 300 ms of buffered signal. Derivation:
- * one packet must always be in hand at the trough or the pump skips a tick
- * and opens an emission gap, plus two pump intervals of slack for scheduling
- * jitter and for a producer block arriving late.
+ * Two packets = 200 ms of buffered signal. A full packet must always be in
+ * hand at the trough or the pump skips a tick and opens an emission gap; the
+ * second packet is margin for scheduling jitter and for a block arriving late.
  *
- * Bounded above by the requirement that a full structural block still fits
- * under H when it lands on the trough, or the trim fires on the very next
- * tick and discards fresh signal:
+ * Bounded above, and the real bound is NOT simply troughTarget + block <= H.
+ * The trough does not sit exactly on target in steady state -- it lands up to
+ * PULL_DIV above it (the position term's deadband), and it alternates over a
+ * further ~samplesPerPkt because of the block-period quantisation described at
+ * TIO_TX_SERVO_WINDOW_TICKS. So the peak the trim actually sees is
  *
- *     troughTarget + block <= H
+ *     troughTarget + PULL_DIV + samplesPerPkt + block <= H
  *
- * ECG 30 + 200 = 230 <= 250; PPG 30 + 13 = 43 <= 63. Both asserted in main.cc
- * so a window-size change fails the build rather than silently trimming. */
-#define TIO_ECG_TX_TROUGH_TARGET (3 * TIO_ECG_SAMPLES_PER_PKT)
-#define TIO_PPG_TX_TROUGH_TARGET (3 * TIO_PPG_SAMPLES_PER_PKT)
+ * ECG 20 + 8 + 10 + 200 = 238 <= 250; PPG 20 + 8 + 10 + 13 = 51 <= 63. That
+ * is what main.cc asserts -- the naive form would have passed at a target of
+ * 30 while the real peak sat at 248, two samples from trimming. */
+#define TIO_ECG_TX_TROUGH_TARGET (2 * TIO_ECG_SAMPLES_PER_PKT)
+#define TIO_PPG_TX_TROUGH_TARGET (2 * TIO_PPG_SAMPLES_PER_PKT)
 
-/* Servo window, in pump ticks. 32 ticks = 3.2 s, which comfortably spans the
- * ~2 s ECG producer block -- asserted in main.cc, because a window shorter
- * than one block would make the measured minimum a point on the sawtooth
- * rather than its trough, and the servo would chase the block structure
- * instead of the drift.
+/* Servo window, in pump ticks. 64 ticks = 6.4 s.
  *
- * This also sets the correction resolution: one budget step per window is
- * 1/3.2 s = 0.31 samples/s, comfortably finer than the ~2.4 samples/s being
- * corrected. Cold-start convergence is a few windows, ~10-25 s. Slow on
- * purpose -- the quantity being tracked drifts by a couple of samples per
- * second and is not worth chasing quickly. */
-#define TIO_TX_SERVO_WINDOW_TICKS (32)
+ * Sized to span SEVERAL producer blocks, not merely one, because of an
+ * aliasing effect measured on hardware 2026-09-01. The ECG block period is
+ * 200 samples at the producer's true ~102.4 samples/s = 1.953 s = 19.53 pump
+ * ticks. Being a non-integer number of ticks, consecutive blocks drain over
+ * alternately 19 or 20 ticks, so the true trough alternates by a full
+ * samplesPerPkt (10) from block to block. That is quantisation beat between
+ * the 100 ms pump grid and the block period -- not drift, and not something
+ * the servo should react to.
+ *
+ * With the earlier 32-tick window (1.64 blocks) some windows caught one trough
+ * and some caught two, so the measured minimum alternated by that same 10 and
+ * the servo's rate term differentiated the artifact: measured trough
+ * alternating 13<->23 and budget slamming 0<->10 every window. At 64 ticks
+ * (3.3 blocks) every window contains at least three troughs, so the minimum is
+ * consistently the bottom of the alternation and is stable to a sample or two.
+ *
+ * The cost is convergence speed: one budget step per window is 1/6.4 s, and
+ * cold start takes roughly 8 windows (~50 s). That is the right trade -- the
+ * quantity being tracked is a clock drift of a couple of samples per second,
+ * which does not change on any timescale worth chasing. */
+#define TIO_TX_SERVO_WINDOW_TICKS (64)
 
 /* Divisor on the servo's position term: each window it moves the budget by
  * (trough - target) / this. It is the gentle term -- the rate term does the
  * actual drift cancellation -- so it is deliberately weak, giving a
- * first-order approach to target over roughly this many windows (~25 s).
+ * first-order approach to target over roughly this many windows.
  *
- * Being an integer division it also supplies the deadband: while the trough is
+ * Being an integer division it also supplies a deadband: while the trough is
  * within +/-8 samples (80 ms) of target this contributes exactly zero and the
- * servo holds still rather than dithering. Lowering it would speed the
- * approach and risk overshooting into the trim. */
+ * servo holds still rather than dithering. The deadband is why the trough
+ * settles somewhat ABOVE target rather than on it, which the peak bound at
+ * TIO_*_TX_TROUGH_TARGET accounts for explicitly. Lowering it would tighten
+ * that offset at the cost of overshoot risk. */
 #define TIO_TX_SERVO_PULL_DIV (8)
 
-/* Budget ceiling, in extra samples per window. 16 per 3.2 s = 5 samples/s,
- * i.e. headroom for ~5% producer drift against the ~2.4% measured. Also the
+/* Budget ceiling, in extra samples per window. 32 per 6.4 s = 5 samples/s,
+ * i.e. headroom for ~5% producer drift against the ~2.4% measured -- scaled
+ * with the window so the ceiling stays a rate, not a count. Also the
  * anti-windup clamp: a stalled producer parks the budget here-or-zero rather
- * than accumulating a debt it would later spend as a burst. */
-#define TIO_TX_SERVO_MAX_BUDGET (16)
+ * than accumulating a debt it would later spend as a burst. Reaching this
+ * ceiling in steady state means drift exceeds what the servo can correct and
+ * the trim will start absorbing the remainder. */
+#define TIO_TX_SERVO_MAX_BUDGET (32)
 
 /* Largest packet either signal slot can emit -- sizes the sender stack buffers
  * and must account for the drift drain above, not just the nominal size. */
