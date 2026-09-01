@@ -1,95 +1,138 @@
 
 /**
- * @file ringbuffer.cc
+ * @file ringbuffer.c
  * @author Adam Page (adam.page@ambiq.com)
  * @brief Basic ring buffer implementation
- * @version 1.0
+ * @version 1.1
  * @date 2023-12-13
  *
  * @copyright Copyright (c) 2023
  *
+ * head/tail run over [0, 2*size) so that a full ring is representable:
+ * head == tail means empty, head == tail + size (mod 2*size) means full.
+ * See ringbuffer.h for the capacity and SPSC concurrency contract.
  */
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
 #include "ringbuffer.h"
 
+/**
+ * @brief Fold an index in [0, 2*size) down to a storage index in [0, size)
+ */
+static inline uint32_t rb_index(const rb_config_t *ctx, uint32_t idx) {
+    return idx >= ctx->size ? idx - ctx->size : idx;
+}
+
+/**
+ * @brief Advance an index in [0, 2*size) by amt (amt <= size), wrapping at 2*size
+ */
+static inline uint32_t rb_advance(const rb_config_t *ctx, uint32_t idx, uint32_t amt) {
+    uint32_t limit = ctx->size * 2u;
+    uint32_t next = idx + amt;
+    return next >= limit ? next - limit : next;
+}
+
+static inline void *rb_slot(const rb_config_t *ctx, uint32_t idx) {
+    return ((char *)ctx->buffer) + (size_t)rb_index(ctx, idx) * ctx->dlen;
+}
+
 size_t ringbuffer_len(rb_config_t *ctx) {
+    size_t raw;
     if (ctx->head >= ctx->tail) {
-        return ctx->head - ctx->tail;
+        raw = ctx->head - ctx->tail;
     } else {
-        return ctx->size - ctx->tail + ctx->head;
+        raw = (size_t)ctx->size * 2u - ctx->tail + ctx->head;
     }
+    // DO NOT REMOVE: this clamp is not dead code. Under the SPSC invariant raw
+    // is always <= size and the clamp is a no-op. But an index pair can be torn
+    // by a racing consumer -- a flush() overlapping a seek()/pop() can leave
+    // tail past head (see the note in main.cc) -- and an unclamped raw then
+    // reads as a huge bogus length. That would underflow ringbuffer_space() to
+    // ~SIZE_MAX and let push() write past the end of the backing array. One
+    // compare makes len/space/push/pop/peek/seek/transfer all fail CLOSED
+    // (ring reads as full/empty) instead of failing open.
+    return raw > ctx->size ? ctx->size : raw;
 }
 
 size_t ringbuffer_space(rb_config_t *ctx) {
     return ctx->size - ringbuffer_len(ctx);
 }
 
+size_t ringbuffer_capacity(rb_config_t *ctx) {
+    return ctx->size;
+}
+
 size_t ringbuffer_push(rb_config_t *ctx, void *data, size_t len) {
+    size_t space = ringbuffer_space(ctx);
+    size_t amt = len > space ? space : len;
+    for (size_t i = 0; i < amt; i++) {
+        memcpy(rb_slot(ctx, ctx->head), ((char *)data) + i * ctx->dlen, ctx->dlen);
+        ctx->head = rb_advance(ctx, ctx->head, 1);
+    }
+    return amt;
+}
+
+size_t ringbuffer_push_overwrite(rb_config_t *ctx, void *data, size_t len, size_t *evicted) {
+    size_t dropped = 0;
+    if (ctx->size == 0) {
+        if (evicted) {
+            *evicted = 0;
+        }
+        return 0;
+    }
     for (size_t i = 0; i < len; i++) {
         if (ringbuffer_space(ctx) == 0) {
-            return i;
+            // Drop-oldest: make room by discarding the element at the tail.
+            ctx->tail = rb_advance(ctx, ctx->tail, 1);
+            dropped++;
         }
-        memcpy(((char *)ctx->buffer) + ctx->head * ctx->dlen, ((char *)data) + i * ctx->dlen, ctx->dlen);
-        ctx->head = (ctx->head + 1) % ctx->size;
+        memcpy(rb_slot(ctx, ctx->head), ((char *)data) + i * ctx->dlen, ctx->dlen);
+        ctx->head = rb_advance(ctx, ctx->head, 1);
+    }
+    if (evicted) {
+        *evicted = dropped;
     }
     return len;
 }
 
-size_t ringbuffer_fill(rb_config_t *ctx, void* value, size_t len) {
+size_t ringbuffer_fill(rb_config_t *ctx, void *value, size_t len) {
     size_t space = ringbuffer_space(ctx);
     size_t amt = len > space ? space : len;
     for (size_t i = 0; i < amt; i++) {
-        memcpy(((char *)ctx->buffer) + ctx->head * ctx->dlen, value, ctx->dlen);
-        ctx->head = (ctx->head + 1) % ctx->size;
+        memcpy(rb_slot(ctx, ctx->head), value, ctx->dlen);
+        ctx->head = rb_advance(ctx, ctx->head, 1);
     }
     return amt;
 }
 
 size_t ringbuffer_pop(rb_config_t *ctx, void *data, size_t len) {
-    for (size_t i = 0; i < len; i++) {
-        if (ringbuffer_len(ctx) == 0) {
-            return i;
-        }
-        memcpy(((char *)data) + i * ctx->dlen, ((char *)ctx->buffer) + ctx->tail * ctx->dlen, ctx->dlen);
-        ctx->tail = (ctx->tail + 1) % ctx->size;
+    size_t avail = ringbuffer_len(ctx);
+    size_t amt = len > avail ? avail : len;
+    for (size_t i = 0; i < amt; i++) {
+        memcpy(((char *)data) + i * ctx->dlen, rb_slot(ctx, ctx->tail), ctx->dlen);
+        ctx->tail = rb_advance(ctx, ctx->tail, 1);
     }
-    return len;
-}
-
-void
-ringbuffer_replace(rb_config_t *ctx, void *data, size_t len) {
-    for (size_t i = 0; i < len; i++) {
-        memcpy(((char *)ctx->buffer) + ctx->tail * ctx->dlen, ((char *)data) + i * ctx->dlen, ctx->dlen);
-        ctx->tail = (ctx->tail + 1) % ctx->size;
-    }
-}
-
-void
-ringbuffer_reset(rb_config_t *ctx) {
-    ctx->head = 0;
-    ctx->tail = 0;
+    return amt;
 }
 
 size_t
 ringbuffer_peek(rb_config_t *ctx, void *data, size_t len) {
-    size_t tail = ctx->tail;
-    for (size_t i = 0; i < len; i++) {
-        if (ringbuffer_len(ctx) == 0) {
-            return i;
-        }
-        memcpy(((char *)data) + i * ctx->dlen, ((char *)ctx->buffer) + tail * ctx->dlen, ctx->dlen);
-        tail = (tail + 1) % ctx->size;
+    size_t avail = ringbuffer_len(ctx);
+    size_t amt = len > avail ? avail : len;
+    uint32_t tail = ctx->tail;
+    for (size_t i = 0; i < amt; i++) {
+        memcpy(((char *)data) + i * ctx->dlen, rb_slot(ctx, tail), ctx->dlen);
+        tail = rb_advance(ctx, tail, 1);
     }
-    return len;
+    return amt;
 }
 
 size_t
 ringbuffer_seek(rb_config_t *ctx, size_t len) {
-    size_t size = ringbuffer_len(ctx);
-    size_t amt = len > size ? size : len;
-    ctx->tail = (ctx->tail + amt) % ctx->size;
+    size_t avail = ringbuffer_len(ctx);
+    size_t amt = len > avail ? avail : len;
+    ctx->tail = rb_advance(ctx, ctx->tail, (uint32_t)amt);
     return amt;
 }
 
@@ -98,15 +141,14 @@ ringbuffer_transfer(rb_config_t *src, rb_config_t *dst, size_t len) {
     if (src->dlen != dst->dlen) {
         return 0;
     }
-    size_t size = ringbuffer_len(src);
-    size_t amt = len > size ? size : len;
+    size_t avail = ringbuffer_len(src);
+    size_t space = ringbuffer_space(dst);
+    size_t amt = len > avail ? avail : len;
+    amt = amt > space ? space : amt;
     for (size_t i = 0; i < amt; i++) {
-        if (ringbuffer_space(dst) == 0) {
-            return i;
-        }
-        memcpy(((char *)dst->buffer) + dst->head * dst->dlen, ((char *)src->buffer) + src->tail * src->dlen, src->dlen);
-        src->tail = (src->tail + 1) % src->size;
-        dst->head = (dst->head + 1) % dst->size;
+        memcpy(rb_slot(dst, dst->head), rb_slot(src, src->tail), src->dlen);
+        src->tail = rb_advance(src, src->tail, 1);
+        dst->head = rb_advance(dst, dst->head, 1);
     }
     return amt;
 }
