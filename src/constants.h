@@ -454,16 +454,24 @@ extern "C" {
  * second packet is margin for scheduling jitter and for a block arriving late.
  *
  * Bounded above, and the real bound is NOT simply troughTarget + block <= H.
- * The trough does not sit exactly on target in steady state -- it lands up to
- * PULL_DIV above it (the position term's deadband), and it alternates over a
- * further ~samplesPerPkt because of the block-period quantisation described at
- * TIO_TX_SERVO_WINDOW_TICKS. So the peak the trim actually sees is
+ * Four things sit between the target and the peak the trim actually sees:
+ * the trough lands up to PULL_DIV above target (the position term's
+ * deadband); it alternates a further ~samplesPerPkt from the block-period
+ * quantisation described at TIO_TX_SERVO_WINDOW_TICKS; and the block itself
+ * can arrive up to TIO_TX_SLIP_SAMPLES late, landing on a trough the servo
+ * has meanwhile raised. So the bound is
  *
- *     troughTarget + PULL_DIV + samplesPerPkt + block <= H
+ *     troughTarget + PULL_DIV + samplesPerPkt + slip + block <= H
  *
- * ECG 20 + 8 + 10 + 200 = 238 <= 250; PPG 20 + 8 + 10 + 13 = 51 <= 63. That
- * is what main.cc asserts -- the naive form would have passed at a target of
- * 30 while the real peak sat at 248, two samples from trimming. */
+ * ECG 20 + 8 + 10 + 30 + 200 = 268 <= 280; PPG 20 + 8 + 10 + 30 + 13 = 81
+ * <= 93. That is what main.cc asserts.
+ *
+ * This bound has been wrong twice, both times by omitting a term, so add
+ * rather than simplify. The naive two-term form passed at a target of 30
+ * while the real peak sat at 248 of 250; the four-term form that replaced it
+ * still ignored producer scheduling and was over-optimistic by an order of
+ * magnitude in margin. The five-term value above matches simulation exactly:
+ * at 102.4 samples/s with three iterations of slip the simulated peak is 268. */
 #define TIO_ECG_TX_TROUGH_TARGET (2 * TIO_ECG_SAMPLES_PER_PKT)
 #define TIO_PPG_TX_TROUGH_TARGET (2 * TIO_PPG_SAMPLES_PER_PKT)
 
@@ -498,10 +506,13 @@ extern "C" {
  * larger window came with the corrected four-term peak bound and both variants
  * meet acceptance identically -- safety margin over a tighter-looking counter.
  *
- * The cost is convergence speed: one budget step per window is 1/6.4 s, and
- * cold start takes roughly 8 windows (~50 s). That is the right trade -- the
- * quantity being tracked is a clock drift of a couple of samples per second,
- * which does not change on any timescale worth chasing. */
+ * The cost is responsiveness, but less than a per-step view suggests: the rate
+ * term is dead-beat, so simulation reaches a working budget on the SECOND
+ * window (~12.7 s from boot), not over the many windows a one-step-per-window
+ * reading would imply. An earlier version of this comment claimed ~50 s and
+ * contradicted the dead-beat description of the control law in main.cc; 12.7 s
+ * is the simulated figure. The residual dither never settles at all, so there
+ * is no later "converged" point to wait for. */
 #define TIO_TX_SERVO_WINDOW_TICKS (64)
 
 /* Divisor on the servo's position term: each window it moves the budget by
@@ -541,14 +552,19 @@ extern "C" {
 
 /* Per-slot TX-ring high-water H, in samples. On each pump tick the slot's TX
  * rings are trimmed to H before popping, so H bounds the stale backlog the
- * firmware is willing to hold. H is a sum of three terms:
+ * firmware is willing to hold. H is a sum of four terms:
  *
  *   1. structural block  -- the largest burst the producer can deliver in one
  *                           go, which the consumer must be able to hold
  *                           without discarding anything in steady state;
  *   2. one packet        -- TIO_*_SAMPLES_PER_PKT, so a full packet can always
  *                           be assembled from what is left after a trim;
- *   3. scheduling slack  -- TIO_TX_SLACK_SAMPLES.
+ *   3. scheduling slack  -- TIO_TX_SLACK_SAMPLES, for a late PUMP tick;
+ *   4. block slip        -- TIO_TX_SLIP_SAMPLES, for a late PRODUCER block.
+ *                           Terms 3 and 4 are different failure modes and both
+ *                           are needed: a late pump leaves samples unread, a
+ *                           late block lands them all at once on top of a
+ *                           trough the servo has already raised.
  *
  * Steady-state trim should be ~0 in BOTH clock-drift directions, and that is
  * the acceptance criterion. The pump's nominal rate is anchored to the
@@ -578,22 +594,58 @@ extern "C" {
  * 0.5% of a 100 Hz stream is 0.5 samples/s; round up to 1. */
 #define TIO_TX_TRIM_DRIFT_ALLOWANCE_SPS (1)
 
-/* Scheduling slack: TIO_JITTER_BUDGET_MS (250 ms) plus one pump interval
- * (100 ms) = 350 ms, rounded up to the next whole pump interval = 400 ms. At
- * 100 Hz that is 40 samples. This absorbs a late pump tick without discarding
- * signal. */
+/* Scheduling slack for a late PUMP tick: TIO_JITTER_BUDGET_MS (250 ms) plus
+ * one pump interval (100 ms) = 350 ms, rounded up to the next whole pump
+ * interval = 400 ms. At 100 Hz that is 40 samples. */
 #define TIO_TX_SLACK_SAMPLES (40)
+
+/* Block slip: allowance for a late PRODUCER block, in samples. Three pump
+ * intervals = 300 ms = 30 samples at 100 Hz.
+ *
+ * WHY THIS EXISTS. EcgProcessTask runs exactly ONE mutually-exclusive pipeline
+ * stage per iteration, and the 200-sample push happens only in the
+ * segmentation branch. A due segmentation is therefore deferrable by whole
+ * iterations whenever a higher-priority branch claims the tick -- denoise is
+ * checked first, so it can push segmentation out by an iteration. The block
+ * then lands late, all at once, on top of a trough the servo has already
+ * raised toward target. Slack (term 3) does not cover this: it is sized for
+ * the opposite failure, a pump that is late reading.
+ *
+ * WHY THREE ITERATIONS. One is the steady-state maximum, since denoise is the
+ * only higher-priority branch and it fires once per block cycle. Three also
+ * covers a denoise inference overrunning its 100 ms budget, and the transient
+ * multi-iteration deferral possible after a flush or reconnect when rbEcgDen
+ * carries a backlog. It matches the 0-300 ms slip envelope the change was
+ * reviewed against.
+ *
+ * MEASURED CONSEQUENCE OF OMITTING IT. Simulated at the measured 102.4
+ * samples/s with the previous H of 250: one iteration of slip put peak
+ * pre-trim occupancy at 247 against H = 250 -- three samples of margin, not
+ * the ~41 that had been documented -- and two iterations reached 255 and
+ * discarded samples, reinstating the permanent-loss defect this branch
+ * exists to remove. With the slip term included, the same sweep peaks at 268
+ * against H = 280 and trims nothing. */
+#define TIO_TX_SLIP_SAMPLES (30)
 
 /* ECG structural block: the segmentation branch is the sole producer of the
  * ECG TX taps and it pushes ECG_SEG_VALID_LEN (200) samples at once, once per
- * 2 s (main.cc, ECG SEGMENTATION). 200 + 10 + 40 = 250. */
+ * 2 s (main.cc, ECG SEGMENTATION). 200 + 10 + 40 + 30 = 280. */
 #define TIO_ECG_TX_BLOCK_SAMPLES (ECG_SEG_VALID_LEN)
-#define TIO_ECG_TX_HIGH_WATER (TIO_ECG_TX_BLOCK_SAMPLES + TIO_ECG_SAMPLES_PER_PKT + TIO_TX_SLACK_SAMPLES)
+#define TIO_ECG_TX_HIGH_WATER                                                                                          \
+    (TIO_ECG_TX_BLOCK_SAMPLES + TIO_ECG_SAMPLES_PER_PKT + TIO_TX_SLACK_SAMPLES + TIO_TX_SLIP_SAMPLES)
 
 /* PPG structural block: PpgProcessTask tees samples continuously, but the
  * AS7058 delivers on a FIFO watermark whose observed ISR interval is
  * ~125-130 ms, so one pump tick can find up to ~13 samples at 100 Hz.
- * 13 + 10 + 40 = 63.
+ * 13 + 10 + 40 + 30 = 93.
+ *
+ * PPG takes the same slip allowance as ECG, for a different reason. Its
+ * producer is not a deferrable stage -- the tee loop runs every iteration --
+ * but a delayed PpgProcessTask lets the sensor ring accumulate, so the slip
+ * shows up as a LARGER TEE BURST rather than a later block. The allowance
+ * covers a 300 ms task delay, which is the same envelope. Costs nothing:
+ * measured PPG occupancy runs 0..22 against the old H of 63, so it never
+ * approached either bound, and the ring headroom is enormous either way.
  *
  * CAVEAT, and it is a weaker guarantee than the ECG line above: 13 is an
  * OBSERVED figure, not a compile-time bound. The ECG block is
@@ -606,7 +658,8 @@ extern "C" {
  * runtime high-water counter g_ppg_tee_burst_max in main.cc exists to catch
  * that on the bench; if it reports above this value, re-derive H. */
 #define TIO_PPG_TX_BLOCK_SAMPLES (13)
-#define TIO_PPG_TX_HIGH_WATER (TIO_PPG_TX_BLOCK_SAMPLES + TIO_PPG_SAMPLES_PER_PKT + TIO_TX_SLACK_SAMPLES)
+#define TIO_PPG_TX_HIGH_WATER                                                                                          \
+    (TIO_PPG_TX_BLOCK_SAMPLES + TIO_PPG_SAMPLES_PER_PKT + TIO_TX_SLACK_SAMPLES + TIO_TX_SLIP_SAMPLES)
 
 
 ///////////////////////////////////////////////////////////////////////////////
