@@ -114,13 +114,27 @@ extern "C" {
 #define EN_APP_DEBUG_LOGS (0)
 #endif
 
-/* Default 0: the timing logs print once per pipeline iteration (see
- * main.cc EcgProcessTask/PpgProcessTask). At the 100 ms pump cadence that
- * print storm costs more time than the stages it measures and distorts the
- * emission timing the latency budget below depends on. Turn it on
- * deliberately for a single bring-up session, never by default. */
+/* Default 0. These prints sit inside the once-per-2-s denoise/segmentation/
+ * metrics branches, so the cost is ~1.5 lines/s rather than a per-iteration
+ * storm -- but nsx_printf over SWO blocks the calling task, and these are the
+ * equal-priority pump tasks whose cadence the latency budget below depends on.
+ * A blocked pump overruns its period, and an overrun is exactly the condition
+ * tio_pump_wait() has to absorb without dropping below 1x. Enable deliberately
+ * for a bring-up session, not by default.
+ *
+ * Turning this off discards the per-stage inference return codes, which were
+ * its only report. g_stage_err[] in main.cc counts them unconditionally so a
+ * persistently failing stage cannot hide behind a plausible-looking trace. */
 #ifndef EN_APP_TIMING_LOGS
 #define EN_APP_TIMING_LOGS (0)
+#endif
+
+/* Default 1: the single 1 Hz [tio-emit] line in ReportTask, which is where the
+ * issue #12 acceptance criteria (packet rate, delivery, trim rate) are read
+ * from. Gated separately from EN_APP_DEBUG_LOGS so that a bench run is not
+ * blind by default -- one line per second does not perturb the pump. */
+#ifndef EN_APP_EMIT_LOGS
+#define EN_APP_EMIT_LOGS (1)
 #endif
 
 #ifndef EN_MODEL_VERBOSE_LOGS
@@ -332,7 +346,8 @@ extern "C" {
 // TileIO latency budget
 ///////////////////////////////////////////////////////////////////////////////
 //
-// Design record: docs/design/streaming-pipeline.md, sections 1 and 3.1-3.4.
+// Design record: see issue #12 (streaming pipeline rework, sections 1 and
+// 3.1-3.4 of the design record attached to it).
 //
 // A live monitor has two independent quantities, and they are not
 // interchangeable:
@@ -376,6 +391,14 @@ extern "C" {
  * paced with vTaskDelayUntil() without rounding drift. */
 #define TIO_PUMP_INTERVAL_MS (100)
 
+/* Phase offset applied to the PPG pump's initial wake time so the two signal
+ * slots do not enqueue in the same tick. Both pump tasks are created
+ * back-to-back at equal priority and would otherwise stay in lockstep
+ * indefinitely, concentrating the packet budget into simultaneous bursts and
+ * making the transport queue peakier than the average rate implies. A third of
+ * the pump interval spreads the two slots evenly. */
+#define TIO_PPG_PUMP_PHASE_MS (33)
+
 /* Samples per signal packet. 10 samples at ECG_TARGET_RATE/PPG_TARGET_RATE =
  * 100 Hz is exactly TIO_PUMP_INTERVAL_MS of signal, which is what makes one
  * packet per pump tick equal to 1.00x realtime: 10 pkt/s per slot.
@@ -401,9 +424,26 @@ extern "C" {
  *                           be assembled from what is left after a trim;
  *   3. scheduling slack  -- TIO_TX_SLACK_SAMPLES.
  *
- * Steady-state trim MUST be zero. A non-zero trim counter in steady state
- * means H is mis-derived or the producer is running above 1x -- it is a bug to
- * investigate, not a policy that is working. */
+ * Judge trim as a RATE, not against zero. The pump's "1x" is anchored to the
+ * FreeRTOS tick; the producer is anchored to the AS7058 sample clock; nothing
+ * cross-checks the two. The asymmetry matters:
+ *
+ *   * Producer slightly SLOW (e.g. 99.5 Hz against a 10-sample/100 ms pump):
+ *     the pump occasionally finds fewer than a full packet and skips a tick.
+ *     Self-throttling, trim stays 0. This is the tolerant direction, and the
+ *     ~99.5 Hz the dashboard reports today puts us in it.
+ *   * Producer slightly FAST (e.g. 100.5 Hz): occupancy climbs until it meets
+ *     H and then trim discards the excess forever -- about 1 sample per 2 s
+ *     block, ~30/min, in a perfectly healthy system.
+ *
+ * So the acceptance criterion is trim rate <= TIO_TX_TRIM_DRIFT_ALLOWANCE_SPS
+ * sustained, not trim == 0. A trim rate materially above that, or any trim
+ * burst not explained by a stall or reconnect, means H is mis-derived or the
+ * producer is genuinely running above 1x -- that is a bug to investigate. */
+
+/* Clock-drift allowance for the trim acceptance criterion, in samples/s.
+ * 0.5% of a 100 Hz stream is 0.5 samples/s; round up to 1. */
+#define TIO_TX_TRIM_DRIFT_ALLOWANCE_SPS (1)
 
 /* Scheduling slack: TIO_JITTER_BUDGET_MS (250 ms) plus one pump interval
  * (100 ms) = 350 ms, rounded up to the next whole pump interval = 400 ms. At
@@ -420,7 +460,18 @@ extern "C" {
 /* PPG structural block: PpgProcessTask tees samples continuously, but the
  * AS7058 delivers on a FIFO watermark whose observed ISR interval is
  * ~125-130 ms, so one pump tick can find up to ~13 samples at 100 Hz.
- * 13 + 10 + 40 = 63. */
+ * 13 + 10 + 40 = 63.
+ *
+ * CAVEAT, and it is a weaker guarantee than the ECG line above: 13 is an
+ * OBSERVED figure, not a compile-time bound. The ECG block is
+ * ECG_SEG_VALID_LEN, a constant the static_asserts in main.cc can check. The
+ * PPG tee loop, with PPG_DS_RATE == 1, is bounded only by the sensor ring
+ * occupancy MIN(len(rbPpg1Sensor), len(rbPpg2Sensor)) -- up to
+ * SENSOR_BUF_LEN-1 (255) if that task is ever delayed long enough. Exceeding
+ * this constant does not corrupt anything (the trim absorbs it) but it does
+ * mean H is under-derived and steady-state trim would become non-zero. The
+ * runtime high-water counter g_ppg_tee_burst_max in main.cc exists to catch
+ * that on the bench; if it reports above this value, re-derive H. */
 #define TIO_PPG_TX_BLOCK_SAMPLES (13)
 #define TIO_PPG_TX_HIGH_WATER (TIO_PPG_TX_BLOCK_SAMPLES + TIO_PPG_SAMPLES_PER_PKT + TIO_TX_SLACK_SAMPLES)
 
