@@ -59,27 +59,32 @@ _Static_assert(HKV_CNT_USB_UIO_RETRY == HKV_CNT_USB_ECG_RETRY + 6, "USB bucket c
 // Gauges
 ///////////////////////////////////////////////////////////////////////////////
 
-/* Sentinel for "no observation in this window". Chosen as UINT32_MAX so the
- * ordinary `value < lo` update needs no is-first-observation branch on the
- * sample path; the reporter substitutes 0 when it sees the sentinel. */
-#define HKV_GAUGE_LO_INIT (0xFFFFFFFFu)
+/* HKV_GAUGE_LO_INIT lives in obs_fmt.h alongside hkv_gauge_lo_display(), so
+ * the sentinel and the substitution that hides it are defined and tested
+ * together rather than a header apart. */
 
 typedef struct {
     volatile uint32_t lo;
     volatile uint32_t hi;
+    /* Observations in the current window. Reported as `<key>_n` because
+     * `<key>_lo=0` is otherwise ambiguous between "observed zero" and "never
+     * observed", which for TX occupancy is the difference between a healthy
+     * empty ring and a pump task that never ran. */
+    volatile uint32_t n;
 } hkv_gauge_t;
 
 typedef struct {
     const char *subsystem;
     const char *key;
+    hkv_gauge_kind_t kind;
     hkv_gauge_reset_t reset;
 } hkv_gauge_meta_t;
 
-#define HKV_GAUGE_META_ROW(id, sub, key, policy) {(sub), (key), (policy)},
+#define HKV_GAUGE_META_ROW(id, sub, key, kind, policy) {(sub), (key), (kind), (policy)},
 static const hkv_gauge_meta_t kGaugeMeta[HKV_GAUGE_COUNT] = {HKV_GAUGE_TABLE(HKV_GAUGE_META_ROW)};
 #undef HKV_GAUGE_META_ROW
 
-#define HKV_GAUGE_INIT_ROW(id, sub, key, policy) {HKV_GAUGE_LO_INIT, 0},
+#define HKV_GAUGE_INIT_ROW(id, sub, key, kind, policy) {HKV_GAUGE_LO_INIT, 0, 0},
 static hkv_gauge_t g_hkv_gauges[HKV_GAUGE_COUNT] = {HKV_GAUGE_TABLE(HKV_GAUGE_INIT_ROW)};
 #undef HKV_GAUGE_INIT_ROW
 
@@ -89,6 +94,7 @@ hkv_gauge_observe(hkv_gauge_id_t id, uint32_t value)
     /* Same relaxed model as the counters, for the same reason: this runs on
      * the pump tick and the PPG tee path. The worst case of a lost update is
      * one interval reporting a slightly narrow range. */
+    g_hkv_gauges[id].n++;
     if (value > g_hkv_gauges[id].hi) {
         g_hkv_gauges[id].hi = value;
     }
@@ -102,6 +108,7 @@ hkv_gauge_reset(hkv_gauge_id_t id)
 {
     g_hkv_gauges[id].lo = HKV_GAUGE_LO_INIT;
     g_hkv_gauges[id].hi = 0;
+    g_hkv_gauges[id].n = 0;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -235,10 +242,17 @@ hkv_log_u32_ps(const char *key, uint32_t value)
     nsx_printf("%s_ps=%lu ", key, (unsigned long)value);
 }
 
+/* `_n` first, deliberately: it is the field that says whether the other two
+ * mean anything, and a human scanning the line should hit it before reading a
+ * number into a diagnosis. */
 static void
-hkv_log_gauge(const char *key, uint32_t lo, uint32_t hi)
+hkv_log_gauge(const char *key, hkv_gauge_kind_t kind, uint32_t lo, uint32_t hi, uint32_t n)
 {
-    nsx_printf("%s_lo=%lu %s_hi=%lu ", key, (unsigned long)lo, key, (unsigned long)hi);
+    nsx_printf("%s_n=%lu ", key, (unsigned long)n);
+    if (kind == HKV_GAUGE_RANGE) {
+        nsx_printf("%s_lo=%lu ", key, (unsigned long)hkv_gauge_lo_display(lo));
+    }
+    nsx_printf("%s_hi=%lu ", key, (unsigned long)hi);
 }
 
 void
@@ -256,10 +270,11 @@ hkv_report_subsystem(const char *subsystem, void (*extra)(void))
             continue;
         }
         cur = g_hkv_counters[i];
-        /* Unsigned subtraction, so this stays correct across the counter's
-         * 32-bit wrap. That correctness is exactly why the reporter keeps its
-         * own snapshot instead of zeroing the counter. */
-        delta = cur - g_hkv_prev[i];
+        /* Unsigned subtraction (hkv_counter_delta, obs_fmt.h), so this stays
+         * correct across the counter's 32-bit wrap. That correctness is
+         * exactly why the reporter keeps its own snapshot instead of zeroing
+         * the counter. */
+        delta = hkv_counter_delta(cur, g_hkv_prev[i]);
         g_hkv_prev[i] = cur;
 
         switch (kCounterMeta[i].emit) {
@@ -278,18 +293,11 @@ hkv_report_subsystem(const char *subsystem, void (*extra)(void))
     }
 
     for (i = 0; i < (uint32_t)HKV_GAUGE_COUNT; i++) {
-        uint32_t lo;
-        uint32_t hi;
-
         if (strcmp(kGaugeMeta[i].subsystem, subsystem) != 0) {
             continue;
         }
-        lo = g_hkv_gauges[i].lo;
-        hi = g_hkv_gauges[i].hi;
-        if (lo == HKV_GAUGE_LO_INIT) {
-            lo = 0; /* nothing observed in this window */
-        }
-        hkv_log_gauge(kGaugeMeta[i].key, lo, hi);
+        hkv_log_gauge(kGaugeMeta[i].key, kGaugeMeta[i].kind, g_hkv_gauges[i].lo, g_hkv_gauges[i].hi,
+                      g_hkv_gauges[i].n);
         if (kGaugeMeta[i].reset == HKV_GAUGE_WINDOWED) {
             hkv_gauge_reset((hkv_gauge_id_t)i);
         }

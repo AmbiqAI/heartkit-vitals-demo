@@ -1,11 +1,19 @@
 /**
  * @file obs_fmt.h
- * @brief Pure value formatting for the HKV diagnostic line format.
+ * @brief Pure value arithmetic for the HKV diagnostic line format.
  *
- * Deliberately dependency-free (stdint only): no FreeRTOS, no nsx, no float
- * printf. That is what lets tests/test_obs_format.c exercise it on the host
- * under UBSan, which is the only place the edge cases below are actually
- * checked -- the firmware never sees a NaN on the bench until it does.
+ * Everything the line format computes that does NOT need FreeRTOS, nsx, or a
+ * lock lives here rather than inside obs.c, for one reason: this header is
+ * dependency-free (stdint only), so tests/test_obs_format.c can exercise it on
+ * the host under ASan/UBSan. Anything left in obs.c is only reachable on
+ * hardware, where a wrong answer shows up as a plausible number in a capture
+ * rather than as a failing test.
+ *
+ * That is not a hypothetical distinction. All three functions below encode a
+ * claim that the rest of the design leans on -- the sign of a negative metric,
+ * the correctness of a delta across a counter wrap, and the difference between
+ * "observed zero" and "observed nothing" -- and each one is a single line that
+ * a refactor could plausibly "simplify" into being wrong.
  *
  * See obs.h for the line format and the counter/gauge model.
  */
@@ -72,6 +80,59 @@ hkv_fx2_from_float(float v)
     }
     scaled = v * 100.0f;
     return (int32_t)(scaled + ((scaled >= 0.0f) ? 0.5f : -0.5f));
+}
+
+/**
+ * @brief Interval delta for a free-running counter.
+ *
+ * MUST stay unsigned. This is what lets a counter be free-running and
+ * WRAPPING and never reset -- which is in turn what lets two independent
+ * consumers each keep their own snapshot without stealing each other's
+ * interval (obs.h). Unsigned subtraction is defined to wrap modulo 2^32, so
+ * the answer is correct across the wrap for any interval shorter than 2^32
+ * counts, which at this app's rates is decades.
+ *
+ * The failure mode if this is ever "simplified" to signed arithmetic is
+ * specific and ugly: the first report after a wrap emits a delta of roughly
+ * 4.29e9 in a `_ps` field, every downstream rate calculation spikes, and
+ * nothing in the firmware notices. That is why it is a named function with a
+ * test rather than an inline subtraction.
+ *
+ * @param cur current counter value
+ * @param prev value at the previous report
+ * @return counts elapsed since prev
+ */
+static inline uint32_t
+hkv_counter_delta(uint32_t cur, uint32_t prev)
+{
+    return cur - prev;
+}
+
+/* Sentinel a gauge's minimum holds when nothing has been observed in the
+ * current window. UINT32_MAX specifically, so the ordinary `value < lo` update
+ * on the sample path needs no is-this-the-first-observation branch. */
+#define HKV_GAUGE_LO_INIT (0xFFFFFFFFu)
+
+/**
+ * @brief Value to report for a gauge minimum, mapping the sentinel to 0.
+ *
+ * The sentinel is an internal encoding, not a measurement, and 0xFFFFFFFF in a
+ * `_lo` field would read as a real and alarming occupancy. It is reported as 0
+ * instead.
+ *
+ * THAT SUBSTITUTION IS AMBIGUOUS ON ITS OWN, which is why every gauge also
+ * emits an observation count (`<key>_n`): `occ_lo=0` alone cannot distinguish
+ * "the pump never ran in this window" from "the pump ran normally against an
+ * empty ring", and those are opposite diagnoses. Read `_n` first: `_n=0` means
+ * the `_lo`/`_hi` pair carries no information at all.
+ *
+ * @param lo raw stored minimum
+ * @return lo, or 0 if nothing was observed
+ */
+static inline uint32_t
+hkv_gauge_lo_display(uint32_t lo)
+{
+    return (lo == HKV_GAUGE_LO_INIT) ? 0u : lo;
 }
 
 #ifdef __cplusplus

@@ -66,6 +66,21 @@ target_include_directories(heartkit-vitals-demo PRIVATE
 # Board name comes from the CMake variable that actually selected the build,
 # not from an SoC preprocessor macro guessed in C -- the boot line should not
 # be able to disagree with the build it came from.
+#
+# Both strings land unescaped in the boot line, whose fields are separated by
+# spaces and whose records are separated by `|`. A value containing either
+# breaks the format for a whitespace-splitting parser: -DHKV_FW_VERSION="1.2
+# rc1" emits `fw=1.2 rc1 board=...` and silently shifts every later field by
+# one. HKV_FW_VERSION is externally supplied, so validate rather than trust.
+foreach(hkv_ident_var HKV_FW_VERSION NSX_BOARD)
+    if("${${hkv_ident_var}}" MATCHES "[ 	|]")
+        message(FATAL_ERROR
+            "${hkv_ident_var}='${${hkv_ident_var}}' contains a space, tab or '|'. "
+            "It is emitted verbatim into the HKV boot line, where those characters "
+            "are field and record separators, so it would corrupt the line format.")
+    endif()
+endforeach()
+
 target_compile_definitions(heartkit-vitals-demo PRIVATE
     HKV_BOARD_NAME="${NSX_BOARD}"
     HKV_FW_VERSION="${HKV_FW_VERSION}"

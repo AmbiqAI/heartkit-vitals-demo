@@ -66,5 +66,39 @@ main(void)
     CHECK(hkv_fx2_from_float(-one / zero) != HKV_FX2_INVALID);
     CHECK(hkv_fx2_from_float(-1.0e30f) != HKV_FX2_INVALID);
 
+    TEST_CASE("counter delta is ordinary in the common case");
+    CHECK_EQ(hkv_counter_delta(0u, 0u), 0u);
+    CHECK_EQ(hkv_counter_delta(10u, 0u), 10u);
+    CHECK_EQ(hkv_counter_delta(1010u, 1000u), 10u);
+
+    /* THE LOAD-BEARING CASE. obs.h calls the wrap-correct delta "the whole
+     * reason counters are not resettable": it is what lets a counter run free
+     * and lets each consumer keep its own snapshot. If this is ever changed to
+     * signed arithmetic the first report after a wrap emits ~4.29e9 into a
+     * `_ps` field and nothing else in the firmware notices. */
+    TEST_CASE("counter delta is correct across the 32-bit wrap");
+    CHECK_EQ(hkv_counter_delta(0u, 0xFFFFFFFFu), 1u);
+    CHECK_EQ(hkv_counter_delta(9u, 0xFFFFFFFFu), 10u);
+    CHECK_EQ(hkv_counter_delta(0x00000005u, 0xFFFFFFFBu), 10u);
+    /* Straddling the wrap must not produce a huge value. A per-second rate on
+     * this app's busiest counter is order 100, so anything above a few
+     * thousand here is the signed-arithmetic regression. */
+    CHECK(hkv_counter_delta(4u, 0xFFFFFF00u) < 1000u);
+    /* Exactly one full wrap reads as zero elapsed. That is unavoidable at any
+     * width and is not what this test is defending against; it is pinned so
+     * the boundary behaviour is stated rather than discovered. */
+    CHECK_EQ(hkv_counter_delta(0x1234u, 0x1234u), 0u);
+
+    TEST_CASE("gauge sentinel is hidden from the wire");
+    CHECK_EQ(hkv_gauge_lo_display(HKV_GAUGE_LO_INIT), 0u);
+    /* Every other value passes through untouched -- including 0, which is a
+     * legitimate observation of an empty ring and must not be confused with
+     * the sentinel. The `_n` field, not this function, is what tells those two
+     * apart on the wire. */
+    CHECK_EQ(hkv_gauge_lo_display(0u), 0u);
+    CHECK_EQ(hkv_gauge_lo_display(1u), 1u);
+    CHECK_EQ(hkv_gauge_lo_display(280u), 280u);
+    CHECK_EQ(hkv_gauge_lo_display(0xFFFFFFFEu), 0xFFFFFFFEu);
+
     return TEST_RESULT();
 }

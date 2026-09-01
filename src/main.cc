@@ -2142,6 +2142,13 @@ static const hkv_report_line_t kReportLines[] = {
 #define HKV_REPORT_SLOT_MS (1000u / HKV_REPORT_LINE_COUNT)
 
 static_assert(HKV_REPORT_SLOT_MS > 0, "report rotation cannot exceed one subsystem per millisecond");
+/* Integer division, so a line count that does not divide 1000 silently yields
+ * a rotation SHORTER than a second -- 11 subsystems gives 90 ms slots and a
+ * 990 ms rotation -- while every `_ps` field stays labelled per-second and
+ * reads ~1% high. Fail the build instead: either pick a divisor of 1000 or
+ * change the slot derivation and the `_ps` suffix together. */
+static_assert(1000u % HKV_REPORT_LINE_COUNT == 0,
+              "report line count must divide 1000 ms exactly, or _ps is not a per-second rate");
 
 void
 ReportTask(void *pvParameters)

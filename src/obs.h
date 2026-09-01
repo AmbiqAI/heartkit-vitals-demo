@@ -85,6 +85,8 @@
  *   `<key>_ps`  -- a per-report-interval delta, i.e. a rate per second
  *   `<key>_lo`  -- gauge minimum over the window
  *   `<key>_hi`  -- gauge maximum over the window
+ *   `<key>_n`   -- observations behind that window; `_n=0` means the `_lo` and
+ *                  `_hi` beside it are placeholders, NOT measurements
  *   `<key>_x100`-- signed integer hundredths
  *
  * One subsystem per line, each comfortably under 1024 bytes.
@@ -119,9 +121,23 @@
  * hkv_log_*. Direct nsx_printf calls elsewhere in the app (sensor.c,
  * ble_bringup.c, as7058_profiles.c, the model TUs) and inside vendored modules
  * are NOT serialized against it and CAN still corrupt a line if they land
- * concurrently. Most of those are bring-up-time or error-path prints, so the
- * exposure in a steady-state capture is small, but it is not zero and this
- * change does not eliminate the class.
+ * concurrently. This change does not eliminate the class; it removes the
+ * app-level steady-state sources and leaves the rest visible.
+ *
+ * Two categories, and the distinction is the useful part:
+ *   - Bring-up and error paths (most of the above). They fire once at startup
+ *     or when something has already gone wrong, so a corrupted line in a
+ *     steady-state capture is unlikely and, on an error path, is not the
+ *     problem you are debugging anyway.
+ *   - STEADY-STATE emitters, which are the ones that actually reproduce the
+ *     defect. One was found in review and fixed rather than documented:
+ *     ecg_physiokit_segmentation_inference() (ecg_segmentation.cc) emitted
+ *     1 + numPeaks raw lines from EcgProcessTask once per ~2 s window whenever
+ *     segmentation is in DSP mode -- runtime-selectable over UIO, so reachable
+ *     by any user without a rebuild. It is now behind EN_MODEL_VERBOSE_LOGS,
+ *     matching ecg_arrhythmia.cc. If you add a print on a periodic path,
+ *     either route it through hkv_log_* or gate it; a raw nsx_printf on a
+ *     2 s cadence is enough to corrupt a capture.
  */
 #ifndef __HKV_OBS_H
 #define __HKV_OBS_H
@@ -285,7 +301,17 @@ hkv_count(hkv_counter_id_t id)
 // Gauge table
 ///////////////////////////////////////////////////////////////////////////////
 //
-// X(id, subsystem, key, reset policy)
+// X(id, subsystem, key, kind, reset policy)
+//
+// Every gauge emits `<key>_n`, the number of observations in the window. It is
+// not decoration: without it `<key>_lo=0` cannot be told apart from a window in
+// which the producer never ran at all, and those are opposite diagnoses. `_n=0`
+// means the rest of the pair carries no information.
+
+typedef enum {
+    HKV_GAUGE_RANGE = 0, /* emit `_lo` and `_hi` */
+    HKV_GAUGE_MAX        /* emit `_hi` only; the minimum is not meaningful */
+} hkv_gauge_kind_t;
 
 typedef enum {
     HKV_GAUGE_WINDOWED = 0, /* reporter resets after each emit */
@@ -296,20 +322,26 @@ typedef enum {
 #define HKV_GAUGE_TABLE(X)                                                                         \
     /* TX ring occupancy, sampled pre-trim and pre-pop so it reflects what     */                  \
     /* the producer actually created including whatever the trim discards.     */                  \
-    /* For a block-structured producer like ECG the low value IS the pre-block */                  \
-    /* residual: how close the next atomic 200-sample push lands to H.         */                  \
-    X(HKV_GAUGE_TXECG_OCC,  "txecg", "occ",  HKV_GAUGE_WINDOWED)                                   \
-    X(HKV_GAUGE_TXPPG_OCC,  "txppg", "occ",  HKV_GAUGE_WINDOWED)                                   \
+    /* RANGE because both ends are read: for a block-structured producer like  */                  \
+    /* ECG the low value IS the pre-block residual, i.e. how close the next    */                  \
+    /* atomic 200-sample push lands to H, while the high value is the peak the */                  \
+    /* trim had to absorb.                                                     */                  \
+    X(HKV_GAUGE_TXECG_OCC,  "txecg", "occ",  HKV_GAUGE_RANGE, HKV_GAUGE_WINDOWED)                  \
+    X(HKV_GAUGE_TXPPG_OCC,  "txppg", "occ",  HKV_GAUGE_RANGE, HKV_GAUGE_WINDOWED)                  \
     /* Samples teed into the PPG TX rings by one pass of PpgProcessTask, i.e.  */                  \
-    /* the OBSERVED structural block. LIFETIME on purpose: this exists to      */                  \
-    /* check the claim that TIO_PPG_TX_BLOCK_SAMPLES bounds it, and a single   */                  \
-    /* excursion invalidates the derivation of H. A per-second maximum would   */                  \
-    /* scroll that one excursion out of the capture, which is the opposite of  */                  \
-    /* what the counter is for.                                                */                  \
-    X(HKV_GAUGE_PPG_TEE,    "pipe",  "tee",  HKV_GAUGE_LIFETIME)
+    /* the OBSERVED structural block.                                          */                  \
+    /* MAX, not RANGE: the question this answers is "did a single pass ever    */                  \
+    /* exceed TIO_PPG_TX_BLOCK_SAMPLES", and the minimum is structurally 0 --  */                  \
+    /* the loop runs on every iteration whether or not samples are waiting, so */                  \
+    /* the first empty pass pins a `_lo` at 0 forever and it never carries     */                  \
+    /* information again.                                                      */                  \
+    /* LIFETIME, not WINDOWED: a single excursion invalidates the derivation   */                  \
+    /* of H, and a per-second maximum would scroll that one excursion out of   */                  \
+    /* the capture -- the opposite of what this gauge is for.                  */                  \
+    X(HKV_GAUGE_PPG_TEE,    "pipe",  "tee",  HKV_GAUGE_MAX,   HKV_GAUGE_LIFETIME)
 /* clang-format on */
 
-#define HKV_GAUGE_ENUM_ROW(id, sub, key, policy) id,
+#define HKV_GAUGE_ENUM_ROW(id, sub, key, kind, policy) id,
 typedef enum { HKV_GAUGE_TABLE(HKV_GAUGE_ENUM_ROW) HKV_GAUGE_COUNT } hkv_gauge_id_t;
 #undef HKV_GAUGE_ENUM_ROW
 
