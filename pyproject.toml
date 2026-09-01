@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Tooling environment for the HeartKit vitals demo (neuralSPOT-X build/flash/view)"
 requires-python = ">=3.11"
 dependencies = [
-    "neuralspotx>=0.7.4",
+    "neuralspotx>=0.7.17",
 ]
 
 [tool.uv]
