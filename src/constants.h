@@ -114,8 +114,13 @@ extern "C" {
 #define EN_APP_DEBUG_LOGS (0)
 #endif
 
+/* Default 0: the timing logs print once per pipeline iteration (see
+ * main.cc EcgProcessTask/PpgProcessTask). At the 100 ms pump cadence that
+ * print storm costs more time than the stages it measures and distorts the
+ * emission timing the latency budget below depends on. Turn it on
+ * deliberately for a single bring-up session, never by default. */
 #ifndef EN_APP_TIMING_LOGS
-#define EN_APP_TIMING_LOGS (1)
+#define EN_APP_TIMING_LOGS (0)
 #endif
 
 #ifndef EN_MODEL_VERBOSE_LOGS
@@ -322,6 +327,102 @@ extern "C" {
 #define TIO_SLOT0_SIG_NUM_VALS (10)
 #define TIO_SLOT0_FS (ECG_TARGET_RATE / TIO_SLOT0_SIG_NUM_VALS)
 #define TIO_SLOT0_SCALE (1000)
+
+///////////////////////////////////////////////////////////////////////////////
+// TileIO latency budget
+///////////////////////////////////////////////////////////////////////////////
+//
+// Design record: docs/design/streaming-pipeline.md, sections 1 and 3.1-3.4.
+//
+// A live monitor has two independent quantities, and they are not
+// interchangeable:
+//
+//   D = fixed pipeline delay (sensor -> render). Dominated by the denoise and
+//       segmentation windows. Invisible on a scrolling waveform.
+//   J = arrival jitter, i.e. the spread of inter-packet spacing at the host.
+//       This is what the host's playout buffer has to absorb and what its
+//       staleness rule punishes.
+//
+// The pre-fix code minimised D and left J unbounded: ECG TX samples were only
+// produced inside the segmentation branch, 200 samples (2 s at 100 Hz) at a
+// time, and drained at up to 40 samples per 100 ms tick. The host saw 2 s of
+// signal inside ~500 ms followed by ~1.5 s of nothing, overran its 1500 ms
+// retention, and rendered a gap every 2 s in completely normal operation.
+//
+// The constants below trade D (which nobody can see) for a hard bound on J
+// (which everybody can see).
+
+/* Worst-case inter-packet spacing permitted at the host, per signal slot.
+ * 250 ms = 50% of the host's 500 ms playout delay (2x margin) and 17% of its
+ * 1500 ms staleness threshold. Exceeding it is a user-visible gap. */
+#define TIO_JITTER_BUDGET_MS (250)
+
+/* INVARIANT: TIO_MAX_EMIT_RATE = 1.00x realtime -- never exceed, no catch-up
+ * ever.
+ *
+ * After a stall of T seconds the firmware holds T extra seconds of signal.
+ * Draining that backlog at *any* rate above 1x necessarily adds T to the
+ * host's playout latency permanently, leaving it T closer to its staleness
+ * threshold forever; there is no catch-up rate at which this works. The only
+ * correct policy for a live monitor is to discard the stale backlog at the
+ * source (trim to high-water, below) and resume at exactly 1x. One honest gap
+ * of exactly T renders, and latency returns to nominal immediately.
+ *
+ * Enforced in main.cc by emitting at most one fixed-size packet per pump tick
+ * and never emitting a short packet. */
+
+/* Pump period for the ECG and PPG signal slots. At configTICK_RATE_HZ = 1000
+ * this is exactly 100 ticks, so pdMS_TO_TICKS() is exact and the pump can be
+ * paced with vTaskDelayUntil() without rounding drift. */
+#define TIO_PUMP_INTERVAL_MS (100)
+
+/* Samples per signal packet. 10 samples at ECG_TARGET_RATE/PPG_TARGET_RATE =
+ * 100 Hz is exactly TIO_PUMP_INTERVAL_MS of signal, which is what makes one
+ * packet per pump tick equal to 1.00x realtime: 10 pkt/s per slot.
+ *
+ * Wire framing, deliberately: 10 samples x 6 B = 60 B of samples, ~72 B on the
+ * wire once the TileIO slot header is added, inside a TIO_USB_PACKET_LEN
+ * (256 B) frame -- about 72% padding, BY DESIGN. At ~24 pkt/s total (~6 kB/s)
+ * on a full-speed bulk link, wire efficiency is not the scarce resource; the
+ * jitter budget is. Packing more samples per packet directly widens
+ * inter-packet spacing and spends the very budget this file exists to protect.
+ * Do not "optimise" the padding away. */
+#define TIO_ECG_SAMPLES_PER_PKT (10)
+#define TIO_PPG_SAMPLES_PER_PKT (10)
+
+/* Per-slot TX-ring high-water H, in samples. On each pump tick the slot's TX
+ * rings are trimmed to H before popping, so H bounds the stale backlog the
+ * firmware is willing to hold. H is a sum of three terms:
+ *
+ *   1. structural block  -- the largest burst the producer can deliver in one
+ *                           go, which the consumer must be able to hold
+ *                           without discarding anything in steady state;
+ *   2. one packet        -- TIO_*_SAMPLES_PER_PKT, so a full packet can always
+ *                           be assembled from what is left after a trim;
+ *   3. scheduling slack  -- TIO_TX_SLACK_SAMPLES.
+ *
+ * Steady-state trim MUST be zero. A non-zero trim counter in steady state
+ * means H is mis-derived or the producer is running above 1x -- it is a bug to
+ * investigate, not a policy that is working. */
+
+/* Scheduling slack: TIO_JITTER_BUDGET_MS (250 ms) plus one pump interval
+ * (100 ms) = 350 ms, rounded up to the next whole pump interval = 400 ms. At
+ * 100 Hz that is 40 samples. This absorbs a late pump tick without discarding
+ * signal. */
+#define TIO_TX_SLACK_SAMPLES (40)
+
+/* ECG structural block: the segmentation branch is the sole producer of the
+ * ECG TX taps and it pushes ECG_SEG_VALID_LEN (200) samples at once, once per
+ * 2 s (main.cc, ECG SEGMENTATION). 200 + 10 + 40 = 250. */
+#define TIO_ECG_TX_BLOCK_SAMPLES (ECG_SEG_VALID_LEN)
+#define TIO_ECG_TX_HIGH_WATER (TIO_ECG_TX_BLOCK_SAMPLES + TIO_ECG_SAMPLES_PER_PKT + TIO_TX_SLACK_SAMPLES)
+
+/* PPG structural block: PpgProcessTask tees samples continuously, but the
+ * AS7058 delivers on a FIFO watermark whose observed ISR interval is
+ * ~125-130 ms, so one pump tick can find up to ~13 samples at 100 Hz.
+ * 13 + 10 + 40 = 63. */
+#define TIO_PPG_TX_BLOCK_SAMPLES (13)
+#define TIO_PPG_TX_HIGH_WATER (TIO_PPG_TX_BLOCK_SAMPLES + TIO_PPG_SAMPLES_PER_PKT + TIO_TX_SLACK_SAMPLES)
 
 
 ///////////////////////////////////////////////////////////////////////////////

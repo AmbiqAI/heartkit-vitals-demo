@@ -659,20 +659,135 @@ apply_pending_uio_state(void)
 
 static volatile uint32_t g_tio_nodata[3] = {0};
 
+///////////////////////////////////////////////////////////////////////////////
+// Rate-matched signal emission
+///////////////////////////////////////////////////////////////////////////////
+//
+// See constants.h "TileIO latency budget" and
+// docs/design/streaming-pipeline.md sections 3.1-3.4.
+//
+// Every pump tick, per signal slot:
+//
+//   1. TRIM the slot's TX rings down to their high-water H. Anything above H
+//      is stale backlog we have already decided not to ship (no catch-up,
+//      ever). The discarded sample count is accumulated per slot so it can
+//      later be signalled to the host as a sequence discontinuity (TimedSignal
+//      v2 carries a per-slot sample sequence; tracked separately). For now it
+//      is exposed as a counter, and in steady state it MUST read zero.
+//   2. Emit AT MOST ONE packet of EXACTLY TIO_*_SAMPLES_PER_PKT samples. If a
+//      full packet is not available, emit nothing this tick rather than a
+//      short packet. Fixed size x one packet per tick is what pins emission to
+//      1.00x realtime; a short packet now would have to be made up later,
+//      which is catch-up by another name.
+//
+// SAMPLE ALIGNMENT (the part that silently corrupts the waveform if it is
+// wrong): a slot's TX taps are several parallel rings holding the same sample
+// index in each position (ECG: raw/denoised/mask; PPG: red/IR). They only stay
+// aligned if every ring is advanced by the SAME number of samples on every
+// operation. That is enforced structurally here rather than by convention:
+//
+//   * The rings of a slot are held in one group, and all counts are derived
+//     from tio_tx_group_avail(), the MINIMUM length across the group.
+//   * The trim seeks every ring in the group by one single `drop` value
+//     computed once, in one loop.
+//   * The pop loop below is bounded by one single `numSamples` value returned
+//     by tio_tx_group_prepare(), and pops exactly one sample from each ring
+//     per iteration.
+//
+// There is deliberately no code path that advances one ring of a group without
+// advancing the others by the same amount.
+
+typedef struct {
+    rb_config_t *rings[3];   /* parallel TX taps, must stay sample-aligned */
+    uint8_t numRings;
+    uint16_t highWater;      /* H, samples (constants.h) */
+    uint16_t samplesPerPkt;  /* fixed packet size, samples */
+    uint32_t trimmed;        /* samples discarded by trim-to-high-water */
+    uint32_t packets;        /* packets emitted */
+} tio_tx_group_t;
+
+static tio_tx_group_t g_ecgTxGroup = {
+    {&rbEcgMaskTx, &rbEcgRawTx, &rbEcgDenTx}, 3, TIO_ECG_TX_HIGH_WATER, TIO_ECG_SAMPLES_PER_PKT, 0, 0};
+static tio_tx_group_t g_ppgTxGroup = {
+    {&rbPpg1Tx, &rbPpg2Tx, NULL}, 2, TIO_PPG_TX_HIGH_WATER, TIO_PPG_SAMPLES_PER_PKT, 0, 0};
+
+static_assert(TIO_ECG_TX_HIGH_WATER < ECG_TX_BUF_LEN, "ECG TX high-water exceeds ring capacity");
+static_assert(TIO_PPG_TX_HIGH_WATER < PPG_TX_BUF_LEN, "PPG TX high-water exceeds ring capacity");
+
+/* Samples every ring in the group holds in common. Using the minimum (never a
+ * per-ring length) is what keeps the group advancing as a unit. */
+static size_t
+tio_tx_group_avail(const tio_tx_group_t *group)
+{
+    size_t avail = ringbuffer_len(group->rings[0]);
+    for (uint8_t i = 1; i < group->numRings; i++) {
+        avail = MIN(avail, ringbuffer_len(group->rings[i]));
+    }
+    return avail;
+}
+
+/* Trim to high-water, then decide whether to emit. Returns the exact number of
+ * samples to pop from EVERY ring of the group (its fixed packet size), or 0 to
+ * emit nothing this tick. */
+static size_t
+tio_tx_group_prepare(tio_tx_group_t *group)
+{
+    size_t avail = tio_tx_group_avail(group);
+    if (avail > group->highWater) {
+        /* Drop-oldest: discard the stale head of the backlog, keep the newest
+         * H samples. One `drop`, applied to every ring, so the group stays
+         * aligned across the trim. */
+        size_t drop = avail - group->highWater;
+        for (uint8_t i = 0; i < group->numRings; i++) {
+            ringbuffer_seek(group->rings[i], drop);
+        }
+        group->trimmed += (uint32_t)drop;
+        avail = group->highWater;
+    }
+    if (avail < group->samplesPerPkt) {
+        return 0;
+    }
+    return group->samplesPerPkt;
+}
+
+/* Pace a signal pump task at exactly TIO_PUMP_INTERVAL_MS.
+ *
+ * vTaskDelayUntil() (not vTaskDelay) so the period is measured from the
+ * previous wake time and scheduling latency does not accumulate into drift --
+ * the old "measure the loop with DWT, then vTaskDelay the remainder" form lost
+ * the measurement/delay gap on every single iteration. At
+ * configTICK_RATE_HZ = 1000, pdMS_TO_TICKS(100) is exactly 100 ticks.
+ *
+ * If the iteration overran the period (a long inference, say), reset the phase
+ * instead of letting vTaskDelayUntil() fire back-to-back to catch up. Catching
+ * up here would emit packets closer together than TIO_PUMP_INTERVAL_MS, i.e.
+ * above 1.00x realtime, which the latency budget forbids (constants.h). A late
+ * tick is absorbed by TIO_TX_SLACK_SAMPLES; a burst is not. */
+static void
+tio_pump_wait(TickType_t *pLastWake)
+{
+    const TickType_t period = pdMS_TO_TICKS(TIO_PUMP_INTERVAL_MS);
+    TickType_t now = xTaskGetTickCount();
+    if ((TickType_t)(now - *pLastWake) >= period) {
+        *pLastWake = now;
+    }
+    vTaskDelayUntil(pLastWake, period);
+}
+
 static void
 send_ecg_signals(void)
 {
-    uint8_t buffer[240];
+    uint8_t buffer[TIO_ECG_SAMPLES_PER_PKT * (sizeof(uint16_t) + 2 * sizeof(int16_t))];
     float32_t rawVal, denVal;
     uint16_t maskVal;
     int16_t txVal;
     uint32_t length;
-    size_t numSamples = MIN3(ringbuffer_len(&rbEcgRawTx), ringbuffer_len(&rbEcgDenTx), ringbuffer_len(&rbEcgMaskTx));
+    /* Single shared count for all three rings -- see the alignment note above. */
+    size_t numSamples = tio_tx_group_prepare(&g_ecgTxGroup);
     if (numSamples == 0) {
         g_tio_nodata[0]++;
         return;
     }
-    numSamples = MIN(numSamples, sizeof(buffer) / (3 * sizeof(int16_t)));
     length = 0;
     for (size_t i = 0; i < numSamples; i++) {
         ringbuffer_pop(&rbEcgMaskTx, &maskVal, 1);
@@ -688,6 +803,7 @@ send_ecg_signals(void)
         length += sizeof(int16_t);
     }
     pack_and_enqueue_tio_packet(0, 0, buffer, length);
+    g_ecgTxGroup.packets++;
 }
 
 static void
@@ -741,19 +857,19 @@ ppg_display_sample(ppg_tx_display_state_t *state, float32_t sample)
 static void
 send_ppg_signals(void)
 {
-    uint8_t buffer[240];
+    uint8_t buffer[TIO_PPG_SAMPLES_PER_PKT * (sizeof(uint16_t) + 2 * sizeof(int16_t))];
     float32_t val1, val2;
     float32_t txVal1, txVal2;
     int16_t txValI16;
     uint32_t length;
     uint8_t qos = (uint8_t)(ppgMetResults.qos / 25);
     uint16_t mask = (uint16_t)(qos << SIG_MASK_QOS_OFFSET);
-    size_t numSamples = MIN(ringbuffer_len(&rbPpg1Tx), ringbuffer_len(&rbPpg2Tx));
+    /* Single shared count for both rings -- see the alignment note above. */
+    size_t numSamples = tio_tx_group_prepare(&g_ppgTxGroup);
     if (numSamples == 0) {
         g_tio_nodata[1]++;
         return;
     }
-    numSamples = MIN(numSamples, sizeof(buffer) / (sizeof(uint16_t) + 2 * sizeof(int16_t)));
     length = 0;
     for (size_t i = 0; i < numSamples; i++) {
         memcpy(&buffer[length], &mask, sizeof(uint16_t));
@@ -770,6 +886,7 @@ send_ppg_signals(void)
         length += sizeof(int16_t);
     }
     pack_and_enqueue_tio_packet(1, 0, buffer, length);
+    g_ppgTxGroup.packets++;
 }
 
 static void
@@ -855,11 +972,10 @@ EcgProcessTask(void *pvParameters)
     uint32_t err = 0;
     uint32_t tickStart;
     size_t numSamples;
-    uint32_t loopTickStart;
+    TickType_t pumpLastWake = xTaskGetTickCount();
 
     while (true) {
         err = 0;
-        loopTickStart = dwt_cycles();
         service_ecg_flush_request();
 
         ///////////////////////////////////////////////////////////////////
@@ -999,21 +1115,7 @@ EcgProcessTask(void *pvParameters)
         send_ecg_signals();
         (void)err;
 
-        /* Rate-limit the whole loop to ~100ms, matching legacy's "Try to
-         * maintain 100ms loop" -- without this, the loop free-runs at raw
-         * sample rate whenever data is flowing, calling send_ecg_signals()
-         * far more often than useful (each call only finds 1-3 fresh TX
-         * samples, producing tiny/mostly-overhead packets that starve the
-         * TileIO queue instead of a few well-filled ~40-sample packets/sec).
-         * This was a real regression from the phase 6 port -- confirmed via
-         * SWO diagnostics showing near-zero ECG/PPG TileIO throughput
-         * despite the pipeline computing correct metrics internally. */
-        {
-            uint32_t loopDeltaUs = dwt_delta_us(loopTickStart);
-            if (loopDeltaUs < 100000u) {
-                vTaskDelay(pdMS_TO_TICKS((100000u - loopDeltaUs) / 1000u));
-            }
-        }
+        tio_pump_wait(&pumpLastWake);
     }
 }
 
@@ -1035,14 +1137,13 @@ void
 PpgProcessTask(void *pvParameters)
 {
     (void)pvParameters;
-    uint32_t err;
+    uint32_t err = 0;
     bio_spo2_a0_configuration_t spo2Cfg;
     const bio_spo2_a0_configuration_t *pSpo2Cfg;
-    uint32_t loopTickStart;
+    TickType_t pumpLastWake = xTaskGetTickCount();
 
     while (true) {
         g_ppg_loop_iters++;
-        loopTickStart = dwt_cycles();
         service_ppg_flush_request();
         size_t numSamples = MIN(ringbuffer_len(&rbPpg1Sensor), ringbuffer_len(&rbPpg2Sensor));
         for (size_t i = 0; i < numSamples / PPG_DS_RATE; i++) {
@@ -1081,15 +1182,9 @@ PpgProcessTask(void *pvParameters)
         }
 
         send_ppg_signals();
+        (void)err; /* only consumed by the EN_APP_TIMING_LOGS print above */
 
-        /* Rate-limit to ~100ms, matching legacy and the same fix applied to
-         * EcgProcessTask above -- see its comment for why this matters. */
-        {
-            uint32_t loopDeltaUs = dwt_delta_us(loopTickStart);
-            if (loopDeltaUs < 100000u) {
-                vTaskDelay(pdMS_TO_TICKS((100000u - loopDeltaUs) / 1000u));
-            }
-        }
+        tio_pump_wait(&pumpLastWake);
     }
 }
 
@@ -1483,6 +1578,23 @@ ReportTask(void *pvParameters)
                    (unsigned)ringbuffer_len(&rbEcgRawTx), (unsigned)ringbuffer_len(&rbEcgDenTx),
                    (unsigned)ringbuffer_len(&rbEcgMaskTx), (unsigned)ringbuffer_len(&rbPpg1Tx),
                    (unsigned)ringbuffer_len(&rbPpg2Tx), (unsigned)uxQueueMessagesWaiting(g_tioTxQueue));
+        /* Rate-matched emission health, per signal slot (constants.h "TileIO
+         * latency budget"). ReportTask runs at 1 Hz, so the deltas below ARE
+         * the per-second packet rate: expect pkt_rate ~= 10/s for both slots.
+         * trim counts samples discarded by trim-to-high-water; it must stay at
+         * zero in steady state. Non-zero trim outside a stall/reconnect means
+         * the producer is running above 1x or H is mis-derived -- a bug, not a
+         * policy doing its job. */
+        {
+            static uint32_t lastEcgPkts = 0, lastPpgPkts = 0;
+            uint32_t ecgPkts = g_ecgTxGroup.packets, ppgPkts = g_ppgTxGroup.packets;
+            nsx_printf("[tio-emit] ecg(pkt_rate=%lu/s pkts=%lu trim=%lu) ppg(pkt_rate=%lu/s pkts=%lu trim=%lu)\n",
+                       (unsigned long)(ecgPkts - lastEcgPkts), (unsigned long)ecgPkts,
+                       (unsigned long)g_ecgTxGroup.trimmed, (unsigned long)(ppgPkts - lastPpgPkts),
+                       (unsigned long)ppgPkts, (unsigned long)g_ppgTxGroup.trimmed);
+            lastEcgPkts = ecgPkts;
+            lastPpgPkts = ppgPkts;
+        }
         nsx_printf("[ecg-len] rbEcgSensor=%u rbEcgDen=%u rbEcgRawSeg=%u rbEcgSeg=%u rbEcgMet=%u rbEcgMaskMet=%u seg_runs=%lu\n",
                    (unsigned)ringbuffer_len(&rbEcgSensor), (unsigned)ringbuffer_len(&rbEcgDen),
                    (unsigned)ringbuffer_len(&rbEcgRawSeg), (unsigned)ringbuffer_len(&rbEcgSeg),
