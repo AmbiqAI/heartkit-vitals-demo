@@ -2112,6 +2112,22 @@ report_extra_cpu(void)
     hkv_log_fx2("util", appMetResults.cpuPercUtil);
     hkv_log_fx2("batt_days", appMetResults.batteryDays);
     hkv_log_fx2("avg_ips", appMetResults.avgAiIps);
+    /* Free stack words on the BLE radio dispatcher task. Sampled HERE, once
+     * per second, and nowhere else: the call is a byte-at-a-time walk of
+     * ~14.9 KB of untouched stack fill (~1 ms), which is exactly why it is no
+     * longer in the dispatcher loop where it cost 15 CPU points (issue #19).
+     * See ble_bringup_radio_stack_free_words().
+     *
+     * Read it against BLE_BRINGUP_RADIO_STACK_WORDS (4096); the measured
+     * steady-state figure is ~3714, i.e. the stack is ~9% used. `ble_wake_ps`
+     * on this same line is the other half of the BLE CPU picture.
+     *
+     * OMITTED, not zero-filled, on the two boards with no radio -- same gate
+     * as the ble_bringup.h include above. A `ble_hwm=0` would read as a stack
+     * about to overflow, which is the opposite of "there is no BLE task". */
+#if defined(AM_PART_APOLLO510B) && TIO_BLE_ENABLED
+    hkv_log_u32("ble_hwm", ble_bringup_radio_stack_free_words());
+#endif
 }
 
 typedef struct {
