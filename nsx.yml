@@ -48,7 +48,7 @@ module_registry:
     nsx-as7058:
       name: nsx-as7058
       url: https://github.com/AmbiqAI/nsx-as7058.git
-      revision: main
+      revision: c70db89ae56178b8e35c938064c8609e87d73bed
       path: modules/nsx-as7058
     nsx-sensors:
       name: nsx-sensors
@@ -58,7 +58,7 @@ module_registry:
     nsx-physiokit:
       name: nsx-physiokit
       url: https://github.com/AmbiqAI/nsx-physiokit.git
-      revision: main
+      revision: 17ac957fab6faaa15d19149d1ab68e0ef9ad75e5
       path: modules/nsx-physiokit
     helia-dsp:
       name: helia-dsp
@@ -73,7 +73,7 @@ module_registry:
   modules:
     nsx-as7058:
       project: nsx-as7058
-      revision: main
+      revision: c70db89ae56178b8e35c938064c8609e87d73bed
       metadata: modules/nsx-as7058/nsx-module.yaml
     nsx-sensors:
       project: nsx-sensors
@@ -81,7 +81,7 @@ module_registry:
       metadata: modules/nsx-sensors/nsx-module.yaml
     nsx-physiokit:
       project: nsx-physiokit
-      revision: main
+      revision: 17ac957fab6faaa15d19149d1ab68e0ef9ad75e5
       metadata: modules/nsx-physiokit/nsx-module.yaml
     helia-dsp:
       project: helia-dsp
