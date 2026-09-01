@@ -52,6 +52,7 @@
 #include "constants.h"
 #include "metrics.h"
 #include "nstdb_noise.h"
+#include "obs.h"
 #include "ringbuffer.h"
 #include "sensor.h"
 #include "store.h"
@@ -80,10 +81,28 @@ static TaskHandle_t cpuProcessTaskHandle;
 static TaskHandle_t tioProcessTaskHandle;
 static TaskHandle_t reportTaskHandle;
 
-static TaskStatus_t xTaskDetails[10];
+/* Capacity of the run-time-stats snapshot buffer, used in BOTH the array
+ * declaration and the uxTaskGetSystemState() call -- a named constant rather
+ * than two hard-coded 10s that can drift apart, which is how this got close to
+ * failing in the first place.
+ *
+ * WHY THIS IS NOT A TUNING KNOB. uxTaskGetSystemState() returns 0 -- not a
+ * truncated list -- when the array cannot hold every task. The previous value
+ * was 10 against 9 live tasks on the BLE build (6 app + idle + timer + BLE
+ * radio), so ONE additional task anywhere, including one created inside a
+ * vendored module, would have silently zeroed every per-task percentage and
+ * pinned the reported CPU utilisation at a constant value with no other
+ * symptom. 16 restores real headroom, and CpuProcessTask now counts the
+ * overflow (HKV_CNT_CPU_STAT_OVERFLOW) and skips the interval instead of
+ * publishing a number computed from an empty list. The `tasks` field on the
+ * `cpu` report line shows how much of this is actually in use. */
+#define HKV_TASK_STATUS_CAPACITY (16u)
+static TaskStatus_t xTaskDetails[HKV_TASK_STATUS_CAPACITY];
+/* Tasks seen by the last successful uxTaskGetSystemState(), reported so the
+ * headroom against HKV_TASK_STATUS_CAPACITY is visible before it runs out. */
+static volatile uint32_t g_cpu_num_tasks = 0;
 
 static QueueHandle_t g_tioTxQueue = NULL;
-static volatile uint32_t g_tio_tx_queue_drops = 0;
 static const TickType_t kTioTxTaskPollTicks = pdMS_TO_TICKS(10);
 /* Total USB send attempts allowed for one held packet (first try + retries),
  * one attempt per drain iteration. Covers a transient FIFO-full window
@@ -308,9 +327,6 @@ service_cpu_flush_request(void)
     ringbuffer_flush(&rbTotalCpuTx);
 }
 
-static volatile uint32_t g_tio_enqueue_ok[3] = {0};
-static volatile uint32_t g_tio_enqueue_fail[3] = {0};
-static volatile uint32_t g_tio_pack_fail[3] = {0};
 /* Slot id / packet type byte offsets inside a packed TileIO frame. tio_usb.c
  * keeps TIO_USB_SLOT_IDX/TIO_USB_TYPE_IDX private; mirrored here so the drain
  * task can attribute a USB retry/drop to the stream that produced the packet. */
@@ -324,24 +340,20 @@ static volatile uint32_t g_tio_pack_fail[3] = {0};
 #define TIO_USB_BUCKET_COUNT 4u
 #define TIO_USB_BUCKET_UIO 3u
 
-/* USB send failures that were deferred for a retry, and packets that were not
- * delivered over USB at all (see TioProcessTask). */
-static volatile uint32_t g_tio_usb_retry[TIO_USB_BUCKET_COUNT] = {0};
-static volatile uint32_t g_tio_usb_drop[TIO_USB_BUCKET_COUNT] = {0};
-/* Times the drain task latched the "host mounted but not draining" state. */
-static volatile uint32_t g_tio_usb_stalls = 0;
-
+/* Attribute a USB retry/drop to the stream that produced the packet. Storage
+ * is the obs.h counter table (HKV_CNT_USB_*); `which` selects retry vs drop
+ * within a bucket and the stride is static_asserted in obs.c. */
 static void
-count_tio_usb_event(volatile uint32_t *counters, const uint8_t packet[TIO_USB_PACKET_LEN])
+count_tio_usb_event(uint32_t which, const uint8_t packet[TIO_USB_PACKET_LEN])
 {
     uint8_t slot;
     if (packet[TIO_PACKET_TYPE_IDX] == TIO_PACKET_TYPE_UIO) {
-        counters[TIO_USB_BUCKET_UIO]++;
+        hkv_count(HKV_CNT_USB_BUCKET(TIO_USB_BUCKET_UIO, which));
         return;
     }
     slot = packet[TIO_PACKET_SLOT_IDX];
     if (slot < 3) {
-        counters[slot]++;
+        hkv_count(HKV_CNT_USB_BUCKET(slot, which));
     }
 }
 
@@ -351,7 +363,7 @@ enqueue_tio_packet(const uint8_t packet[TIO_USB_PACKET_LEN])
 {
     BaseType_t queued = pdFALSE;
     if (g_tioTxQueue == NULL) {
-        g_tio_tx_queue_drops++;
+        hkv_count(HKV_CNT_TIO_QDROP);
         return false;
     }
 
@@ -366,7 +378,7 @@ enqueue_tio_packet(const uint8_t packet[TIO_USB_PACKET_LEN])
     }
 
     if (queued != pdTRUE) {
-        g_tio_tx_queue_drops++;
+        hkv_count(HKV_CNT_TIO_QDROP);
         return false;
     }
     return true;
@@ -381,7 +393,7 @@ enqueue_tio_packet_priority(const uint8_t packet[TIO_USB_PACKET_LEN])
     uint8_t dropped_packet[TIO_USB_PACKET_LEN];
 
     if (g_tioTxQueue == NULL) {
-        g_tio_tx_queue_drops++;
+        hkv_count(HKV_CNT_TIO_QDROP);
         return false;
     }
     if (xQueueSendToFront(g_tioTxQueue, packet, 0) == pdTRUE) {
@@ -389,10 +401,10 @@ enqueue_tio_packet_priority(const uint8_t packet[TIO_USB_PACKET_LEN])
     }
     if (xQueueReceive(g_tioTxQueue, dropped_packet, 0) != pdTRUE ||
         xQueueSendToFront(g_tioTxQueue, packet, 0) != pdTRUE) {
-        g_tio_tx_queue_drops++;
+        hkv_count(HKV_CNT_TIO_QDROP);
         return false;
     }
-    g_tio_tx_queue_drops++;
+    hkv_count(HKV_CNT_TIO_QDROP);
     return true;
 }
 
@@ -403,16 +415,16 @@ pack_and_enqueue_tio_packet(uint8_t slot, uint8_t slot_type, const void *payload
     bool ok;
     if (tio_usb_pack_slot_data(slot, slot_type, (const uint8_t *)payload, payload_len, packet) != 0) {
         if (slot < 3) {
-            g_tio_pack_fail[slot]++;
+            hkv_count(HKV_CNT_TIO_SLOT(slot, HKV_TIO_WHICH_PACKFAIL));
         }
         return false;
     }
     ok = enqueue_tio_packet(packet);
     if (slot < 3) {
         if (ok) {
-            g_tio_enqueue_ok[slot]++;
+            hkv_count(HKV_CNT_TIO_SLOT(slot, HKV_TIO_WHICH_OK));
         } else {
-            g_tio_enqueue_fail[slot]++;
+            hkv_count(HKV_CNT_TIO_SLOT(slot, HKV_TIO_WHICH_FAIL));
         }
     }
     return ok;
@@ -440,7 +452,9 @@ check_tio_state(void)
     if (available != g_tio_available) {
         g_tio_available = available;
         if (g_tio_available) {
-            nsx_printf("[tio] host connected\n");
+            hkv_log_begin("tio");
+            hkv_log_u32("host_connected", 1);
+            hkv_log_end();
             request_pipeline_flush();
             /* Tell the newly connected host our current mode state so its UI
              * reflects reality without requiring it to write UIO first --
@@ -462,8 +476,10 @@ set_input_source(uint8_t source)
     if (appState.inputSource != source) {
         appState.inputSource = source;
         sensorCtx.inputSource = source;
-        nsx_printf("[app] input source: %d (%s)\n", (int)sensorCtx.inputSource,
-                   source < NUM_INPUT_PTS ? "canned patient playback" : "live sensor");
+        hkv_log_begin("app");
+        hkv_log_u32("input_source", sensorCtx.inputSource);
+        hkv_log_str("input_kind", source < NUM_INPUT_PTS ? "canned" : "live");
+        hkv_log_end();
     }
 }
 
@@ -473,8 +489,11 @@ set_noise_inputs(uint8_t bw, uint8_t ma, uint8_t em)
     appState.bwNoiseLevel = bw;
     appState.maNoiseLevel = ma;
     appState.emNoiseLevel = em;
-    nsx_printf("[app] noise levels: bw=%d ma=%d em=%d\n", (int)appState.bwNoiseLevel, (int)appState.maNoiseLevel,
-               (int)appState.emNoiseLevel);
+    hkv_log_begin("app");
+    hkv_log_u32("noise_bw", appState.bwNoiseLevel);
+    hkv_log_u32("noise_ma", appState.maNoiseLevel);
+    hkv_log_u32("noise_em", appState.emNoiseLevel);
+    hkv_log_end();
 }
 
 static void
@@ -483,7 +502,9 @@ set_denoise_mode(uint8_t mode)
     mode = MIN(mode, 2);
     if (appState.denoiseMode != mode) {
         appState.denoiseMode = mode;
-        nsx_printf("[app] denoise mode: %d\n", (int)appState.denoiseMode);
+        hkv_log_begin("app");
+        hkv_log_u32("denoise_mode", appState.denoiseMode);
+        hkv_log_end();
     }
 }
 
@@ -493,7 +514,9 @@ set_segmentation_mode(uint8_t mode)
     mode = MIN(mode, 2);
     if (appState.segMode != mode) {
         appState.segMode = mode;
-        nsx_printf("[app] segmentation mode: %d\n", (int)appState.segMode);
+        hkv_log_begin("app");
+        hkv_log_u32("seg_mode", appState.segMode);
+        hkv_log_end();
     }
 }
 
@@ -503,7 +526,9 @@ set_arrhythmia_mode(uint8_t mode)
     mode = MIN(mode, 2);
     if (appState.arrMode != mode) {
         appState.arrMode = mode;
-        nsx_printf("[app] arrhythmia mode: %d\n", (int)appState.arrMode);
+        hkv_log_begin("app");
+        hkv_log_u32("arr_mode", appState.arrMode);
+        hkv_log_end();
     }
 }
 
@@ -514,7 +539,9 @@ set_speed_mode(uint8_t mode)
     if (appState.speedMode != mode) {
         appState.speedMode = mode;
         nsx_power_set_performance_mode(appState.speedMode ? NSX_POWER_PERF_HIGH : NSX_POWER_PERF_LOW);
-        nsx_printf("[app] CPU speed mode: %d\n", (int)appState.speedMode);
+        hkv_log_begin("app");
+        hkv_log_u32("speed_mode", appState.speedMode);
+        hkv_log_end();
     }
 }
 
@@ -605,7 +632,6 @@ ble_bringup_uio_read_cb(uint8_t *data, uint32_t length)
  */
 static volatile uint8_t g_uio_pending = 0;
 static volatile uint8_t g_uio_state_request_pending = 0;
-static volatile uint32_t g_uio_rx_count = 0;
 static uint8_t g_uio_rx_buf[8];
 
 static void
@@ -622,7 +648,7 @@ received_uio_state(const uint8_t *data, uint32_t length)
     }
     memcpy(g_uio_rx_buf, data, 8);
     __asm volatile("" ::: "memory");
-    g_uio_rx_count++;
+    hkv_count(HKV_CNT_TIO_UIO_RX);
     g_uio_pending = 1;
 }
 
@@ -656,8 +682,6 @@ apply_pending_uio_state(void)
 ///////////////////////////////////////////////////////////////////////////////
 // TIO packet senders
 ///////////////////////////////////////////////////////////////////////////////
-
-static volatile uint32_t g_tio_nodata[3] = {0};
 
 ///////////////////////////////////////////////////////////////////////////////
 // Rate-matched signal emission
@@ -718,46 +742,51 @@ typedef struct {
     uint32_t servoTroughPrev;    /* previous window's trough, for the rate term */
     volatile uint16_t extraBudget;  /* servo output: extra samples per window */
     volatile uint32_t servoTrough;  /* last completed window's trough (log) */
-    volatile uint32_t trimmed;   /* samples discarded by trim-to-high-water */
-    /* `pumped` counts ticks on which a full packet was assembled and handed to
-     * the transport. `delivered` counts those the transport actually accepted.
-     * They are NOT the same number and the difference matters: samples are
-     * popped from the rings before the enqueue result is known, so during a
-     * host blackout the rings still drain and pumped keeps climbing at 10/s
-     * with trim at 0 while nothing reaches the host. pumped == delivered is
-     * the healthy case; a gap between them is real loss, corroborated by
-     * g_tio_enqueue_ok/g_tio_enqueue_fail and g_tio_usb_drop. */
-    volatile uint32_t pumped;
-    volatile uint32_t delivered;
-    /* Ticks on which the servo spent an extra sample. Compare against
-     * extraBudget: if drained tracks the budget the servo is in control, and
-     * if it falls short the guard is holding the pump off a near-empty ring. */
-    volatile uint32_t drained;
-    /* Occupancy watermarks, sampled pre-trim and pre-pop -- the true peak the
-     * producer created, including whatever the trim is about to discard.
-     * ReportTask resets them each interval so the log shows a progression
-     * rather than a lifetime extreme.
+    /* Observability IDs, not storage. The values live in the obs.h counter and
+     * gauge tables so that every counter in the app is emitted by one
+     * table-driven reporter and adding one needs no reporter or parser change.
+     * The group only carries which row it owns.
      *
-     * For a block-structured producer like ECG, occMin IS the pre-block
-     * residual R: the sawtooth trough is the last pump tick before the next
-     * block lands. That is the quantity currently being inferred rather than
-     * measured, so it is the one worth having.
+     * cntPumped counts ticks on which a full packet was assembled and handed
+     * to the transport; cntDelivered counts those the transport accepted. They
+     * are NOT the same number and the difference matters: samples are popped
+     * from the rings before the enqueue result is known, so during a host
+     * blackout the rings still drain and pump_ps keeps reading 10/s with
+     * trim_ps at 0 while nothing reaches the host. pump_ps == deliv_ps is the
+     * healthy case; a gap between them is real loss, corroborated by the
+     * `tio` and `tiousb` report lines.
      *
-     * Diagnostics, not control inputs. ReportTask's reset is a plain 32-bit
-     * store racing the pump's update; both are atomic on Cortex-M, so the
-     * worst case is one interval reporting a slightly narrow range. */
-    volatile uint32_t occMax;
-    volatile uint32_t occMin;
+     * cntDrained counts ticks on which the servo spent an extra sample.
+     * Compare against extraBudget: if it tracks the budget the servo is in
+     * control, and if it falls short the spend guard is holding the pump off a
+     * near-empty ring. MIND THE UNITS -- drain_ps is per second while bgt is
+     * per servo window (64 ticks = 6.4 s).
+     *
+     * gaugeOcc is the occupancy watermark pair, sampled pre-trim and pre-pop
+     * so it is the true peak the producer created including whatever the trim
+     * is about to discard. Windowed, so the report shows a progression rather
+     * than a lifetime extreme. For a block-structured producer like ECG the
+     * low value IS the pre-block residual R: the sawtooth trough is the last
+     * pump tick before the next block lands. */
+    hkv_counter_id_t cntTrimmed;   /* samples discarded by trim-to-high-water */
+    hkv_counter_id_t cntPumped;
+    hkv_counter_id_t cntDelivered;
+    hkv_counter_id_t cntDrained;
+    hkv_gauge_id_t gaugeOcc;
 } tio_tx_group_t;
 
 #define TIO_OCC_MIN_INIT (0xFFFFFFFFu)
 
-/* Designated initialisers deliberately, not positional. These are 17 fields of
+/* Designated initialisers deliberately, not positional. These are 16 fields of
  * which most are same-typed zeros, the build does not enable -Wextra, so
  * -Wmissing-field-initializers is off, and a reorder would not warn. The
  * specific hazard: if troughTarget silently took another field's zero, the
  * spend guard degrades to `avail > samplesPerPkt` and the servo takes an extra
- * sample on nearly every tick. */
+ * sample on nearly every tick.
+ *
+ * The same argument now covers the counter/gauge ids: they are consecutive
+ * enum values, so a positional mix-up would attribute PPG trim to the ECG
+ * report line and nothing would warn. Naming each one is the check. */
 static tio_tx_group_t g_ecgTxGroup = {
     .rings = {&rbEcgMaskTx, &rbEcgRawTx, &rbEcgDenTx},
     .numRings = 3,
@@ -770,12 +799,11 @@ static tio_tx_group_t g_ecgTxGroup = {
     .servoTroughPrev = TIO_ECG_TX_TROUGH_TARGET,
     .extraBudget = 0,
     .servoTrough = 0,
-    .trimmed = 0,
-    .pumped = 0,
-    .delivered = 0,
-    .drained = 0,
-    .occMax = 0,
-    .occMin = TIO_OCC_MIN_INIT};
+    .cntTrimmed = HKV_CNT_TXECG_TRIM,
+    .cntPumped = HKV_CNT_TXECG_PUMP,
+    .cntDelivered = HKV_CNT_TXECG_DELIV,
+    .cntDrained = HKV_CNT_TXECG_DRAIN,
+    .gaugeOcc = HKV_GAUGE_TXECG_OCC};
 static tio_tx_group_t g_ppgTxGroup = {
     .rings = {&rbPpg1Tx, &rbPpg2Tx, NULL},
     .numRings = 2,
@@ -788,12 +816,11 @@ static tio_tx_group_t g_ppgTxGroup = {
     .servoTroughPrev = TIO_PPG_TX_TROUGH_TARGET,
     .extraBudget = 0,
     .servoTrough = 0,
-    .trimmed = 0,
-    .pumped = 0,
-    .delivered = 0,
-    .drained = 0,
-    .occMax = 0,
-    .occMin = TIO_OCC_MIN_INIT};
+    .cntTrimmed = HKV_CNT_TXPPG_TRIM,
+    .cntPumped = HKV_CNT_TXPPG_PUMP,
+    .cntDelivered = HKV_CNT_TXPPG_DELIV,
+    .cntDrained = HKV_CNT_TXPPG_DRAIN,
+    .gaugeOcc = HKV_GAUGE_TXPPG_OCC};
 
 /* Peak ring occupancy is not H: the trim runs BEFORE the pop, so the producer
  * can land a full structural block on top of (H - samplesPerPkt) samples that
@@ -1045,12 +1072,7 @@ tio_tx_group_prepare(tio_tx_group_t *group)
     size_t avail = tio_tx_group_avail(group);
     /* Sample occupancy before the trim and before the pop, so the watermarks
      * reflect what the producer actually created. */
-    if ((uint32_t)avail > group->occMax) {
-        group->occMax = (uint32_t)avail;
-    }
-    if ((uint32_t)avail < group->occMin) {
-        group->occMin = (uint32_t)avail;
-    }
+    hkv_gauge_observe(group->gaugeOcc, (uint32_t)avail);
     /* Servo error signal: the minimum occupancy seen this window, sampled at
      * tick start so it reflects what the pump actually had to work with. */
     if ((uint32_t)avail < group->servoTroughMin) {
@@ -1066,7 +1088,7 @@ tio_tx_group_prepare(tio_tx_group_t *group)
         for (uint8_t i = 0; i < group->numRings; i++) {
             ringbuffer_seek(group->rings[i], drop);
         }
-        group->trimmed += (uint32_t)drop;
+        hkv_count_n(group->cntTrimmed, (uint32_t)drop);
         avail = group->highWater;
     }
     if (avail < group->samplesPerPkt) {
@@ -1094,7 +1116,7 @@ tio_tx_group_prepare(tio_tx_group_t *group)
             numSamples = avail;
         }
         group->extraSpent++;
-        group->drained++;
+        hkv_count(group->cntDrained);
     }
     return numSamples;
 }
@@ -1161,7 +1183,7 @@ send_ecg_signals(void)
     /* Single shared count for all three rings -- see the alignment note above. */
     size_t numSamples = tio_tx_group_prepare(&g_ecgTxGroup);
     if (numSamples == 0) {
-        g_tio_nodata[0]++;
+        hkv_count(HKV_CNT_TIO_SLOT(0, HKV_TIO_WHICH_NODATA));
         return;
     }
     length = 0;
@@ -1178,9 +1200,9 @@ send_ecg_signals(void)
         memcpy(&buffer[length], &txVal, sizeof(int16_t));
         length += sizeof(int16_t);
     }
-    g_ecgTxGroup.pumped++;
+    hkv_count(g_ecgTxGroup.cntPumped);
     if (pack_and_enqueue_tio_packet(0, 0, buffer, length)) {
-        g_ecgTxGroup.delivered++;
+        hkv_count(g_ecgTxGroup.cntDelivered);
     }
 }
 
@@ -1246,7 +1268,7 @@ send_ppg_signals(void)
     /* Single shared count for both rings -- see the alignment note above. */
     size_t numSamples = tio_tx_group_prepare(&g_ppgTxGroup);
     if (numSamples == 0) {
-        g_tio_nodata[1]++;
+        hkv_count(HKV_CNT_TIO_SLOT(1, HKV_TIO_WHICH_NODATA));
         return;
     }
     length = 0;
@@ -1264,9 +1286,9 @@ send_ppg_signals(void)
         memcpy(&buffer[length], &txValI16, sizeof(int16_t));
         length += sizeof(int16_t);
     }
-    g_ppgTxGroup.pumped++;
+    hkv_count(g_ppgTxGroup.cntPumped);
     if (pack_and_enqueue_tio_packet(1, 0, buffer, length)) {
-        g_ppgTxGroup.delivered++;
+        hkv_count(g_ppgTxGroup.cntDelivered);
     }
 }
 
@@ -1289,7 +1311,7 @@ send_cpu_signals(void)
     uint16_t mask = (uint16_t)(SIG_QOS_GOOD << SIG_MASK_QOS_OFFSET);
     size_t numSamples = MIN3(ringbuffer_len(&rbEcgCpuTx), ringbuffer_len(&rbPpgCpuTx), ringbuffer_len(&rbTotalCpuTx));
     if (numSamples == 0) {
-        g_tio_nodata[2]++;
+        hkv_count(HKV_CNT_TIO_SLOT(2, HKV_TIO_WHICH_NODATA));
         return;
     }
     numSamples = MIN(numSamples, sizeof(buffer) / (sizeof(uint16_t) + 3 * sizeof(float32_t)));
@@ -1344,24 +1366,14 @@ SensorIrqTask(void *pvParameters)
 // legacy's EcgProcessTask 1:1 modulo the sensor.c stimulus-substitution gap
 // documented at the top of this file.
 
-static volatile uint32_t g_ecg_seg_runs = 0;
-
-/* Per-stage non-zero-return counts, indexed by tio_stage_err_t.
- *
- * Always compiled, unlike the EN_APP_TIMING_LOGS prints these sit beside: with
- * those prints off (the default) the inference return codes are otherwise
- * discarded at the `(void)err`, so a persistently failing denoise or
- * segmentation stage would produce a plausible-looking flat trace and no
- * indication anywhere that the model never ran. Two increments per 2 s. */
-typedef enum {
-    kStageErrEcgDenoise = 0,
-    kStageErrEcgSegment,
-    kStageErrEcgMetrics,
-    kStageErrPpgMetrics,
-    kStageErrCount
-} tio_stage_err_t;
-
-static volatile uint32_t g_stage_err[kStageErrCount] = {0};
+/* Per-stage non-zero-return counts live in the obs.h counter table
+ * (HKV_CNT_PIPE_ERR_*), so they are ALWAYS compiled in, unlike the
+ * EN_APP_TRACE lines they sit beside. With tracing off -- the default -- the
+ * inference return codes are otherwise discarded at the `(void)err`, and a
+ * persistently failing denoise or segmentation stage would produce a
+ * plausible-looking flat trace with no indication anywhere that the model
+ * never ran. Two increments per 2 s: the counters are not what costs, the
+ * printing is. */
 
 void
 EcgProcessTask(void *pvParameters)
@@ -1433,11 +1445,9 @@ EcgProcessTask(void *pvParameters)
             ecgMetResults.denoiseIps = ips_from_delta_us(dwt_delta_us(tickStart));
             ecgMetResults.denoiseuIpspw = 1.0e3f * ecgMetResults.denoiseIps / AVG_INFERENCE_POWER;
             if (err != 0) {
-                g_stage_err[kStageErrEcgDenoise]++;
+                hkv_count(HKV_CNT_PIPE_ERR_ECG_DEN);
             }
-#if EN_APP_TIMING_LOGS
-            nsx_printf("[ecg] denoise err=%lu\n", (unsigned long)err);
-#endif
+            HKV_TRACE_KV("ecg", "den_err", err);
         }
 
         ///////////////////////////////////////////////////////////////////
@@ -1445,7 +1455,7 @@ EcgProcessTask(void *pvParameters)
         ///////////////////////////////////////////////////////////////////
         else if (ringbuffer_len(&rbEcgSeg) >= ECG_SEG_WINDOW_LEN) {
             tickStart = dwt_cycles();
-            g_ecg_seg_runs++;
+            hkv_count(HKV_CNT_PIPE_SEG_RUNS);
             ringbuffer_peek(&rbEcgSeg, ecgSegInout, ECG_SEG_WINDOW_LEN);
 
             if (appState.segMode == SegmentationModeDsp) {
@@ -1476,11 +1486,9 @@ EcgProcessTask(void *pvParameters)
             ecgMetResults.segmentIps = ips_from_delta_us(dwt_delta_us(tickStart));
             ecgMetResults.segmentuIpspw = 1.0e3f * ecgMetResults.segmentIps / AVG_INFERENCE_POWER;
             if (err != 0) {
-                g_stage_err[kStageErrEcgSegment]++;
+                hkv_count(HKV_CNT_PIPE_ERR_ECG_SEG);
             }
-#if EN_APP_TIMING_LOGS
-            nsx_printf("[ecg] segment err=%lu\n", (unsigned long)err);
-#endif
+            HKV_TRACE_KV("ecg", "seg_err", err);
         }
 
         ///////////////////////////////////////////////////////////////////
@@ -1510,11 +1518,9 @@ EcgProcessTask(void *pvParameters)
 
             send_ecg_metrics();
             if (err != 0) {
-                g_stage_err[kStageErrEcgMetrics]++;
+                hkv_count(HKV_CNT_PIPE_ERR_ECG_MET);
             }
-#if EN_APP_TIMING_LOGS
-            nsx_printf("[ecg] metrics err=%lu\n", (unsigned long)err);
-#endif
+            HKV_TRACE_KV("ecg", "met_err", err);
         } else {
             vTaskDelay(pdMS_TO_TICKS(20));
         }
@@ -1544,21 +1550,21 @@ EcgProcessTask(void *pvParameters)
 // (Phase 6 fix: previously ran single-wavelength only because sensor.c
 // applied the wrong AS7058 profile -- see sensor.c/store.h.)
 
-static volatile uint32_t g_ppg_loop_iters = 0;
-static volatile uint32_t g_ppg_samples_pushed = 0;
-
-/* Largest number of samples teed into the PPG TX rings by a single pass of the
- * loop below, i.e. the OBSERVED structural block.
+/* Loop iterations and teed samples are counted in the obs.h table
+ * (HKV_CNT_PIPE_PPG_ITERS / HKV_CNT_PIPE_PPG_PUSHED), and the size of a single
+ * tee pass -- the OBSERVED structural block -- is the HKV_GAUGE_PPG_TEE gauge.
  *
  * TIO_PPG_TX_BLOCK_SAMPLES (13) is an empirical figure taken from the AS7058
  * watermark interval, not a compile-time bound: with PPG_DS_RATE == 1 the loop
  * is bounded only by MIN(len(rbPpg1Sensor), len(rbPpg2Sensor)), so a delayed
  * task could in principle tee up to SENSOR_BUF_LEN-1 samples in one pass and
  * exceed H. Unlike ECG, whose block is ECG_SEG_VALID_LEN and therefore
- * statically checkable, this one has to be watched at runtime. If this counter
- * reports above TIO_PPG_TX_BLOCK_SAMPLES on the bench, that constant is wrong
- * and H must be re-derived from the real bound. */
-static volatile uint32_t g_ppg_tee_burst_max = 0;
+ * statically checkable, this one has to be watched at runtime. That is why the
+ * gauge is declared LIFETIME rather than windowed: a single excursion
+ * invalidates the derivation of H, and a per-second maximum would scroll it
+ * out of the capture. If `tee_hi` on the `pipe` report line exceeds
+ * TIO_PPG_TX_BLOCK_SAMPLES, that constant is wrong and H must be re-derived
+ * from the real bound. */
 
 void
 PpgProcessTask(void *pvParameters)
@@ -1574,12 +1580,10 @@ PpgProcessTask(void *pvParameters)
     TickType_t pumpLastWake = xTaskGetTickCount() + pdMS_TO_TICKS(TIO_PPG_PUMP_PHASE_MS);
 
     while (true) {
-        g_ppg_loop_iters++;
+        hkv_count(HKV_CNT_PIPE_PPG_ITERS);
         service_ppg_flush_request();
         size_t numSamples = MIN(ringbuffer_len(&rbPpg1Sensor), ringbuffer_len(&rbPpg2Sensor));
-        if (numSamples / PPG_DS_RATE > g_ppg_tee_burst_max) {
-            g_ppg_tee_burst_max = (uint32_t)(numSamples / PPG_DS_RATE);
-        }
+        hkv_gauge_observe(HKV_GAUGE_PPG_TEE, (uint32_t)(numSamples / PPG_DS_RATE));
         for (size_t i = 0; i < numSamples / PPG_DS_RATE; i++) {
             float32_t sample1, sample2;
             ringbuffer_seek(&rbPpg1Sensor, PPG_DS_RATE - 1);
@@ -1593,7 +1597,7 @@ PpgProcessTask(void *pvParameters)
             ringbuffer_push(&rbPpg2Met, &sample2, 1);
             ringbuffer_push(&rbPpg2Tx, &sample2, 1);
             ringbuffer_seek(&rbPpg2Sensor, 1);
-            g_ppg_samples_pushed++;
+            hkv_count(HKV_CNT_PIPE_PPG_PUSHED);
         }
 
         if (MIN(ringbuffer_len(&rbPpg1Met), ringbuffer_len(&rbPpg2Met)) >= PPG_MET_WINDOW_LEN) {
@@ -1607,18 +1611,14 @@ PpgProcessTask(void *pvParameters)
             ringbuffer_seek(&rbPpg2Met, PPG_MET_VALID_LEN);
             send_ppg_metrics();
             if (err != 0) {
-                g_stage_err[kStageErrPpgMetrics]++;
+                hkv_count(HKV_CNT_PIPE_ERR_PPG_MET);
             }
-#if EN_APP_TIMING_LOGS
-            if (err != 0) {
-                nsx_printf("[ppg] metrics err=%lu\n", (unsigned long)err);
-            }
-#endif
+            HKV_TRACE_KV("ppg", "met_err", err);
         } else {
             vTaskDelay(pdMS_TO_TICKS(20));
         }
 
-        (void)err; /* only consumed by the EN_APP_TIMING_LOGS print above */
+        (void)err; /* counted above; only printed under EN_APP_TRACE */
 
         /* Wait before sending -- see the note in EcgProcessTask. */
         tio_pump_wait(&pumpLastWake);
@@ -1655,7 +1655,21 @@ CpuProcessTask(void *pvParameters)
     while (true) {
         uint32_t idleCounter = 0;
         service_cpu_flush_request();
-        numTasks = uxTaskGetSystemState(xTaskDetails, 10, &runTimeTicks);
+        numTasks = uxTaskGetSystemState(xTaskDetails, HKV_TASK_STATUS_CAPACITY, &runTimeTicks);
+        if (numTasks == 0) {
+            /* Not "no tasks" -- uxTaskGetSystemState() returns 0, rather than
+             * a truncated list, when the array is too small for the live task
+             * count. Falling through would compute every percentage from an
+             * empty list: idleDelta underflows, cpuIdlePerc clamps, and the
+             * published utilisation becomes a plausible constant that nothing
+             * else contradicts. Count it, skip the interval, and leave the
+             * previous published value alone. If stat_overflow is climbing on
+             * the `cpu` report line, raise HKV_TASK_STATUS_CAPACITY. */
+            hkv_count(HKV_CNT_CPU_STAT_OVERFLOW);
+            vTaskDelay(pdMS_TO_TICKS(kCpuStatsSamplePeriodMs));
+            continue;
+        }
+        g_cpu_num_tasks = (uint32_t)numTasks;
         runDelta = runTimeTicks - prevRun;
         if (prevRun == 0 || runDelta == 0) {
             prevRun = runTimeTicks;
@@ -1793,7 +1807,7 @@ static void
 tio_usb_enter_stall(tio_usb_tx_state_t *usb)
 {
     if (!usb->stalled) {
-        g_tio_usb_stalls++;
+        hkv_count(HKV_CNT_USB_STALL);
     }
     usb->stalled = true;
     usb->probeCountdown = kTioUsbStallProbePackets;
@@ -1811,7 +1825,7 @@ tio_usb_service_pending(tio_usb_tx_state_t *usb, bool usbReady)
     }
     if (!usbReady) {
         /* Host went away mid-retry: the held frame can never land. */
-        count_tio_usb_event(g_tio_usb_drop, usb->packet);
+        count_tio_usb_event(HKV_USB_WHICH_DROP, usb->packet);
         usb->pending = false;
         return;
     }
@@ -1833,10 +1847,10 @@ tio_usb_service_pending(tio_usb_tx_state_t *usb, bool usbReady)
     }
     usb->attempts++;
     if (tio_usb_status_retryable(status) && (usb->attempts < kTioUsbMaxSendAttempts)) {
-        count_tio_usb_event(g_tio_usb_retry, usb->packet);
+        count_tio_usb_event(HKV_USB_WHICH_RETRY, usb->packet);
         return;
     }
-    count_tio_usb_event(g_tio_usb_drop, usb->packet);
+    count_tio_usb_event(HKV_USB_WHICH_DROP, usb->packet);
     usb->pending = false;
     tio_usb_enter_stall(usb);
 }
@@ -1852,12 +1866,12 @@ tio_usb_offer_packet(tio_usb_tx_state_t *usb, uint8_t packet[TIO_USB_PACKET_LEN]
     if (usb->pending) {
         /* An older packet is still held: sending this one now would reorder
          * the stream. */
-        count_tio_usb_event(g_tio_usb_drop, packet);
+        count_tio_usb_event(HKV_USB_WHICH_DROP, packet);
         return;
     }
     if (usb->stalled && (usb->probeCountdown > 0)) {
         usb->probeCountdown--;
-        count_tio_usb_event(g_tio_usb_drop, packet);
+        count_tio_usb_event(HKV_USB_WHICH_DROP, packet);
         return;
     }
     status = tio_usb_send_slot_packet(packet, TIO_USB_PACKET_LEN);
@@ -1871,10 +1885,10 @@ tio_usb_offer_packet(tio_usb_tx_state_t *usb, uint8_t packet[TIO_USB_PACKET_LEN]
         usb->pending = true;
         usb->attempts = 1;
         usb->lastAttemptTick = xTaskGetTickCount();
-        count_tio_usb_event(g_tio_usb_retry, packet);
+        count_tio_usb_event(HKV_USB_WHICH_RETRY, packet);
         return;
     }
-    count_tio_usb_event(g_tio_usb_drop, packet);
+    count_tio_usb_event(HKV_USB_WHICH_DROP, packet);
     tio_usb_enter_stall(usb);
 }
 
@@ -1945,194 +1959,214 @@ TioProcessTask(void *pvParameters)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// Report task (debug: sensor throughput + latest metrics, once/sec)
+// Report task (periodic subsystem report, EN_APP_REPORT)
 ///////////////////////////////////////////////////////////////////////////////
+//
+// See src/obs.h for the line format, the counter/gauge model, and the locking
+// argument. This file supplies only the rotation list and the per-subsystem
+// `extra` callbacks that append values which do not live in the counter/gauge
+// tables (instantaneous ring lengths, servo state, metric results).
+//
+// WHY A ROTATION AND NOT ONE BURST. Emitting every subsystem back-to-back once
+// a second puts the whole per-second SWO cost -- on the order of 20 ms across
+// ten lines -- into a single burst inside ReportTask, which runs at the SAME
+// priority as the ECG and PPG pump tasks. A 20 ms burst fits inside the 250 ms
+// jitter budget, so it would not break anything, but it perturbs exactly the
+// cadence the report exists to measure. Emitting ONE subsystem per slot
+// spreads the same total over the second and keeps each individual stall to a
+// couple of milliseconds.
+//
+// Each subsystem is still visited exactly once per rotation and the rotation
+// is one second, so every `_ps` delta is a genuine per-second rate. The slot
+// period is derived from the list length, so adding a subsystem keeps the
+// rotation at one second rather than silently stretching the delta window.
+
+/* Every hkv_log_* call in these callbacks runs with the log lock already held
+ * (hkv_report_subsystem took it). They must not call hkv_log_begin or
+ * hkv_log_end: the mutex is not recursive and a nested begin deadlocks. */
+
+static void
+report_extra_sensor(void)
+{
+    /* sensor.c owns these counters: they are updated from the AS7058 INT ISR
+     * and the interval pair carries a ticks->ms conversion, so they stay
+     * behind sensor.h's accessors rather than moving into the obs table. The
+     * wire format is `k=v` either way, so nothing downstream can tell.
+     *
+     * Confirms the INT ISR is firing and that both PPG channels and ECG are
+     * actually reaching their ringbuffers. A stable isr_min/isr_max pair close
+     * to the FIFO watermark's expected interval (~125-130 ms on hardware for
+     * this profile) confirms a normal cadence -- the bursty look of
+     * watermark-batched delivery is not itself a bug. A max that is a large
+     * multiple of the min is real IRQ starvation, and is the first thing to
+     * check after any change touching interrupt priorities, the USB/BLE ISR
+     * paths, or critical sections. */
+    hkv_log_u32("isr", sensor_get_as7058_int_isr_count());
+    hkv_log_u32("missed", sensor_get_irq_notify_missed_count());
+    hkv_log_u32("ppg_push", sensor_get_ppg_push_count());
+    hkv_log_u32("ppg_drop", sensor_get_ppg_drop_count());
+    hkv_log_u32("ecg_push", sensor_get_ecg_push_count());
+    hkv_log_u32("ecg_drop", sensor_get_ecg_drop_count());
+    hkv_log_u32("isr_int_lo_ms", sensor_get_as7058_isr_min_interval_ms());
+    hkv_log_u32("isr_int_hi_ms", sensor_get_as7058_isr_max_interval_ms());
+    sensor_reset_as7058_isr_interval_stats();
+}
+
+static void
+report_extra_tio(void)
+{
+    hkv_log_u32("qdepth", (uint32_t)uxQueueMessagesWaiting(g_tioTxQueue));
+}
+
+/* Servo state that is control output rather than an observability counter, so
+ * it is read straight from the group instead of being mirrored into a table.
+ *
+ *   bgt  -- servo budget, extra samples per SERVO WINDOW (64 ticks = 6.4 s),
+ *           NOT per second. The rate it encodes is bgt / (window x pump
+ *           interval), which should equal the producer's drift. Do NOT expect
+ *           a settled value: measured spread is 0..31 clustering near
+ *           multiples of samplesPerPkt. See tio_tx_group_servo().
+ *   trgh -- the trough the servo last measured, against a target of
+ *           TIO_*_TX_TROUGH_TARGET. The shipped servo does not converge;
+ *           measured spread is 3..34 against a target of 20. Judge trim_ps and
+ *           pump_ps, not this.
+ *           CAUTION: trgh 0 with bgt 0 is ambiguous. It is the normal reading
+ *           for a producer slower than the pump (self-throttling, not a fault)
+ *           AND the reading for a producer that has stopped entirely.
+ *           Distinguish them with pump_ps and the `sensor` line, not here. */
+static void
+report_extra_tx_group(const tio_tx_group_t *group)
+{
+    hkv_log_u32("bgt", group->extraBudget);
+    hkv_log_u32("trgh", group->servoTrough);
+    hkv_log_u32("hw", group->highWater);
+}
+
+static void
+report_extra_txecg(void)
+{
+    report_extra_tx_group(&g_ecgTxGroup);
+    /* Instantaneous TX-tap occupancy at the moment of sampling. Chronically 0
+     * means the segmentation branch is not feeding the taps; large or climbing
+     * means the taps fill but do not drain. */
+    hkv_log_u32("raw_len", (uint32_t)ringbuffer_len(&rbEcgRawTx));
+    hkv_log_u32("den_len", (uint32_t)ringbuffer_len(&rbEcgDenTx));
+    hkv_log_u32("mask_len", (uint32_t)ringbuffer_len(&rbEcgMaskTx));
+}
+
+static void
+report_extra_txppg(void)
+{
+    report_extra_tx_group(&g_ppgTxGroup);
+    hkv_log_u32("p1_len", (uint32_t)ringbuffer_len(&rbPpg1Tx));
+    hkv_log_u32("p2_len", (uint32_t)ringbuffer_len(&rbPpg2Tx));
+}
+
+static void
+report_extra_ring(void)
+{
+    /* Stage-to-stage ring occupancy across both pipelines. Read as a profile
+     * rather than individually: a single ring pinned near its capacity while
+     * the ones after it sit empty localises the stalled stage immediately. */
+    hkv_log_u32("ecg_sensor", (uint32_t)ringbuffer_len(&rbEcgSensor));
+    hkv_log_u32("ecg_den", (uint32_t)ringbuffer_len(&rbEcgDen));
+    hkv_log_u32("ecg_rawseg", (uint32_t)ringbuffer_len(&rbEcgRawSeg));
+    hkv_log_u32("ecg_seg", (uint32_t)ringbuffer_len(&rbEcgSeg));
+    hkv_log_u32("ecg_met", (uint32_t)ringbuffer_len(&rbEcgMet));
+    hkv_log_u32("ecg_maskmet", (uint32_t)ringbuffer_len(&rbEcgMaskMet));
+    hkv_log_u32("ppg1_sensor", (uint32_t)ringbuffer_len(&rbPpg1Sensor));
+    hkv_log_u32("ppg2_sensor", (uint32_t)ringbuffer_len(&rbPpg2Sensor));
+    hkv_log_u32("ppg1_met", (uint32_t)ringbuffer_len(&rbPpg1Met));
+    hkv_log_u32("ppg2_met", (uint32_t)ringbuffer_len(&rbPpg2Met));
+}
+
+static void
+report_extra_ecgmet(void)
+{
+    /* Fixed point, not the `%d.%02d` split this replaces: that idiom prints
+     * -0.5 as "0.50" and costs an fabsf plus two float->int conversions per
+     * field. See obs_fmt.h. */
+    hkv_log_fx2("hr", ecgMetResults.hr);
+    hkv_log_fx2("hrv", ecgMetResults.hrv);
+    hkv_log_fx2("qos", ecgMetResults.qos);
+    hkv_log_fx2("cossim", ecgMetResults.denoiseCossim);
+    hkv_log_u32("rhythm", (uint32_t)ecgMetResults.arrhythmiaLabel);
+}
+
+static void
+report_extra_ppgmet(void)
+{
+    hkv_log_fx2("pr", ppgMetResults.pr);
+    hkv_log_fx2("spo2", ppgMetResults.spo2);
+    hkv_log_fx2("qos", ppgMetResults.qos);
+}
+
+static void
+report_extra_cpu(void)
+{
+    /* `tasks` against HKV_TASK_STATUS_CAPACITY is the headroom that the
+     * stat_overflow counter on this same line reports the loss of. Watch it
+     * before it becomes a number rather than after. */
+    hkv_log_u32("tasks", g_cpu_num_tasks);
+    hkv_log_u32("capacity", HKV_TASK_STATUS_CAPACITY);
+    hkv_log_fx2("util", appMetResults.cpuPercUtil);
+    hkv_log_fx2("batt_days", appMetResults.batteryDays);
+    hkv_log_fx2("avg_ips", appMetResults.avgAiIps);
+}
+
+typedef struct {
+    const char *subsystem;
+    void (*extra)(void);
+} hkv_report_line_t;
+
+/* The rotation. Adding a subsystem is one row; the slot period below keeps the
+ * rotation at one second on its own. Subsystems with no `extra` are emitted
+ * entirely from the obs.h counter and gauge tables. */
+static const hkv_report_line_t kReportLines[] = {
+    {"sensor", report_extra_sensor},
+    {"tio", report_extra_tio},
+    {"tiousb", NULL},
+    {"txecg", report_extra_txecg},
+    {"txppg", report_extra_txppg},
+    {"pipe", NULL},
+    {"ring", report_extra_ring},
+    {"ecgmet", report_extra_ecgmet},
+    {"ppgmet", report_extra_ppgmet},
+    {"cpu", report_extra_cpu},
+};
+
+#define HKV_REPORT_LINE_COUNT (sizeof(kReportLines) / sizeof(kReportLines[0]))
+
+/* One full rotation per second, whatever the list length, so `_ps` stays a
+ * per-second rate without anyone having to remember to retune this. */
+#define HKV_REPORT_SLOT_MS (1000u / HKV_REPORT_LINE_COUNT)
+
+static_assert(HKV_REPORT_SLOT_MS > 0, "report rotation cannot exceed one subsystem per millisecond");
 
 void
 ReportTask(void *pvParameters)
 {
     (void)pvParameters;
+#if EN_APP_REPORT
+    TickType_t lastWake = xTaskGetTickCount();
+    size_t idx = 0;
+
     while (true) {
-#if EN_APP_DEBUG_LOGS
-        /* Debug sensor breadcrumbs:
-         * confirms the AS7058 INT ISR is firing and both PPG channels +
-         * ECG are actually flowing into their ringbuffers, useful for
-         * verifying sensor bring-up on new hardware/profile changes. */
-        nsx_printf("[sensor] isr=%lu missed=%lu ppg(push=%lu drop=%lu) ecg(push=%lu drop=%lu) tio_drops=%lu\n",
-                   (unsigned long)sensor_get_as7058_int_isr_count(), (unsigned long)sensor_get_irq_notify_missed_count(),
-                   (unsigned long)sensor_get_ppg_push_count(), (unsigned long)sensor_get_ppg_drop_count(),
-                   (unsigned long)sensor_get_ecg_push_count(), (unsigned long)sensor_get_ecg_drop_count(),
-                   (unsigned long)g_tio_tx_queue_drops);
-        /* AS7058 INT ISR-to-ISR interval range over the last report period.
-         * A stable, uniform min/max close to the FIFO watermark's expected
-         * interval (e.g. ~125-130ms for a ~26-sample/200Hz ECG watermark, as
-         * observed on hardware) confirms the INT line is firing at a normal,
-         * expected cadence -- the "bursty" look of watermark-batched
-         * ringbuffer delivery is not itself a bug. A max interval that's a
-         * large multiple of the min would indicate real IRQ starvation/delay
-         * and is worth watching for after any change touching interrupt
-         * priorities, USB/BLE ISR paths, or critical sections. */
-        nsx_printf("[sensor] as7058 isr interval min=%lu ms max=%lu ms\n",
-                   (unsigned long)sensor_get_as7058_isr_min_interval_ms(),
-                   (unsigned long)sensor_get_as7058_isr_max_interval_ms());
-        sensor_reset_as7058_isr_interval_stats();
-        /* TEMP diagnostic (tracking down ECG/PPG TileIO starvation): per
-         * slot (0=ECG,1=PPG,2=CPU) nodata=numSamples==0 early-return count,
-         * ok=successfully enqueued, fail=enqueue attempted but queue was
-         * full, packfail=tio_usb_pack_slot_data() itself rejected the call. */
-        nsx_printf("[tio] uio_rx=%lu ecg(nodata=%lu ok=%lu fail=%lu packfail=%lu) ppg(nodata=%lu ok=%lu fail=%lu packfail=%lu) "
-                   "cpu(nodata=%lu ok=%lu fail=%lu packfail=%lu)\n",
-                   (unsigned long)g_uio_rx_count,
-                   (unsigned long)g_tio_nodata[0], (unsigned long)g_tio_enqueue_ok[0], (unsigned long)g_tio_enqueue_fail[0],
-                   (unsigned long)g_tio_pack_fail[0], (unsigned long)g_tio_nodata[1], (unsigned long)g_tio_enqueue_ok[1],
-                   (unsigned long)g_tio_enqueue_fail[1], (unsigned long)g_tio_pack_fail[1], (unsigned long)g_tio_nodata[2],
-                   (unsigned long)g_tio_enqueue_ok[2], (unsigned long)g_tio_enqueue_fail[2], (unsigned long)g_tio_pack_fail[2]);
-        /* USB delivery health per stream (0=ECG,1=PPG,2=CPU slots, uio=UIO
-         * responses): retry=a BUSY/PARTIAL send that was deferred and will be
-         * attempted again, drop=packet not delivered over USB at all (retry
-         * budget exhausted, skipped while the stall latch was set, or held
-         * when the host disconnected). retry>0 with drop==0 is a transient
-         * FIFO-full window that every packet survived; drop>0 is real,
-         * deliberate USB-side loss (those packets still went out over BLE
-         * when BLE is compiled in and connected). */
-        nsx_printf("[tio-usb] stall=%lu ecg(retry=%lu drop=%lu) ppg(retry=%lu drop=%lu) cpu(retry=%lu drop=%lu) "
-                   "uio(retry=%lu drop=%lu)\n",
-                   (unsigned long)g_tio_usb_stalls,
-                   (unsigned long)g_tio_usb_retry[0], (unsigned long)g_tio_usb_drop[0],
-                   (unsigned long)g_tio_usb_retry[1], (unsigned long)g_tio_usb_drop[1],
-                   (unsigned long)g_tio_usb_retry[2], (unsigned long)g_tio_usb_drop[2],
-                   (unsigned long)g_tio_usb_retry[TIO_USB_BUCKET_UIO], (unsigned long)g_tio_usb_drop[TIO_USB_BUCKET_UIO]);
-        /* TEMP diagnostic: instantaneous ring-buffer occupancy at the exact
-         * moment ReportTask samples it -- if these are chronically 0, the
-         * producer (EcgProcessTask/PpgProcessTask segmentation/downsample
-         * stage) isn't feeding the TX taps; if they're large/climbing, the
-         * TX taps are filling but not being drained (queue/consumer side). */
-        nsx_printf("[ppg-task] loop_iters=%lu samples_pushed=%lu rbPpg1Sensor_len=%u rbPpg2Sensor_len=%u "
-                   "rbPpg1Met_len=%u rbPpg2Met_len=%u\n",
-                   (unsigned long)g_ppg_loop_iters, (unsigned long)g_ppg_samples_pushed,
-                   (unsigned)ringbuffer_len(&rbPpg1Sensor), (unsigned)ringbuffer_len(&rbPpg2Sensor),
-                   (unsigned)ringbuffer_len(&rbPpg1Met), (unsigned)ringbuffer_len(&rbPpg2Met));
-        nsx_printf("[tio-len] ecgRawTx=%u ecgDenTx=%u ecgMaskTx=%u ppg1Tx=%u ppg2Tx=%u qdepth=%u\n",
-                   (unsigned)ringbuffer_len(&rbEcgRawTx), (unsigned)ringbuffer_len(&rbEcgDenTx),
-                   (unsigned)ringbuffer_len(&rbEcgMaskTx), (unsigned)ringbuffer_len(&rbPpg1Tx),
-                   (unsigned)ringbuffer_len(&rbPpg2Tx), (unsigned)uxQueueMessagesWaiting(g_tioTxQueue));
-        nsx_printf("[ecg-len] rbEcgSensor=%u rbEcgDen=%u rbEcgRawSeg=%u rbEcgSeg=%u rbEcgMet=%u rbEcgMaskMet=%u seg_runs=%lu\n",
-                   (unsigned)ringbuffer_len(&rbEcgSensor), (unsigned)ringbuffer_len(&rbEcgDen),
-                   (unsigned)ringbuffer_len(&rbEcgRawSeg), (unsigned)ringbuffer_len(&rbEcgSeg),
-                   (unsigned)ringbuffer_len(&rbEcgMet), (unsigned)ringbuffer_len(&rbEcgMaskMet),
-                   (unsigned long)g_ecg_seg_runs);
-        nsx_printf("[ecg] hr=%d.%02d bpm hrv=%d.%02d ms rhythm=%d qos=%d.%02d\n", (int)ecgMetResults.hr,
-                   (int)(fabsf(ecgMetResults.hr - (int)ecgMetResults.hr) * 100), (int)ecgMetResults.hrv,
-                   (int)(fabsf(ecgMetResults.hrv - (int)ecgMetResults.hrv) * 100), (int)ecgMetResults.arrhythmiaLabel,
-                   (int)ecgMetResults.qos, (int)(fabsf(ecgMetResults.qos - (int)ecgMetResults.qos) * 100));
-        nsx_printf("[ppg] pr=%d.%02d bpm spo2=%d.%02d qos=%d.%02d\n", (int)ppgMetResults.pr,
-                   (int)(fabsf(ppgMetResults.pr - (int)ppgMetResults.pr) * 100), (int)ppgMetResults.spo2,
-                   (int)(fabsf(ppgMetResults.spo2 - (int)ppgMetResults.spo2) * 100), (int)ppgMetResults.qos,
-                   (int)(fabsf(ppgMetResults.qos - (int)ppgMetResults.qos) * 100));
-#endif
-
-#if EN_APP_EMIT_LOGS
-        /* Rate-matched emission health, per signal slot (constants.h "TileIO
-         * latency budget"). Gated separately from EN_APP_DEBUG_LOGS and on by
-         * default: this single 1 Hz line is what the issue #12 acceptance
-         * criteria are read from, and pkt_rate below 10/s is the only direct
-         * symptom of a pump that has lost its cadence. Defaulting it off
-         * alongside EN_APP_TIMING_LOGS would leave a bench run blind.
-         *
-         * ReportTask runs at 1 Hz, so the deltas ARE the per-second rates.
-         *   pkt_rate  -- packets HANDED to the transport; expect 10/s +/- 1.
-         *   deliv     -- of those, the ones the transport accepted. pkt_rate
-         *                without deliv means the host is not receiving,
-         *                however healthy the rest of the line looks.
-         *   trim      -- samples discarded by trim-to-high-water. Expect 0 in
-         *                both clock-drift directions now that the drift drain
-         *                keeps occupancy off H; TIO_TX_TRIM_DRIFT_ALLOWANCE_SPS
-         *                is only a backstop for judging a capture. Sustained
-         *                non-zero trim is a bug, not a policy working.
-         *   drain     -- ticks on which the servo spent an extra sample.
-         *                MIND THE UNITS: this is a PER-SECOND delta while bgt
-         *                is per servo window (64 ticks = 6.4 s). They differ by
-         *                6.4x, so a healthy pair looks like drain=2/s against
-         *                bgt=13 -- do not read that as the drain falling short.
-         *   bgt       -- servo budget, extra samples per SERVO WINDOW. The rate
-         *                it encodes is bgt / (window x pump interval), which
-         *                should equal the producer's drift. Do NOT expect a
-         *                settled value: measured spread is 0..31 clustering
-         *                near multiples of samplesPerPkt. See RESIDUAL
-         *                BEHAVIOUR at tio_tx_group_servo().
-         *   trgh      -- trough the servo last measured, against a target of
-         *                TIO_*_TX_TROUGH_TARGET. There is no hysteresis band;
-         *                the position term has an integer-division deadband,
-         *                which is a different thing, and the shipped servo does
-         *                NOT converge -- measured trgh spread is 3..34 against
-         *                a target of 20. Judge trim and pkt, not this.
-         *                CAUTION: trgh 0 with bgt 0 is ambiguous. It is the
-         *                normal reading for a producer slower than the pump
-         *                (self-throttling, not a fault) AND the reading for a
-         *                producer that has stopped entirely. Distinguish them
-         *                with pkt and the sensor counters, not from this line.
-         *   occ       -- TX occupancy low..high per interval, sampled pre-trim
-         *                and pre-pop. For ECG the low value is the pre-block
-         *                residual R, i.e. how close the next atomic 200-sample
-         *                push will land to H.
-         *   ppg_burst -- high-water mark of one PPG tee pass; must stay <=
-         *                TIO_PPG_TX_BLOCK_SAMPLES or H is mis-derived.
-         *   stage_err -- cumulative non-zero returns from ECG denoise /
-         *                segment / metrics and PPG metrics. Any sustained
-         *                climb invalidates the waveform regardless of rate.
-         *
-         * Split across two lines deliberately: SWO output from concurrent
-         * tasks interleaves and corrupts long lines (issue #11), so no single
-         * line should have to be trusted on its own. */
-        {
-            static uint32_t lastEcgPkts = 0, lastPpgPkts = 0, lastEcgTrim = 0, lastPpgTrim = 0;
-            static uint32_t lastEcgDeliv = 0, lastPpgDeliv = 0, lastEcgDrain = 0, lastPpgDrain = 0;
-            uint32_t ecgPkts = g_ecgTxGroup.pumped, ppgPkts = g_ppgTxGroup.pumped;
-            uint32_t ecgTrim = g_ecgTxGroup.trimmed, ppgTrim = g_ppgTxGroup.trimmed;
-            uint32_t ecgDeliv = g_ecgTxGroup.delivered, ppgDeliv = g_ppgTxGroup.delivered;
-            uint32_t ecgDrain = g_ecgTxGroup.drained, ppgDrain = g_ppgTxGroup.drained;
-            uint32_t ecgOccMin = g_ecgTxGroup.occMin, ecgOccMax = g_ecgTxGroup.occMax;
-            uint32_t ppgOccMin = g_ppgTxGroup.occMin, ppgOccMax = g_ppgTxGroup.occMax;
-            /* Reset the watermarks so the next interval reports afresh. */
-            g_ecgTxGroup.occMin = TIO_OCC_MIN_INIT;
-            g_ecgTxGroup.occMax = 0;
-            g_ppgTxGroup.occMin = TIO_OCC_MIN_INIT;
-            g_ppgTxGroup.occMax = 0;
-            if (ecgOccMin == TIO_OCC_MIN_INIT) {
-                ecgOccMin = 0;
-            }
-            if (ppgOccMin == TIO_OCC_MIN_INIT) {
-                ppgOccMin = 0;
-            }
-            nsx_printf("[tio-emit] ecg(pkt=%lu/s deliv=%lu/s trim=%lu/s drain=%lu/s occ=%lu..%lu "
-                       "bgt=%u trgh=%lu) ppg(pkt=%lu/s deliv=%lu/s trim=%lu/s drain=%lu/s "
-                       "occ=%lu..%lu bgt=%u trgh=%lu)\n",
-                       (unsigned long)(ecgPkts - lastEcgPkts), (unsigned long)(ecgDeliv - lastEcgDeliv),
-                       (unsigned long)(ecgTrim - lastEcgTrim), (unsigned long)(ecgDrain - lastEcgDrain),
-                       (unsigned long)ecgOccMin, (unsigned long)ecgOccMax,
-                       (unsigned)g_ecgTxGroup.extraBudget, (unsigned long)g_ecgTxGroup.servoTrough,
-                       (unsigned long)(ppgPkts - lastPpgPkts), (unsigned long)(ppgDeliv - lastPpgDeliv),
-                       (unsigned long)(ppgTrim - lastPpgTrim), (unsigned long)(ppgDrain - lastPpgDrain),
-                       (unsigned long)ppgOccMin, (unsigned long)ppgOccMax,
-                       (unsigned)g_ppgTxGroup.extraBudget, (unsigned long)g_ppgTxGroup.servoTrough);
-            nsx_printf("[tio-health] trim_tot(ecg=%lu ppg=%lu) ppg_burst=%lu "
-                       "stage_err(den=%lu seg=%lu met=%lu ppgmet=%lu)\n",
-                       (unsigned long)ecgTrim, (unsigned long)ppgTrim, (unsigned long)g_ppg_tee_burst_max,
-                       (unsigned long)g_stage_err[kStageErrEcgDenoise], (unsigned long)g_stage_err[kStageErrEcgSegment],
-                       (unsigned long)g_stage_err[kStageErrEcgMetrics], (unsigned long)g_stage_err[kStageErrPpgMetrics]);
-            lastEcgPkts = ecgPkts;
-            lastPpgPkts = ppgPkts;
-            lastEcgTrim = ecgTrim;
-            lastPpgTrim = ppgTrim;
-            lastEcgDeliv = ecgDeliv;
-            lastPpgDeliv = ppgDeliv;
-            lastEcgDrain = ecgDrain;
-            lastPpgDrain = ppgDrain;
-        }
-#endif
-
+        /* vTaskDelayUntil, so a long line does not push the rotation late and
+         * turn the `_ps` deltas into something other than per-second. */
+        vTaskDelayUntil(&lastWake, pdMS_TO_TICKS(HKV_REPORT_SLOT_MS));
+        hkv_report_subsystem(kReportLines[idx].subsystem, kReportLines[idx].extra);
+        idx = (idx + 1u) % HKV_REPORT_LINE_COUNT;
+    }
+#else
+    /* Counters and gauges keep running; only the printing is off. Keeping the
+     * task alive rather than deleting it holds the task count -- and therefore
+     * the CPU attribution -- identical across the A/B builds used to measure
+     * what the reporting itself costs. */
+    while (true) {
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
+#endif
 }
 
 int
@@ -2144,6 +2178,12 @@ main(void)
         .api = &nsx_core_V1_0_0,
     };
     NSX_TRY(nsx_core_init(&core_cfg), "Core Init failed.\n");
+
+    /* Before any task exists, so every hkv_log_* call from here on is covered.
+     * Calls made before this point are still safe: with no mutex yet, the log
+     * falls through unlocked, which is correct while main() is the only
+     * context running. */
+    hkv_log_init();
 
     sensorCtx.inputSource = appState.inputSource;
     nsxPwrCfg.perf_mode = appState.speedMode ? NSX_POWER_PERF_HIGH : NSX_POWER_PERF_LOW;
@@ -2216,7 +2256,11 @@ main(void)
     NSX_TRY((xTaskCreate(ReportTask, "ReportTask", 1024, 0, 1, &reportTaskHandle) != pdPASS),
             "ReportTask create failed.\n");
 
-    nsx_printf("heartkit-vitals-demo: AS7058 sensing + physiokit/heliaRT DSP+AI pipeline + TileIO USB streaming\n");
+    /* Emitted from main(), before the scheduler starts, so it is the FIRST
+     * line of any capture and cannot interleave with a report line. A capture
+     * that does not begin with this is a capture whose build is unknown, and
+     * every conclusion drawn from it is provisional. */
+    hkv_log_boot();
 
     nsx_freertos_start();
 

@@ -110,31 +110,54 @@ extern "C" {
 #define EN_AS7058_CB_DEBUG_LOGS (0)
 #endif
 
-#ifndef EN_APP_DEBUG_LOGS
-#define EN_APP_DEBUG_LOGS (0)
-#endif
+///////////////////////////////////////////////////////////////////////////////
+// Observability (issue #11 -- see src/obs.h for the full argument)
+///////////////////////////////////////////////////////////////////////////////
+//
+// There are exactly TWO flags here, and neither of them gates a counter.
+//
+// Counters and gauges are ALWAYS compiled in. Recording one is a relaxed
+// load/add/store on a volatile uint32_t -- a few hundred per second across the
+// whole app -- so there is no build in which switching them off buys anything
+// worth the loss of evidence. What costs is PRINTING, and that is what these
+// two flags control.
+//
+// This replaces three flags whose polarity was backwards: EN_APP_DEBUG_LOGS
+// (deleted) defaulted to 0 and hid the cheap 1 Hz counter report, while
+// EN_APP_TIMING_LOGS (deleted) defaulted to 1 and shipped the expensive
+// per-pipeline-branch prints. The shipped build paid for the costly channel
+// and omitted the useful one, and hardware validation of the emission rework
+// was impossible until the flag was flipped by hand. EN_APP_EMIT_LOGS is
+// folded into EN_APP_REPORT rather than surviving as a third flag.
 
-/* Default 0. These prints sit inside the once-per-2-s denoise/segmentation/
- * metrics branches, so the cost is ~1.5 lines/s rather than a per-iteration
- * storm -- but nsx_printf over SWO blocks the calling task, and these are the
- * equal-priority pump tasks whose cadence the latency budget below depends on.
- * A blocked pump overruns its period, and an overrun is exactly the condition
- * tio_pump_wait() has to absorb without dropping below 1x. Enable deliberately
- * for a bring-up session, not by default.
+/* Default 1: the periodic subsystem report emitted by ReportTask, one
+ * subsystem per rotation slot at ~1 Hz per subsystem. This is where the
+ * acceptance criteria for the streaming rework (packet rate, delivery, trim
+ * rate, occupancy) are read from, so defaulting it off would leave every bench
+ * run blind -- the mistake this whole flag scheme exists to correct.
  *
- * Turning this off discards the per-stage inference return codes, which were
- * its only report. g_stage_err[] in main.cc counts them unconditionally so a
- * persistently failing stage cannot hide behind a plausible-looking trace. */
-#ifndef EN_APP_TIMING_LOGS
-#define EN_APP_TIMING_LOGS (0)
+ * Setting it to 0 does NOT stop the counters; it only stops them being
+ * printed. Use that for an A/B measurement of the reporter's own CPU cost, or
+ * for a build where SWO is unavailable. */
+#ifndef EN_APP_REPORT
+#define EN_APP_REPORT (1)
 #endif
 
-/* Default 1: the single 1 Hz [tio-emit] line in ReportTask, which is where the
- * issue #12 acceptance criteria (packet rate, delivery, trim rate) are read
- * from. Gated separately from EN_APP_DEBUG_LOGS so that a bench run is not
- * blind by default -- one line per second does not perturb the pump. */
-#ifndef EN_APP_EMIT_LOGS
-#define EN_APP_EMIT_LOGS (1)
+/* Default 0: ad hoc per-event trace lines (HKV_TRACE_KV, src/obs.h).
+ *
+ * These sit inside the once-per-2-s denoise/segmentation/metrics branches on
+ * the EQUAL-PRIORITY pump tasks whose cadence the latency budget below depends
+ * on, and each line blocks its caller for the duration of the SWO write. A
+ * blocked pump overruns its period, and an overrun is exactly the condition
+ * tio_pump_wait() has to absorb without dropping below 1x. Enable deliberately
+ * for a bring-up session; do not ship it on.
+ *
+ * Nothing is lost by leaving it off. Every value a trace line carried is also
+ * counted (err_den/err_seg/err_met/err_ppgmet on the `pipe` report line), so a
+ * persistently failing stage cannot hide behind a plausible-looking silence --
+ * which is what made the old default dangerous rather than merely wasteful. */
+#ifndef EN_APP_TRACE
+#define EN_APP_TRACE (0)
 #endif
 
 #ifndef EN_MODEL_VERBOSE_LOGS
@@ -655,8 +678,10 @@ extern "C" {
  * SENSOR_BUF_LEN-1 (255) if that task is ever delayed long enough. Exceeding
  * this constant does not corrupt anything (the trim absorbs it) but it does
  * mean H is under-derived and steady-state trim would become non-zero. The
- * runtime high-water counter g_ppg_tee_burst_max in main.cc exists to catch
- * that on the bench; if it reports above this value, re-derive H. */
+ * HKV_GAUGE_PPG_TEE gauge (src/obs.h) exists to catch that on the bench: it is
+ * declared LIFETIME rather than windowed precisely so a single excursion
+ * cannot scroll out of the capture. Read it as `tee_hi` on the `pipe` report
+ * line; if it exceeds this value, re-derive H. */
 #define TIO_PPG_TX_BLOCK_SAMPLES (13)
 #define TIO_PPG_TX_HIGH_WATER                                                                                          \
     (TIO_PPG_TX_BLOCK_SAMPLES + TIO_PPG_SAMPLES_PER_PKT + TIO_TX_SLACK_SAMPLES + TIO_TX_SLIP_SAMPLES)
