@@ -372,19 +372,38 @@ extern "C" {
  * 1500 ms staleness threshold. Exceeding it is a user-visible gap. */
 #define TIO_JITTER_BUDGET_MS (250)
 
-/* INVARIANT: TIO_MAX_EMIT_RATE = 1.00x realtime -- never exceed, no catch-up
- * ever.
+/* INVARIANT: TIO_MAX_EMIT_RATE = 1.00x realtime -- never exceed.
  *
  * After a stall of T seconds the firmware holds T extra seconds of signal.
  * Draining that backlog at *any* rate above 1x necessarily adds T to the
  * host's playout latency permanently, leaving it T closer to its staleness
  * threshold forever; there is no catch-up rate at which this works. The only
  * correct policy for a live monitor is to discard the stale backlog at the
- * source (trim to high-water, below) and resume at exactly 1x. One honest gap
- * of exactly T renders, and latency returns to nominal immediately.
+ * source (trim to high-water, below) and resume at 1x. One honest gap of
+ * exactly T renders, and latency returns to nominal immediately.
  *
- * Enforced in main.cc by emitting at most one fixed-size packet per pump tick
- * and never emitting a short packet. */
+ * WHAT ACTUALLY ENFORCES THIS: the pump pops from a ring, so it can only ever
+ * emit samples the producer has already produced. Averaged over any window
+ * longer than the buffer, emitted rate <= produced rate is guaranteed by the
+ * ring itself, whatever count the pump chooses to pop. The invariant is
+ * structural, not a property of the packet size.
+ *
+ * That distinction matters because a rigidly fixed pop count does NOT protect
+ * the invariant -- it only fails in the other direction. Hardware run
+ * 2026-09-01 measured the PPG producer ~1.1% faster than a fixed
+ * 10-samples-per-100-ms pump: occupancy pinned at H and the trim discarded
+ * ~1.1 samples/s permanently, forever, in a perfectly healthy system. ECG,
+ * which happens to sit on the slow side of the same comparison, trimmed zero.
+ *
+ * So the pump tracks the producer instead of assuming it: above a setpoint it
+ * pops one extra sample per tick (TIO_TX_DRIFT_CATCHUP_SAMPLES) to drain
+ * accumulated drift, and below the packet size it emits nothing at all. Both
+ * corrections are bounded by what the ring holds, so neither can push the
+ * average above the producer's true rate. The transient excess is bounded by
+ * H - setpoint = one packet = 100 ms of signal, drained over ~1 s, which is
+ * inside the 250 ms jitter budget and far inside the host's 500 ms playout
+ * delay. Permanent loss is the thing worth avoiding; 100 ms of transient
+ * latency is not. */
 
 /* Pump period for the ECG and PPG signal slots. At configTICK_RATE_HZ = 1000
  * this is exactly 100 ticks, so pdMS_TO_TICKS() is exact and the pump can be
@@ -413,6 +432,26 @@ extern "C" {
 #define TIO_ECG_SAMPLES_PER_PKT (10)
 #define TIO_PPG_SAMPLES_PER_PKT (10)
 
+/* Drift drain. When TX occupancy sits above its setpoint (H minus one packet)
+ * the producer is running fractionally faster than the pump's nominal
+ * 10-per-100-ms, so the pump pops this many extra samples per tick until
+ * occupancy falls back. One extra sample is a 10% drain rate against drift
+ * measured in tenths of a percent, so it clears in about a second and then
+ * stops; the setpoint sits a full packet below H, so the drain always engages
+ * before the trim would and steady-state loss goes to zero in BOTH drift
+ * directions (the slow direction is already handled by skipping a tick when
+ * fewer than a full packet is available).
+ *
+ * Packets are therefore 10 or 11 samples, i.e. 60 or 66 B of payload. The
+ * TimedSignal header carries the length and the host reads dlen, so variable
+ * packet size is fine on the wire. */
+#define TIO_TX_DRIFT_CATCHUP_SAMPLES (1)
+
+/* Largest packet either signal slot can emit -- sizes the sender stack buffers
+ * and must account for the drift drain above, not just the nominal size. */
+#define TIO_ECG_MAX_SAMPLES_PER_PKT (TIO_ECG_SAMPLES_PER_PKT + TIO_TX_DRIFT_CATCHUP_SAMPLES)
+#define TIO_PPG_MAX_SAMPLES_PER_PKT (TIO_PPG_SAMPLES_PER_PKT + TIO_TX_DRIFT_CATCHUP_SAMPLES)
+
 /* Per-slot TX-ring high-water H, in samples. On each pump tick the slot's TX
  * rings are trimmed to H before popping, so H bounds the stale backlog the
  * firmware is willing to hold. H is a sum of three terms:
@@ -424,24 +463,29 @@ extern "C" {
  *                           be assembled from what is left after a trim;
  *   3. scheduling slack  -- TIO_TX_SLACK_SAMPLES.
  *
- * Judge trim as a RATE, not against zero. The pump's "1x" is anchored to the
- * FreeRTOS tick; the producer is anchored to the AS7058 sample clock; nothing
- * cross-checks the two. The asymmetry matters:
+ * Steady-state trim should be ~0 in BOTH clock-drift directions, and that is
+ * the acceptance criterion. The pump's nominal rate is anchored to the
+ * FreeRTOS tick while the producer is anchored to the AS7058 sample clock, and
+ * nothing cross-checks the two, so the pump corrects for the difference at
+ * both ends rather than assuming it away:
  *
- *   * Producer slightly SLOW (e.g. 99.5 Hz against a 10-sample/100 ms pump):
- *     the pump occasionally finds fewer than a full packet and skips a tick.
- *     Self-throttling, trim stays 0. This is the tolerant direction, and the
- *     ~99.5 Hz the dashboard reports today puts us in it.
- *   * Producer slightly FAST (e.g. 100.5 Hz): occupancy climbs until it meets
- *     H and then trim discards the excess forever -- about 1 sample per 2 s
- *     block, ~30/min, in a perfectly healthy system.
+ *   * Producer slightly SLOW: the pump finds fewer than a full packet and
+ *     skips the tick. Self-throttling, no loss.
+ *   * Producer slightly FAST: occupancy rises past the setpoint and the drift
+ *     drain (TIO_TX_DRIFT_CATCHUP_SAMPLES) pops an extra sample per tick until
+ *     it falls back, so occupancy never reaches H. No loss.
  *
- * So the acceptance criterion is trim rate <= TIO_TX_TRIM_DRIFT_ALLOWANCE_SPS
- * sustained, not trim == 0. A trim rate materially above that, or any trim
- * burst not explained by a stall or reconnect, means H is mis-derived or the
- * producer is genuinely running above 1x -- that is a bug to investigate. */
+ * Before the drain existed, the fast direction lost samples permanently:
+ * hardware 2026-09-01 measured PPG at ~1.1 samples/s trimmed indefinitely
+ * while ECG, on the slow side, trimmed zero.
+ *
+ * TIO_TX_TRIM_DRIFT_ALLOWANCE_SPS is retained only as a backstop for judging a
+ * capture, not as an expectation: sustained trim at any appreciable rate now
+ * means the drain is not keeping up (drift far larger than the ~1% seen on
+ * hardware), H is mis-derived, or the producer is genuinely misbehaving.
+ * Any of those is a bug to investigate, not a policy working as intended. */
 
-/* Clock-drift allowance for the trim acceptance criterion, in samples/s.
+/* Backstop tolerance when judging a bench capture, in samples/s. Expect 0.
  * 0.5% of a 100 Hz stream is 0.5 samples/s; round up to 1. */
 #define TIO_TX_TRIM_DRIFT_ALLOWANCE_SPS (1)
 

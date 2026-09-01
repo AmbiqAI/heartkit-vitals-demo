@@ -675,11 +675,18 @@ static volatile uint32_t g_tio_nodata[3] = {0};
 //      carries a per-slot sample sequence; tracked separately). For now it is
 //      exposed as a counter -- see the trim acceptance rate in constants.h,
 //      which is a small drift allowance rather than a hard zero.
-//   2. Emit AT MOST ONE packet of EXACTLY TIO_*_SAMPLES_PER_PKT samples. If a
-//      full packet is not available, emit nothing this tick rather than a
-//      short packet. Fixed size x one packet per tick is what pins emission to
-//      1.00x realtime; a short packet now would have to be made up later,
-//      which is catch-up by another name.
+//   2. Emit AT MOST ONE packet, of TIO_*_SAMPLES_PER_PKT samples, plus
+//      TIO_TX_DRIFT_CATCHUP_SAMPLES more when occupancy is above the setpoint
+//      (H - samplesPerPkt). If a full packet is not available, emit nothing
+//      this tick rather than a short packet.
+//
+//      The nominal count assumes the producer runs at exactly the pump's
+//      nominal rate; it does not. The two corrections -- skip a tick when
+//      short, pop one extra when long -- let the pump track the producer's
+//      real rate in both directions. Neither can push emission above 1x,
+//      because the pop comes out of a ring and can only return samples the
+//      producer already produced; that invariant is structural, not a
+//      property of the count. See constants.h.
 //
 // SAMPLE ALIGNMENT (the part that silently corrupts the waveform if it is
 // wrong): a slot's TX taps are several parallel rings holding the same sample
@@ -724,11 +731,27 @@ static tio_tx_group_t g_ppgTxGroup = {
 /* Peak ring occupancy is not H: the trim runs BEFORE the pop, so the producer
  * can land a full structural block on top of (H - samplesPerPkt) samples that
  * survived the previous tick. Assert on that, not on H alone -- asserting
- * H < BUF_LEN would still pass if a window constant grew enough to overrun. */
+ * H < BUF_LEN would still pass if a window constant grew enough to overrun.
+ *
+ * The drift drain does not enter this bound: popping the extra sample only
+ * ever leaves FEWER samples behind, so the worst case is still the tick that
+ * pops the nominal count. */
 static_assert(TIO_ECG_TX_HIGH_WATER - TIO_ECG_SAMPLES_PER_PKT + TIO_ECG_TX_BLOCK_SAMPLES <= ECG_TX_BUF_LEN,
               "ECG TX peak occupancy (H - pkt + block) exceeds ring capacity");
 static_assert(TIO_PPG_TX_HIGH_WATER - TIO_PPG_SAMPLES_PER_PKT + TIO_PPG_TX_BLOCK_SAMPLES <= PPG_TX_BUF_LEN,
               "PPG TX peak occupancy (H - pkt + block) exceeds ring capacity");
+
+/* The drift drain must engage strictly before the trim would, or it cannot
+ * prevent the loss it exists to prevent. */
+static_assert(TIO_ECG_TX_HIGH_WATER - TIO_ECG_SAMPLES_PER_PKT > TIO_ECG_TX_BLOCK_SAMPLES,
+              "ECG drift-drain setpoint must sit above the structural block");
+static_assert(TIO_PPG_TX_HIGH_WATER - TIO_PPG_SAMPLES_PER_PKT > TIO_PPG_TX_BLOCK_SAMPLES,
+              "PPG drift-drain setpoint must sit above the structural block");
+
+/* Payload must stay within what the TileIO slot framing accepts (240 B was the
+ * bound the pre-fix senders were written against). */
+static_assert(TIO_ECG_MAX_SAMPLES_PER_PKT * 3 * sizeof(int16_t) <= 240, "ECG max payload too large");
+static_assert(TIO_PPG_MAX_SAMPLES_PER_PKT * 3 * sizeof(int16_t) <= 240, "PPG max payload too large");
 
 /* Samples every ring in the group holds in common. Using the minimum (never a
  * per-ring length) is what keeps the group advancing as a unit. */
@@ -742,9 +765,10 @@ tio_tx_group_avail(const tio_tx_group_t *group)
     return avail;
 }
 
-/* Trim to high-water, then decide whether to emit. Returns the exact number of
- * samples to pop from EVERY ring of the group (its fixed packet size), or 0 to
- * emit nothing this tick. */
+/* Trim to high-water, then decide whether and how much to emit. Returns the
+ * number of samples to pop from EVERY ring of the group, or 0 to emit nothing
+ * this tick. Never returns less than samplesPerPkt (no short packets) and
+ * never more than samplesPerPkt + TIO_TX_DRIFT_CATCHUP_SAMPLES. */
 static size_t
 tio_tx_group_prepare(tio_tx_group_t *group)
 {
@@ -760,9 +784,31 @@ tio_tx_group_prepare(tio_tx_group_t *group)
         avail = group->highWater;
     }
     if (avail < group->samplesPerPkt) {
+        /* Producer running fractionally slow, or simply nothing new yet. Skip
+         * the tick rather than emit a short packet. */
         return 0;
     }
-    return group->samplesPerPkt;
+    /* Drift drain. Occupancy above the setpoint means the producer's true rate
+     * is above the pump's nominal one; left alone, occupancy would climb to H
+     * and the trim would then discard the difference forever (measured on
+     * hardware as ~1.1 PPG samples/s, permanently). Popping one extra sample
+     * per tick drains it at ~10%, far faster than any plausible clock drift
+     * accumulates, so occupancy settles just below the setpoint and the trim
+     * never fires.
+     *
+     * This cannot breach the 1x invariant: the pop comes out of a ring, so it
+     * can only return samples the producer already produced. The setpoint sits
+     * one full packet below H, so the drain always engages before the trim
+     * would, and the excess it works off is bounded by that one packet. */
+    size_t numSamples = group->samplesPerPkt;
+    size_t setpoint = (size_t)(group->highWater - group->samplesPerPkt);
+    if (avail > setpoint) {
+        numSamples = group->samplesPerPkt + TIO_TX_DRIFT_CATCHUP_SAMPLES;
+        if (numSamples > avail) {
+            numSamples = avail;
+        }
+    }
+    return numSamples;
 }
 
 /* Pace a signal pump task at exactly TIO_PUMP_INTERVAL_MS.
@@ -801,7 +847,15 @@ tio_pump_wait(TickType_t *pLastWake)
 {
     const TickType_t period = pdMS_TO_TICKS(TIO_PUMP_INTERVAL_MS);
     TickType_t now = xTaskGetTickCount();
-    if ((TickType_t)(now - *pLastWake) >= period) {
+    /* SIGNED delta. An unsigned compare treats a deliberately future-dated
+     * anchor as a huge positive elapsed time and fires the overrun branch,
+     * which silently discarded the PPG phase stagger: PpgProcessTask anchors
+     * at T+33, the first iteration reaches here at ~T+20, and the unsigned
+     * (now - *pLastWake) underflows to a value comfortably >= period. Signed
+     * arithmetic reads that as -13 ticks (not yet due) and leaves the anchor
+     * alone, while remaining wrap-safe for the same reason the unsigned form
+     * was: the difference is what wraps, not the operands. */
+    if ((int32_t)(now - *pLastWake) >= (int32_t)period) {
         *pLastWake = now - period;
     }
     vTaskDelayUntil(pLastWake, period);
@@ -810,7 +864,8 @@ tio_pump_wait(TickType_t *pLastWake)
 static void
 send_ecg_signals(void)
 {
-    uint8_t buffer[TIO_ECG_SAMPLES_PER_PKT * (sizeof(uint16_t) + 2 * sizeof(int16_t))];
+    /* Sized for the drift-drain maximum, not the nominal packet. */
+    uint8_t buffer[TIO_ECG_MAX_SAMPLES_PER_PKT * (sizeof(uint16_t) + 2 * sizeof(int16_t))];
     float32_t rawVal, denVal;
     uint16_t maskVal;
     int16_t txVal;
@@ -892,7 +947,8 @@ ppg_display_sample(ppg_tx_display_state_t *state, float32_t sample)
 static void
 send_ppg_signals(void)
 {
-    uint8_t buffer[TIO_PPG_SAMPLES_PER_PKT * (sizeof(uint16_t) + 2 * sizeof(int16_t))];
+    /* Sized for the drift-drain maximum, not the nominal packet. */
+    uint8_t buffer[TIO_PPG_MAX_SAMPLES_PER_PKT * (sizeof(uint16_t) + 2 * sizeof(int16_t))];
     float32_t val1, val2;
     float32_t txVal1, txVal2;
     int16_t txValI16;
@@ -1175,10 +1231,17 @@ EcgProcessTask(void *pvParameters)
             vTaskDelay(pdMS_TO_TICKS(20));
         }
 
-        send_ecg_signals();
         (void)err;
 
+        /* Wait BEFORE sending, not after. With the send ahead of the wait, a
+         * long iteration (a 250 ms segmentation tick, say) emits at T+250, the
+         * wait correctly returns immediately, and the next near-idle iteration
+         * emits again ~2 ms later -- two packets 2 ms apart, a one-packet
+         * catch-up the design says never happens. Sending immediately after
+         * the wake instead makes inter-packet spacing equal the wake-to-wake
+         * interval, max(work, period), by construction. */
         tio_pump_wait(&pumpLastWake);
+        send_ecg_signals();
     }
 }
 
@@ -1267,10 +1330,11 @@ PpgProcessTask(void *pvParameters)
             vTaskDelay(pdMS_TO_TICKS(20));
         }
 
-        send_ppg_signals();
         (void)err; /* only consumed by the EN_APP_TIMING_LOGS print above */
 
+        /* Wait before sending -- see the note in EcgProcessTask. */
         tio_pump_wait(&pumpLastWake);
+        send_ppg_signals();
     }
 }
 
@@ -1692,10 +1756,11 @@ ReportTask(void *pvParameters)
          *   deliv     -- of those, the ones the transport accepted. pkt_rate
          *                without deliv means the host is not receiving,
          *                however healthy the rest of the line looks.
-         *   trim      -- samples discarded by trim-to-high-water. Judge as a
-         *                RATE against TIO_TX_TRIM_DRIFT_ALLOWANCE_SPS, not
-         *                against zero; see constants.h for why a perfectly
-         *                healthy system can trim slowly forever.
+         *   trim      -- samples discarded by trim-to-high-water. Expect 0 in
+         *                both clock-drift directions now that the drift drain
+         *                keeps occupancy off H; TIO_TX_TRIM_DRIFT_ALLOWANCE_SPS
+         *                is only a backstop for judging a capture. Sustained
+         *                non-zero trim is a bug, not a policy working.
          *   ppg_burst -- high-water mark of one PPG tee pass; must stay <=
          *                TIO_PPG_TX_BLOCK_SAMPLES or H is mis-derived.
          *   stage_err -- cumulative non-zero returns from ECG denoise /
