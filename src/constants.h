@@ -114,8 +114,27 @@ extern "C" {
 #define EN_APP_DEBUG_LOGS (0)
 #endif
 
+/* Default 0. These prints sit inside the once-per-2-s denoise/segmentation/
+ * metrics branches, so the cost is ~1.5 lines/s rather than a per-iteration
+ * storm -- but nsx_printf over SWO blocks the calling task, and these are the
+ * equal-priority pump tasks whose cadence the latency budget below depends on.
+ * A blocked pump overruns its period, and an overrun is exactly the condition
+ * tio_pump_wait() has to absorb without dropping below 1x. Enable deliberately
+ * for a bring-up session, not by default.
+ *
+ * Turning this off discards the per-stage inference return codes, which were
+ * its only report. g_stage_err[] in main.cc counts them unconditionally so a
+ * persistently failing stage cannot hide behind a plausible-looking trace. */
 #ifndef EN_APP_TIMING_LOGS
-#define EN_APP_TIMING_LOGS (1)
+#define EN_APP_TIMING_LOGS (0)
+#endif
+
+/* Default 1: the single 1 Hz [tio-emit] line in ReportTask, which is where the
+ * issue #12 acceptance criteria (packet rate, delivery, trim rate) are read
+ * from. Gated separately from EN_APP_DEBUG_LOGS so that a bench run is not
+ * blind by default -- one line per second does not perturb the pump. */
+#ifndef EN_APP_EMIT_LOGS
+#define EN_APP_EMIT_LOGS (1)
 #endif
 
 #ifndef EN_MODEL_VERBOSE_LOGS
@@ -322,6 +341,325 @@ extern "C" {
 #define TIO_SLOT0_SIG_NUM_VALS (10)
 #define TIO_SLOT0_FS (ECG_TARGET_RATE / TIO_SLOT0_SIG_NUM_VALS)
 #define TIO_SLOT0_SCALE (1000)
+
+///////////////////////////////////////////////////////////////////////////////
+// TileIO latency budget
+///////////////////////////////////////////////////////////////////////////////
+//
+// Design record: see issue #12 (streaming pipeline rework, sections 1 and
+// 3.1-3.4 of the design record attached to it).
+//
+// A live monitor has two independent quantities, and they are not
+// interchangeable:
+//
+//   D = fixed pipeline delay (sensor -> render). Dominated by the denoise and
+//       segmentation windows. Invisible on a scrolling waveform.
+//   J = arrival jitter, i.e. the spread of inter-packet spacing at the host.
+//       This is what the host's playout buffer has to absorb and what its
+//       staleness rule punishes.
+//
+// The pre-fix code minimised D and left J unbounded: ECG TX samples were only
+// produced inside the segmentation branch, 200 samples (2 s at 100 Hz) at a
+// time, and drained at up to 40 samples per 100 ms tick. The host saw 2 s of
+// signal inside ~500 ms followed by ~1.5 s of nothing, overran its 1500 ms
+// retention, and rendered a gap every 2 s in completely normal operation.
+//
+// The constants below trade D (which nobody can see) for a hard bound on J
+// (which everybody can see).
+
+/* Worst-case inter-packet spacing permitted at the host, per signal slot.
+ * 250 ms = 50% of the host's 500 ms playout delay (2x margin) and 17% of its
+ * 1500 ms staleness threshold. Exceeding it is a user-visible gap. */
+#define TIO_JITTER_BUDGET_MS (250)
+
+/* INVARIANT: TIO_MAX_EMIT_RATE = 1.00x realtime -- never exceed.
+ *
+ * After a stall of T seconds the firmware holds T extra seconds of signal.
+ * Draining that backlog at *any* rate above 1x necessarily adds T to the
+ * host's playout latency permanently, leaving it T closer to its staleness
+ * threshold forever; there is no catch-up rate at which this works. The only
+ * correct policy for a live monitor is to discard the stale backlog at the
+ * source (trim to high-water, below) and resume at 1x. One honest gap of
+ * exactly T renders, and latency returns to nominal immediately.
+ *
+ * WHAT ACTUALLY ENFORCES THIS: the pump pops from a ring, so it can only ever
+ * emit samples the producer has already produced. Averaged over any window
+ * longer than the buffer, emitted rate <= produced rate is guaranteed by the
+ * ring itself, whatever count the pump chooses to pop. The invariant is
+ * structural, not a property of the packet size.
+ *
+ * That distinction matters because a rigidly fixed pop count does NOT protect
+ * the invariant -- it only fails in the other direction. Hardware run
+ * 2026-09-01 measured the PPG producer ~1.1% faster than a fixed
+ * 10-samples-per-100-ms pump: occupancy pinned at H and the trim discarded
+ * ~1.1 samples/s permanently, forever, in a perfectly healthy system. A second
+ * capture found ECG doing the same at ~1.8 samples/s and ~2.4% fast.
+ *
+ * So the pump tracks the producer instead of assuming it: a trough servo
+ * estimates the standing rate error and spends a bounded budget of extra
+ * samples to cancel it, and below the packet size the pump emits nothing at
+ * all. Both corrections are bounded by what the ring holds, so neither can
+ * push the average above the producer's true rate.
+ *
+ * The cost of the skip is jitter, not loss: no sample is discarded, the next
+ * packet simply arrives one pump interval later. That is absorbed by the
+ * host's 500 ms playout buffer and produces no waveform discontinuity, which
+ * is the trade this whole file exists to make -- permanent loss is what is
+ * worth avoiding, a bounded arrival delay is not. */
+
+/* Pump period for the ECG and PPG signal slots. At configTICK_RATE_HZ = 1000
+ * this is exactly 100 ticks, so pdMS_TO_TICKS() is exact and the pump can be
+ * paced with vTaskDelayUntil() without rounding drift. */
+#define TIO_PUMP_INTERVAL_MS (100)
+
+/* Phase offset applied to the PPG pump's initial wake time so the two signal
+ * slots do not enqueue in the same tick. Both pump tasks are created
+ * back-to-back at equal priority and would otherwise stay in lockstep
+ * indefinitely, concentrating the packet budget into simultaneous bursts and
+ * making the transport queue peakier than the average rate implies. A third of
+ * the pump interval spreads the two slots evenly. */
+#define TIO_PPG_PUMP_PHASE_MS (33)
+
+/* Samples per signal packet. 10 samples at ECG_TARGET_RATE/PPG_TARGET_RATE =
+ * 100 Hz is exactly TIO_PUMP_INTERVAL_MS of signal, which is what makes one
+ * packet per pump tick equal to 1.00x realtime: 10 pkt/s per slot.
+ *
+ * Wire framing, deliberately: 10 samples x 6 B = 60 B of samples, ~72 B on the
+ * wire once the TileIO slot header is added, inside a TIO_USB_PACKET_LEN
+ * (256 B) frame -- about 72% padding, BY DESIGN. At ~24 pkt/s total (~6 kB/s)
+ * on a full-speed bulk link, wire efficiency is not the scarce resource; the
+ * jitter budget is. Packing more samples per packet directly widens
+ * inter-packet spacing and spends the very budget this file exists to protect.
+ * Do not "optimise" the padding away. */
+#define TIO_ECG_SAMPLES_PER_PKT (10)
+#define TIO_PPG_SAMPLES_PER_PKT (10)
+
+/* Extra samples the pump may take in a single tick when the trough servo has
+ * budget to spend. Deliberately ONE: the correction needed is a couple of
+ * samples per second against 100 produced, so it only has to be applied on a
+ * few ticks per second, and a larger per-tick step would make each correction
+ * a visible rate excursion rather than a nudge. The servo controls HOW MANY
+ * ticks take the extra; this controls how much each one takes.
+ *
+ * Packets are therefore 10 or 11 samples, i.e. 60 or 66 B of payload. The
+ * TimedSignal header carries the length and the host reads dlen, so variable
+ * packet size is fine on the wire. */
+#define TIO_TX_DRIFT_CATCHUP_SAMPLES (1)
+
+/* TARGET TROUGH: the TX occupancy the pump aims to sit at between producer
+ * blocks. This is the servo's reference, not a trigger threshold.
+ *
+ * Two packets = 200 ms of buffered signal. A full packet must always be in
+ * hand at the trough or the pump skips a tick and opens an emission gap; the
+ * second packet is margin for scheduling jitter and for a block arriving late.
+ *
+ * Bounded above, and the real bound is NOT simply troughTarget + block <= H.
+ * Four things sit between the target and the peak the trim actually sees:
+ * the trough lands up to PULL_DIV above target (the position term's
+ * deadband); it alternates a further ~samplesPerPkt from the block-period
+ * quantisation described at TIO_TX_SERVO_WINDOW_TICKS; and the block itself
+ * can arrive up to TIO_TX_SLIP_SAMPLES late, landing on a trough the servo
+ * has meanwhile raised. So the bound is
+ *
+ *     troughTarget + PULL_DIV + samplesPerPkt + slip + block <= H
+ *
+ * ECG 20 + 8 + 10 + 30 + 200 = 268 <= 280; PPG 20 + 8 + 10 + 30 + 13 = 81
+ * <= 93. That is what main.cc asserts.
+ *
+ * This bound has been wrong twice, both times by omitting a term, so add
+ * rather than simplify. The naive two-term form passed at a target of 30
+ * while the real peak sat at 248 of 250; the four-term form that replaced it
+ * still ignored producer scheduling and was over-optimistic by an order of
+ * magnitude in margin. The five-term value above matches simulation exactly:
+ * at 102.4 samples/s with three iterations of slip the simulated peak is 268. */
+#define TIO_ECG_TX_TROUGH_TARGET (2 * TIO_ECG_SAMPLES_PER_PKT)
+#define TIO_PPG_TX_TROUGH_TARGET (2 * TIO_PPG_SAMPLES_PER_PKT)
+
+/* Servo window, in pump ticks. 64 ticks = 6.4 s.
+ *
+ * Sized to span SEVERAL producer blocks, not merely one, because of an
+ * aliasing effect measured on hardware 2026-09-01. The ECG block period is
+ * 200 samples at the producer's true ~102.4 samples/s = 1.953 s = 19.53 pump
+ * ticks. Being a non-integer number of ticks, consecutive blocks drain over
+ * alternately 19 or 20 ticks, so the true trough alternates by a full
+ * samplesPerPkt (10) from block to block. That is quantisation beat between
+ * the 100 ms pump grid and the block period -- not drift, and not something
+ * the servo should react to.
+ *
+ * With the earlier 32-tick window (1.64 blocks) some windows caught one trough
+ * and some caught two, so the measured minimum alternated by that same 10 and
+ * the servo's rate term differentiated the artifact: measured trough
+ * alternating 13<->23 and budget slamming 0<->10 every window.
+ *
+ * HONEST RESULT: widening to 64 ticks did NOT fix that. Measured after the
+ * change, the budget spread WIDENED to 0..31 and the trough to 3..34. The
+ * aliasing analysis above is sound as far as it goes, but it was not the whole
+ * cause, and 64 ticks is 3.28 block periods -- still not an integer multiple,
+ * so the count and phase of the troughs captured per window keep changing. A
+ * fixed-length window cannot be an integer multiple of a block period set by
+ * an independent, drifting producer clock. See the RESIDUAL BEHAVIOUR block at
+ * tio_tx_group_servo() in main.cc for the measured distributions, why it is
+ * shipped anyway, and what to investigate instead. Do not assume this constant
+ * solved the dither.
+ *
+ * The window is nonetheless kept at 64 rather than reverted to 32, because the
+ * larger window came with the corrected four-term peak bound and both variants
+ * meet acceptance identically -- safety margin over a tighter-looking counter.
+ *
+ * The cost is responsiveness, but less than a per-step view suggests: the rate
+ * term is dead-beat, so simulation reaches a working budget on the SECOND
+ * window (~12.7 s from boot), not over the many windows a one-step-per-window
+ * reading would imply. An earlier version of this comment claimed ~50 s and
+ * contradicted the dead-beat description of the control law in main.cc; 12.7 s
+ * is the simulated figure. The residual dither never settles at all, so there
+ * is no later "converged" point to wait for. */
+#define TIO_TX_SERVO_WINDOW_TICKS (64)
+
+/* Divisor on the servo's position term: each window it moves the budget by
+ * (trough - target) / this. It is the gentle term -- the rate term does the
+ * actual drift cancellation -- so it is deliberately weak, giving a
+ * first-order approach to target over roughly this many windows.
+ *
+ * Being an integer division it also supplies a deadband: while the trough is
+ * within +/-8 samples (80 ms) of target this contributes exactly zero and the
+ * servo holds still rather than dithering. The deadband is why the trough
+ * settles somewhat ABOVE target rather than on it, which the peak bound at
+ * TIO_*_TX_TROUGH_TARGET accounts for explicitly. Lowering it would tighten
+ * that offset at the cost of overshoot risk. */
+#define TIO_TX_SERVO_PULL_DIV (8)
+
+/* Budget ceiling, in extra samples per window. 32 per 6.4 s = 5 samples/s,
+ * i.e. headroom for ~5% producer drift against the ~2.4% measured -- scaled
+ * with the window so the ceiling stays a rate, not a count. Also the
+ * anti-windup clamp: a stalled producer parks the budget here-or-zero rather
+ * than accumulating a debt it would later spend as a burst. Reaching this
+ * ceiling in steady state means drift exceeds what the servo can correct and
+ * the trim will start absorbing the remainder.
+ *
+ * MEASURED 2026-09-01: the budget was observed at 31 -- one below this cap --
+ * on 13 lines of a 107 s settled ECG window, at ~2.4% producer drift. It is
+ * not pinned there, but it does reach it intermittently as part of the dither
+ * documented at tio_tx_group_servo(). If you find it sitting AT the cap, know
+ * that it was already touching 31 at normal drift, so the cap is probably not
+ * the problem; and note that this clamp is what keeps the budget from becoming
+ * a burst, so raising it is not automatically the right response. */
+#define TIO_TX_SERVO_MAX_BUDGET (32)
+
+/* Largest packet either signal slot can emit -- sizes the sender stack buffers
+ * and must account for the drift drain above, not just the nominal size. */
+#define TIO_ECG_MAX_SAMPLES_PER_PKT (TIO_ECG_SAMPLES_PER_PKT + TIO_TX_DRIFT_CATCHUP_SAMPLES)
+#define TIO_PPG_MAX_SAMPLES_PER_PKT (TIO_PPG_SAMPLES_PER_PKT + TIO_TX_DRIFT_CATCHUP_SAMPLES)
+
+/* Per-slot TX-ring high-water H, in samples. On each pump tick the slot's TX
+ * rings are trimmed to H before popping, so H bounds the stale backlog the
+ * firmware is willing to hold. H is a sum of four terms:
+ *
+ *   1. structural block  -- the largest burst the producer can deliver in one
+ *                           go, which the consumer must be able to hold
+ *                           without discarding anything in steady state;
+ *   2. one packet        -- TIO_*_SAMPLES_PER_PKT, so a full packet can always
+ *                           be assembled from what is left after a trim;
+ *   3. scheduling slack  -- TIO_TX_SLACK_SAMPLES, for a late PUMP tick;
+ *   4. block slip        -- TIO_TX_SLIP_SAMPLES, for a late PRODUCER block.
+ *                           Terms 3 and 4 are different failure modes and both
+ *                           are needed: a late pump leaves samples unread, a
+ *                           late block lands them all at once on top of a
+ *                           trough the servo has already raised.
+ *
+ * Steady-state trim should be ~0 in BOTH clock-drift directions, and that is
+ * the acceptance criterion. The pump's nominal rate is anchored to the
+ * FreeRTOS tick while the producer is anchored to the AS7058 sample clock, and
+ * nothing cross-checks the two, so the pump corrects for the difference at
+ * both ends rather than assuming it away:
+ *
+ *   * Producer slightly SLOW: the trough falls, the servo winds its budget
+ *     down to 0, and the pump self-throttles by skipping a tick whenever it
+ *     holds less than a full packet. No loss; samples cannot be manufactured.
+ *   * Producer slightly FAST: the trough rises, the servo winds its budget up
+ *     and spends extra samples on a few ticks per second until the trough
+ *     returns to target, so occupancy never approaches H. No loss.
+ *
+ * Both directions were observed as permanent loss before the servo existed:
+ * hardware measured PPG trimming ~1.1 samples/s and ECG ~1.8 samples/s
+ * indefinitely, each with a threshold drain that could not be tuned to fix one
+ * without breaking the other.
+ *
+ * TIO_TX_TRIM_DRIFT_ALLOWANCE_SPS is retained only as a backstop for judging a
+ * capture, not as an expectation: sustained trim at any appreciable rate now
+ * means the servo is saturated (drift beyond TIO_TX_SERVO_MAX_BUDGET), H is
+ * mis-derived, or the producer is genuinely misbehaving. Any of those is a bug
+ * to investigate, not a policy working as intended. */
+
+/* Backstop tolerance when judging a bench capture, in samples/s. Expect 0.
+ * 0.5% of a 100 Hz stream is 0.5 samples/s; round up to 1. */
+#define TIO_TX_TRIM_DRIFT_ALLOWANCE_SPS (1)
+
+/* Scheduling slack for a late PUMP tick: TIO_JITTER_BUDGET_MS (250 ms) plus
+ * one pump interval (100 ms) = 350 ms, rounded up to the next whole pump
+ * interval = 400 ms. At 100 Hz that is 40 samples. */
+#define TIO_TX_SLACK_SAMPLES (40)
+
+/* Block slip: allowance for a late PRODUCER block, in samples. Three pump
+ * intervals = 300 ms = 30 samples at 100 Hz.
+ *
+ * WHY THIS EXISTS. EcgProcessTask runs exactly ONE mutually-exclusive pipeline
+ * stage per iteration, and the 200-sample push happens only in the
+ * segmentation branch. A due segmentation is therefore deferrable by whole
+ * iterations whenever a higher-priority branch claims the tick -- denoise is
+ * checked first, so it can push segmentation out by an iteration. The block
+ * then lands late, all at once, on top of a trough the servo has already
+ * raised toward target. Slack (term 3) does not cover this: it is sized for
+ * the opposite failure, a pump that is late reading.
+ *
+ * WHY THREE ITERATIONS. One is the steady-state maximum, since denoise is the
+ * only higher-priority branch and it fires once per block cycle. Three also
+ * covers a denoise inference overrunning its 100 ms budget, and the transient
+ * multi-iteration deferral possible after a flush or reconnect when rbEcgDen
+ * carries a backlog. It matches the 0-300 ms slip envelope the change was
+ * reviewed against.
+ *
+ * MEASURED CONSEQUENCE OF OMITTING IT. Simulated at the measured 102.4
+ * samples/s with the previous H of 250: one iteration of slip put peak
+ * pre-trim occupancy at 247 against H = 250 -- three samples of margin, not
+ * the ~41 that had been documented -- and two iterations reached 255 and
+ * discarded samples, reinstating the permanent-loss defect this branch
+ * exists to remove. With the slip term included, the same sweep peaks at 268
+ * against H = 280 and trims nothing. */
+#define TIO_TX_SLIP_SAMPLES (30)
+
+/* ECG structural block: the segmentation branch is the sole producer of the
+ * ECG TX taps and it pushes ECG_SEG_VALID_LEN (200) samples at once, once per
+ * 2 s (main.cc, ECG SEGMENTATION). 200 + 10 + 40 + 30 = 280. */
+#define TIO_ECG_TX_BLOCK_SAMPLES (ECG_SEG_VALID_LEN)
+#define TIO_ECG_TX_HIGH_WATER                                                                                          \
+    (TIO_ECG_TX_BLOCK_SAMPLES + TIO_ECG_SAMPLES_PER_PKT + TIO_TX_SLACK_SAMPLES + TIO_TX_SLIP_SAMPLES)
+
+/* PPG structural block: PpgProcessTask tees samples continuously, but the
+ * AS7058 delivers on a FIFO watermark whose observed ISR interval is
+ * ~125-130 ms, so one pump tick can find up to ~13 samples at 100 Hz.
+ * 13 + 10 + 40 + 30 = 93.
+ *
+ * PPG takes the same slip allowance as ECG, for a different reason. Its
+ * producer is not a deferrable stage -- the tee loop runs every iteration --
+ * but a delayed PpgProcessTask lets the sensor ring accumulate, so the slip
+ * shows up as a LARGER TEE BURST rather than a later block. The allowance
+ * covers a 300 ms task delay, which is the same envelope. Costs nothing:
+ * measured PPG occupancy runs 0..22 against the old H of 63, so it never
+ * approached either bound, and the ring headroom is enormous either way.
+ *
+ * CAVEAT, and it is a weaker guarantee than the ECG line above: 13 is an
+ * OBSERVED figure, not a compile-time bound. The ECG block is
+ * ECG_SEG_VALID_LEN, a constant the static_asserts in main.cc can check. The
+ * PPG tee loop, with PPG_DS_RATE == 1, is bounded only by the sensor ring
+ * occupancy MIN(len(rbPpg1Sensor), len(rbPpg2Sensor)) -- up to
+ * SENSOR_BUF_LEN-1 (255) if that task is ever delayed long enough. Exceeding
+ * this constant does not corrupt anything (the trim absorbs it) but it does
+ * mean H is under-derived and steady-state trim would become non-zero. The
+ * runtime high-water counter g_ppg_tee_burst_max in main.cc exists to catch
+ * that on the bench; if it reports above this value, re-derive H. */
+#define TIO_PPG_TX_BLOCK_SAMPLES (13)
+#define TIO_PPG_TX_HIGH_WATER                                                                                          \
+    (TIO_PPG_TX_BLOCK_SAMPLES + TIO_PPG_SAMPLES_PER_PKT + TIO_TX_SLACK_SAMPLES + TIO_TX_SLIP_SAMPLES)
 
 
 ///////////////////////////////////////////////////////////////////////////////

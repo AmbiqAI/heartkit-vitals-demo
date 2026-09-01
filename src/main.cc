@@ -659,20 +659,511 @@ apply_pending_uio_state(void)
 
 static volatile uint32_t g_tio_nodata[3] = {0};
 
+///////////////////////////////////////////////////////////////////////////////
+// Rate-matched signal emission
+///////////////////////////////////////////////////////////////////////////////
+//
+// See constants.h "TileIO latency budget" and issue #12.
+//
+// Every pump tick, per signal slot:
+//
+//   1. TRIM the slot's TX rings down to their high-water H, discarding the
+//      OLDEST samples and keeping the newest H. Anything above H is stale
+//      backlog we have already decided not to ship (no catch-up, ever). The
+//      discarded sample count is accumulated per slot so it can later be
+//      signalled to the host as a sequence discontinuity (TimedSignal v2
+//      carries a per-slot sample sequence; tracked separately). For now it is
+//      exposed as a counter -- see the trim acceptance rate in constants.h,
+//      which is a small drift allowance rather than a hard zero.
+//   2. Emit AT MOST ONE packet, of TIO_*_SAMPLES_PER_PKT samples, plus
+//      TIO_TX_DRIFT_CATCHUP_SAMPLES more while the trough servo still has
+//      budget for this window. If a full packet is not available, emit
+//      nothing this tick rather than a short packet.
+//
+//      The nominal count assumes the producer runs at exactly the pump's
+//      nominal rate; it does not. The two corrections -- skip a tick when
+//      short, pop one extra when long -- let the pump track the producer's
+//      real rate in both directions. Neither can push emission above 1x,
+//      because the pop comes out of a ring and can only return samples the
+//      producer already produced; that invariant is structural, not a
+//      property of the count. See constants.h.
+//
+// SAMPLE ALIGNMENT (the part that silently corrupts the waveform if it is
+// wrong): a slot's TX taps are several parallel rings holding the same sample
+// index in each position (ECG: raw/denoised/mask; PPG: red/IR). They only stay
+// aligned if every ring is advanced by the SAME number of samples on every
+// operation. That is enforced structurally here rather than by convention:
+//
+//   * The rings of a slot are held in one group, and all counts are derived
+//     from tio_tx_group_avail(), the MINIMUM length across the group.
+//   * The trim seeks every ring in the group by one single `drop` value
+//     computed once, in one loop.
+//   * The pop loop below is bounded by one single `numSamples` value returned
+//     by tio_tx_group_prepare(), and pops exactly one sample from each ring
+//     per iteration.
+//
+// There is deliberately no code path that advances one ring of a group without
+// advancing the others by the same amount.
+
+typedef struct {
+    rb_config_t *rings[3];   /* parallel TX taps, must stay sample-aligned */
+    uint8_t numRings;
+    uint16_t highWater;      /* H, samples (constants.h) */
+    uint16_t samplesPerPkt;  /* nominal packet size, samples */
+    uint16_t troughTarget;   /* target steady-state trough (constants.h) */
+    /* Trough servo state. See tio_tx_group_servo() for the control argument. */
+    uint16_t servoTicks;         /* ticks elapsed in the current servo window */
+    uint16_t extraSpent;         /* extra samples already spent this window */
+    uint32_t servoTroughMin;     /* running min occupancy, current window */
+    uint32_t servoTroughPrev;    /* previous window's trough, for the rate term */
+    volatile uint16_t extraBudget;  /* servo output: extra samples per window */
+    volatile uint32_t servoTrough;  /* last completed window's trough (log) */
+    volatile uint32_t trimmed;   /* samples discarded by trim-to-high-water */
+    /* `pumped` counts ticks on which a full packet was assembled and handed to
+     * the transport. `delivered` counts those the transport actually accepted.
+     * They are NOT the same number and the difference matters: samples are
+     * popped from the rings before the enqueue result is known, so during a
+     * host blackout the rings still drain and pumped keeps climbing at 10/s
+     * with trim at 0 while nothing reaches the host. pumped == delivered is
+     * the healthy case; a gap between them is real loss, corroborated by
+     * g_tio_enqueue_ok/g_tio_enqueue_fail and g_tio_usb_drop. */
+    volatile uint32_t pumped;
+    volatile uint32_t delivered;
+    /* Ticks on which the servo spent an extra sample. Compare against
+     * extraBudget: if drained tracks the budget the servo is in control, and
+     * if it falls short the guard is holding the pump off a near-empty ring. */
+    volatile uint32_t drained;
+    /* Occupancy watermarks, sampled pre-trim and pre-pop -- the true peak the
+     * producer created, including whatever the trim is about to discard.
+     * ReportTask resets them each interval so the log shows a progression
+     * rather than a lifetime extreme.
+     *
+     * For a block-structured producer like ECG, occMin IS the pre-block
+     * residual R: the sawtooth trough is the last pump tick before the next
+     * block lands. That is the quantity currently being inferred rather than
+     * measured, so it is the one worth having.
+     *
+     * Diagnostics, not control inputs. ReportTask's reset is a plain 32-bit
+     * store racing the pump's update; both are atomic on Cortex-M, so the
+     * worst case is one interval reporting a slightly narrow range. */
+    volatile uint32_t occMax;
+    volatile uint32_t occMin;
+} tio_tx_group_t;
+
+#define TIO_OCC_MIN_INIT (0xFFFFFFFFu)
+
+/* Designated initialisers deliberately, not positional. These are 17 fields of
+ * which most are same-typed zeros, the build does not enable -Wextra, so
+ * -Wmissing-field-initializers is off, and a reorder would not warn. The
+ * specific hazard: if troughTarget silently took another field's zero, the
+ * spend guard degrades to `avail > samplesPerPkt` and the servo takes an extra
+ * sample on nearly every tick. */
+static tio_tx_group_t g_ecgTxGroup = {
+    .rings = {&rbEcgMaskTx, &rbEcgRawTx, &rbEcgDenTx},
+    .numRings = 3,
+    .highWater = TIO_ECG_TX_HIGH_WATER,
+    .samplesPerPkt = TIO_ECG_SAMPLES_PER_PKT,
+    .troughTarget = TIO_ECG_TX_TROUGH_TARGET,
+    .servoTicks = 0,
+    .extraSpent = 0,
+    .servoTroughMin = TIO_OCC_MIN_INIT,
+    .servoTroughPrev = TIO_ECG_TX_TROUGH_TARGET,
+    .extraBudget = 0,
+    .servoTrough = 0,
+    .trimmed = 0,
+    .pumped = 0,
+    .delivered = 0,
+    .drained = 0,
+    .occMax = 0,
+    .occMin = TIO_OCC_MIN_INIT};
+static tio_tx_group_t g_ppgTxGroup = {
+    .rings = {&rbPpg1Tx, &rbPpg2Tx, NULL},
+    .numRings = 2,
+    .highWater = TIO_PPG_TX_HIGH_WATER,
+    .samplesPerPkt = TIO_PPG_SAMPLES_PER_PKT,
+    .troughTarget = TIO_PPG_TX_TROUGH_TARGET,
+    .servoTicks = 0,
+    .extraSpent = 0,
+    .servoTroughMin = TIO_OCC_MIN_INIT,
+    .servoTroughPrev = TIO_PPG_TX_TROUGH_TARGET,
+    .extraBudget = 0,
+    .servoTrough = 0,
+    .trimmed = 0,
+    .pumped = 0,
+    .delivered = 0,
+    .drained = 0,
+    .occMax = 0,
+    .occMin = TIO_OCC_MIN_INIT};
+
+/* Peak ring occupancy is not H: the trim runs BEFORE the pop, so the producer
+ * can land a full structural block on top of (H - samplesPerPkt) samples that
+ * survived the previous tick. Assert on that, not on H alone -- asserting
+ * H < BUF_LEN would still pass if a window constant grew enough to overrun.
+ *
+ * The drift drain does not enter this bound: popping the extra sample only
+ * ever leaves FEWER samples behind, so the worst case is still the tick that
+ * pops the nominal count.
+ *
+ * Headroom as configured: ECG 280 - 10 + 200 = 470 against ECG_TX_BUF_LEN 500,
+ * leaving 30 samples (300 ms). PPG 93 - 10 + 13 = 96 against PPG_TX_BUF_LEN
+ * 500, leaving 404. The ECG figure is the one to watch -- raising H or the
+ * segmentation window eats it directly, and at H = 310 it is gone. */
+static_assert(TIO_ECG_TX_HIGH_WATER - TIO_ECG_SAMPLES_PER_PKT + TIO_ECG_TX_BLOCK_SAMPLES <= ECG_TX_BUF_LEN,
+              "ECG TX peak occupancy (H - pkt + block) exceeds ring capacity");
+static_assert(TIO_PPG_TX_HIGH_WATER - TIO_PPG_SAMPLES_PER_PKT + TIO_PPG_TX_BLOCK_SAMPLES <= PPG_TX_BUF_LEN,
+              "PPG TX peak occupancy (H - pkt + block) exceeds ring capacity");
+
+/* A full structural block landing on the trough must still fit under H, or the
+ * trim fires on the very next tick and discards fresh signal.
+ *
+ * FIVE terms, because the trough is not the target and the block is not
+ * punctual: the trough settles up to PULL_DIV above target (the position
+ * term's deadband), alternates a further samplesPerPkt with the block-period
+ * quantisation, and the block can arrive TIO_TX_SLIP_SAMPLES late because
+ * EcgProcessTask runs one mutually-exclusive stage per iteration and a due
+ * segmentation is deferrable.
+ *
+ * This bound has been wrong twice by omitting a term. The two-term form passed
+ * at a target of 30 while the real peak sat at 248 of 250. The four-term form
+ * ignored producer scheduling and claimed ~41 samples of margin where
+ * simulation showed 3 -- one more iteration of slip and it trimmed. Add terms
+ * here rather than simplifying; see TIO_TX_SLIP_SAMPLES for the measurements. */
+static_assert(TIO_ECG_TX_TROUGH_TARGET + TIO_TX_SERVO_PULL_DIV + TIO_ECG_SAMPLES_PER_PKT + TIO_TX_SLIP_SAMPLES +
+                      TIO_ECG_TX_BLOCK_SAMPLES <=
+                  TIO_ECG_TX_HIGH_WATER,
+              "ECG worst-case trough + slip + block must fit under H");
+static_assert(TIO_PPG_TX_TROUGH_TARGET + TIO_TX_SERVO_PULL_DIV + TIO_PPG_SAMPLES_PER_PKT + TIO_TX_SLIP_SAMPLES +
+                      TIO_PPG_TX_BLOCK_SAMPLES <=
+                  TIO_PPG_TX_HIGH_WATER,
+              "PPG worst-case trough + slip + block must fit under H");
+
+/* The trough must leave a whole packet in hand, or the pump would skip on
+ * every tick that sits at target -- which is the emission gap this exists to
+ * prevent. */
+static_assert(TIO_ECG_TX_TROUGH_TARGET > TIO_ECG_SAMPLES_PER_PKT, "ECG trough target must exceed one packet");
+static_assert(TIO_PPG_TX_TROUGH_TARGET > TIO_PPG_SAMPLES_PER_PKT, "PPG trough target must exceed one packet");
+
+/* The servo window must span at least THREE whole producer blocks.
+ *
+ * One block is not enough, which cost a bench iteration to learn. The block
+ * period is a non-integer number of pump ticks, so the true trough alternates
+ * by ~samplesPerPkt from block to block; a window spanning 1-2 blocks catches
+ * that alternation in its minimum and the servo's rate term differentiates the
+ * artifact rather than the drift. Three blocks guarantees the minimum is taken
+ * over enough troughs to land consistently at the bottom of the alternation.
+ * ECG is the binding case: block/samplesPerPkt ticks to drain one block. */
+static_assert(TIO_TX_SERVO_WINDOW_TICKS >= (3 * TIO_ECG_TX_BLOCK_SAMPLES / TIO_ECG_SAMPLES_PER_PKT),
+              "servo window must span at least three ECG producer blocks");
+
+/* Payload must stay within what the TileIO slot framing accepts (240 B was the
+ * bound the pre-fix senders were written against). */
+static_assert(TIO_ECG_MAX_SAMPLES_PER_PKT * 3 * sizeof(int16_t) <= 240, "ECG max payload too large");
+static_assert(TIO_PPG_MAX_SAMPLES_PER_PKT * 3 * sizeof(int16_t) <= 240, "PPG max payload too large");
+
+/* Samples every ring in the group holds in common. Using the minimum (never a
+ * per-ring length) is what keeps the group advancing as a unit. */
+static size_t
+tio_tx_group_avail(const tio_tx_group_t *group)
+{
+    size_t avail = ringbuffer_len(group->rings[0]);
+    for (uint8_t i = 1; i < group->numRings; i++) {
+        avail = MIN(avail, ringbuffer_len(group->rings[i]));
+    }
+    return avail;
+}
+
+/* Trough servo. Runs once per servo window, not per tick.
+ *
+ * WHAT IT CORRECTS. The producer and the pump are on different clocks, so the
+ * producer delivers 100 +/- a few tenths of a percent samples per second while
+ * the pump nominally takes exactly 100. The residual is a standing RATE error
+ * of a couple of samples per second, and correcting a rate error is the job
+ * here -- not correcting instantaneous occupancy.
+ *
+ * WHY A THRESHOLD COULD NOT DO IT. The previous design popped an extra sample
+ * on every tick whose occupancy exceeded a setpoint. That asks one number to
+ * be two things at once: the target trough (which must satisfy
+ * trough + block <= H, so <= 50) and the drain trigger (which for a block
+ * producer must sit near the peak, ~200, so that only the few ticks per block
+ * actually needed qualify). For ECG those are incompatible, and measurement
+ * confirmed both failure modes -- setpoint 240 under-drained and trimmed
+ * ~1.8 samples/s forever; setpoint 50 over-drained, emptied the ring and
+ * produced whole seconds with no ECG packet at all.
+ *
+ * HOW THIS ONE WORKS. Each window, compare the measured trough against the
+ * target and nudge a BUDGET of extra samples by one. The budget is the rate
+ * correction; the trough is the error signal. The pump then spends at most
+ * that many extra samples over the following window, at most one per tick, and
+ * only while occupancy is comfortably above target. Corrections are therefore
+ * bounded by construction and the trough is held near target instead of being
+ * driven to either rail.
+ *
+ * CONTROL LAW, and why it is not simply "nudge the budget toward the target".
+ * The plant is an integrator: the budget sets a RATE, and the trough is the
+ * accumulated position. Driving an integrator with a position error alone
+ * (budget += step when the trough is high) is a double integrator and it limit
+ * cycles -- simulated against the measured drift it swings the trough 0 -> 64
+ * -> 0 with an ~80 s period, which would trim at the peak and skip at the
+ * floor. So the law has two terms:
+ *
+ *   budget += (trough - trough_prev)          rate term
+ *           + (trough - target) / PULL_DIV    position term
+ *
+ * The rate term is the whole correction and it is dead-beat: the trough moved
+ * by exactly the imbalance between production and consumption over the window,
+ * so adding that difference to the budget cancels the drift in ONE window and
+ * leaves the trough wherever it sits. The position term is what then walks the
+ * trough back to target, gently, over a first-order tail of ~PULL_DIV windows.
+ * Integer division gives it a natural deadband: inside +/-PULL_DIV samples of
+ * target it contributes zero and the servo holds still.
+ *
+ * STABILITY, which matters more here than convergence speed:
+ *  - The error signal is the per-window MINIMUM, and the window is asserted to
+ *    span at least three producer blocks. So the servo sees the trough, not
+ *    the 2 s sawtooth whose 200-sample swing would otherwise swamp the ~2/s
+ *    drift it is trying to measure.
+ *  - The budget is clamped to [0, TIO_TX_SERVO_MAX_BUDGET], so there is no
+ *    windup: a producer that stops entirely parks the budget at 0 rather than
+ *    accumulating a debt to spend later as a burst.
+ *  - It responds from both directions. Producer fast: trough rises, budget
+ *    rises, extra draining. Producer slow: trough falls, budget falls to 0 and
+ *    the pump self-throttles by skipping, which is the correct response since
+ *    samples cannot be manufactured.
+ *
+ * Those are the properties the law was designed for, and they hold. What does
+ * NOT hold is convergence to a stable operating point -- an earlier version of
+ * this comment claimed a monotone approach to target, and hardware disproved
+ * it. See RESIDUAL BEHAVIOUR below before trusting any stability claim here.
+ *
+ * RESIDUAL BEHAVIOUR: THE SERVO DOES NOT CONVERGE. Read this before tuning it.
+ *
+ * It holds the stream inside its acceptance envelope, but it does not settle
+ * on a stable budget. Measured on hardware 2026-09-01, ECG, over a 107 s
+ * window taken from 60 s into the run -- comfortably past the ~12.7 s the
+ * budget needs to become useful, and there is no later settling point to wait
+ * for since the dither never stops:
+ *
+ *   bgt   0 x13, 7 x6, 9 x4, 10 x31, 13 x7, 19 x7, 20 x26, 31 x13
+ *         -- a 0..31 spread clustering near multiples of samplesPerPkt,
+ *            not the stable ~15 the design intends.
+ *   trgh  3..34 spread, against a target of 20.
+ *
+ * WHY IT IS SHIPPED ANYWAY. Every quantity that matters is comfortably inside
+ * bounds, and the dither is a fraction of a sample per second of rate error
+ * that never accumulates:
+ *
+ *   trim  0/s on every line -- no sample is ever discarded.
+ *   pkt   mean 9.96/s, no interval below 9 -- no emission gap.
+ *   occ   observed peak ~209 against H = 250, ~41 samples of real margin
+ *         (the four-term static_assert above bounds the theoretical worst
+ *         case at 238, and the observed peak sits well under even that).
+ *
+ * The controlled variable misbehaving while every controlled OUTCOME is in
+ * spec means the loop is sloppy, not unsafe. It was not worth further tuning
+ * passes against a bench.
+ *
+ * WHAT DID NOT FIX IT, so nobody re-derives a false premise. The block-period
+ * aliasing diagnosis at TIO_TX_SERVO_WINDOW_TICKS is real -- the block period
+ * genuinely is a non-integer 19.53 pump ticks and the trough genuinely does
+ * alternate by a packet -- but widening the window from 32 to 64 ticks did NOT
+ * remove the dither. It WIDENED it: the earlier 32-tick window gave bgt 0<->10
+ * and trgh 13<->23, tighter than the 0..31 and 3..34 above. So aliasing is at
+ * most part of the cause. The likely reason widening failed is that 64 ticks
+ * is 3.28 block periods -- still not an integer multiple, so the number of
+ * troughs captured per window and their phases keep changing, and the
+ * per-window minimum keeps stepping by packet-sized amounts. A fixed-length
+ * window cannot be an integer multiple of a block period that is set by an
+ * independent, drifting producer clock.
+ *
+ * A SECOND MECHANISM, found by simulation and not by the window analysis. The
+ * rate term cannot distinguish producer SCHEDULING SLIP from clock drift: a
+ * block deferred by an iteration looks exactly like a producer that briefly
+ * sped up, so the servo corrects for a rate change that never happened. The
+ * asymmetry is what makes it stick -- when the block arrives late the trough
+ * dips and the correction goes negative, but the 0-clamp rectifies it, so the
+ * budget is not given back on the rebound. Simulated with perfectly periodic
+ * blocks the dither is only bgt 7..20 / trgh 11..24; adding one iteration of
+ * slip reproduces the measured 0..31 / 3..34 almost exactly. There is also a
+ * boot transient: the first window measures a trough of 0 while the ring is
+ * still filling, that value becomes servoTroughPrev, and the next window's
+ * rate term is the entire fill transient.
+ *
+ * So the dither has two causes, not one, and neither is a gain problem --
+ * which is why no amount of gain tuning fixed it.
+ *
+ * WHAT TO INVESTIGATE NEXT, if a future maintainer wants real convergence: do
+ * not tune the gains -- make the MEASUREMENT synchronous with the producer.
+ * Detect the block push (an occupancy jump of ~block samples) and latch the
+ * trough once per block rather than once per fixed window. That removes the
+ * phase beat at its source rather than averaging over it, it makes the rate
+ * term a true per-block imbalance, and it addresses the slip mechanism too --
+ * a block measured per block is not "late" relative to its own arrival, so
+ * scheduling deferral stops masquerading as drift. One change, both causes.
+ * It is a structural change to the error signal, which is why it was out of
+ * scope here.
+ *
+ * ALSO RECORDED: bgt was observed at 31 against TIO_TX_SERVO_MAX_BUDGET of 32
+ * on 13 of those lines. It is not pinned, but it is close, so if someone later
+ * finds it sitting at the cap they should know it was already reaching 31
+ * intermittently at ~2.4% producer drift -- and that the cap is what stops the
+ * budget becoming a burst, so raising it is not automatically the right move.
+ *
+ * Two smaller, understood contributors to the offset, both benign: the trough
+ * settles ABOVE target by up to PULL_DIV because the position term's integer
+ * division has no restoring force inside its deadband, and the underlying
+ * occupancy alternates by ~samplesPerPkt from the block quantisation. Both are
+ * carried in the peak static_assert above. */
+static void
+tio_tx_group_servo(tio_tx_group_t *group)
+{
+    int32_t trough = (int32_t)group->servoTroughMin;
+    int32_t rate = trough - (int32_t)group->servoTroughPrev;
+    int32_t pull = (trough - (int32_t)group->troughTarget) / TIO_TX_SERVO_PULL_DIV;
+    int32_t budget = (int32_t)group->extraBudget + rate + pull;
+
+    if (budget < 0) {
+        budget = 0;
+    } else if (budget > TIO_TX_SERVO_MAX_BUDGET) {
+        budget = TIO_TX_SERVO_MAX_BUDGET;
+    }
+    group->extraBudget = (uint16_t)budget;
+
+    group->servoTroughPrev = (uint32_t)trough;
+    group->servoTrough = (uint32_t)trough;
+    group->servoTroughMin = TIO_OCC_MIN_INIT;
+    group->extraSpent = 0;
+    group->servoTicks = 0;
+}
+
+/* Trim to high-water, then decide whether and how much to emit. Returns the
+ * number of samples to pop from EVERY ring of the group, or 0 to emit nothing
+ * this tick. Never returns less than samplesPerPkt (no short packets) and
+ * never more than samplesPerPkt + TIO_TX_DRIFT_CATCHUP_SAMPLES. */
+static size_t
+tio_tx_group_prepare(tio_tx_group_t *group)
+{
+    size_t avail = tio_tx_group_avail(group);
+    /* Sample occupancy before the trim and before the pop, so the watermarks
+     * reflect what the producer actually created. */
+    if ((uint32_t)avail > group->occMax) {
+        group->occMax = (uint32_t)avail;
+    }
+    if ((uint32_t)avail < group->occMin) {
+        group->occMin = (uint32_t)avail;
+    }
+    /* Servo error signal: the minimum occupancy seen this window, sampled at
+     * tick start so it reflects what the pump actually had to work with. */
+    if ((uint32_t)avail < group->servoTroughMin) {
+        group->servoTroughMin = (uint32_t)avail;
+    }
+    if (++group->servoTicks >= TIO_TX_SERVO_WINDOW_TICKS) {
+        tio_tx_group_servo(group);
+    }
+    if (avail > group->highWater) {
+        /* Discard the stale oldest samples, keep the newest H. One `drop`,
+         * applied to every ring, so the group stays aligned across the trim. */
+        size_t drop = avail - group->highWater;
+        for (uint8_t i = 0; i < group->numRings; i++) {
+            ringbuffer_seek(group->rings[i], drop);
+        }
+        group->trimmed += (uint32_t)drop;
+        avail = group->highWater;
+    }
+    if (avail < group->samplesPerPkt) {
+        /* Producer running fractionally slow, or simply nothing new yet. Skip
+         * the tick rather than emit a short packet. */
+        return 0;
+    }
+    /* Spend the servo's budget: at most one extra sample per tick, at most
+     * extraBudget per window, and only while occupancy stays a full packet
+     * clear of the target trough.
+     *
+     * That guard is what stops the over-draining that emptied the ring under
+     * the old threshold design: however large the budget, the pump stops
+     * taking extra as soon as occupancy approaches target, so the correction
+     * can never pull the trough down to where the next tick has to skip.
+     *
+     * The 1x invariant remains structural rather than tuned: the pop comes out
+     * of a ring, so it can only ever return samples the producer has already
+     * produced. */
+    size_t numSamples = group->samplesPerPkt;
+    if (group->extraSpent < group->extraBudget &&
+        avail > (size_t)(group->troughTarget + group->samplesPerPkt)) {
+        numSamples = group->samplesPerPkt + TIO_TX_DRIFT_CATCHUP_SAMPLES;
+        if (numSamples > avail) {
+            numSamples = avail;
+        }
+        group->extraSpent++;
+        group->drained++;
+    }
+    return numSamples;
+}
+
+/* Pace a signal pump task at exactly TIO_PUMP_INTERVAL_MS.
+ *
+ * vTaskDelayUntil() (not vTaskDelay) so the period is measured from the
+ * previous wake time and scheduling latency does not accumulate into drift --
+ * the old "measure the loop with DWT, then vTaskDelay the remainder" form lost
+ * the measurement/delay gap on every single iteration. At
+ * configTICK_RATE_HZ = 1000, pdMS_TO_TICKS(100) is exactly 100 ticks.
+ *
+ * Overrun handling is the subtle part, and it has to hit `max(work, period)`
+ * exactly -- both neighbouring behaviours are bugs:
+ *
+ *   * Letting vTaskDelayUntil() fire back-to-back to catch up emits packets
+ *     closer together than the period, i.e. ABOVE 1.00x realtime, which the
+ *     latency budget forbids.
+ *   * Re-anchoring to `now` and then delaying is worse in the other
+ *     direction: the deadline `now + period` is still in the future, so the
+ *     task blocks a further full period and the iteration costs `work +
+ *     period`. That runs the pump BELOW 1x, and because the producer is
+ *     clocked independently the resulting sample deficit accumulates until
+ *     the trim starts discarding it -- a recurring splice, exactly the
+ *     artifact this file exists to remove. Overrun is a real condition here
+ *     (one long inference per cycle is enough), not a hypothetical.
+ *
+ * So on overrun, re-anchor to `now - period`: vTaskDelayUntil() then sees a
+ * deadline of `now`, returns immediately without blocking, and leaves
+ * *pLastWake == now for the next cycle. The period is dropped, never
+ * compressed and never doubled.
+ *
+ * Note for bench runs: enabling the debug log flags puts blocking SWO writes
+ * into these equal-priority tasks and makes overrun materially more likely --
+ * the instrumented build is the one most likely to exercise this path. */
+static void
+tio_pump_wait(TickType_t *pLastWake)
+{
+    const TickType_t period = pdMS_TO_TICKS(TIO_PUMP_INTERVAL_MS);
+    TickType_t now = xTaskGetTickCount();
+    /* SIGNED delta. An unsigned compare treats a deliberately future-dated
+     * anchor as a huge positive elapsed time and fires the overrun branch,
+     * which silently discarded the PPG phase stagger: PpgProcessTask anchors
+     * at T+33, the first iteration reaches here at ~T+20, and the unsigned
+     * (now - *pLastWake) underflows to a value comfortably >= period. Signed
+     * arithmetic reads that as -13 ticks (not yet due) and leaves the anchor
+     * alone, while remaining wrap-safe for the same reason the unsigned form
+     * was: the difference is what wraps, not the operands. */
+    if ((int32_t)(now - *pLastWake) >= (int32_t)period) {
+        *pLastWake = now - period;
+    }
+    vTaskDelayUntil(pLastWake, period);
+}
+
 static void
 send_ecg_signals(void)
 {
-    uint8_t buffer[240];
+    /* Sized for the drift-drain maximum, not the nominal packet. */
+    uint8_t buffer[TIO_ECG_MAX_SAMPLES_PER_PKT * (sizeof(uint16_t) + 2 * sizeof(int16_t))];
     float32_t rawVal, denVal;
     uint16_t maskVal;
     int16_t txVal;
     uint32_t length;
-    size_t numSamples = MIN3(ringbuffer_len(&rbEcgRawTx), ringbuffer_len(&rbEcgDenTx), ringbuffer_len(&rbEcgMaskTx));
+    /* Single shared count for all three rings -- see the alignment note above. */
+    size_t numSamples = tio_tx_group_prepare(&g_ecgTxGroup);
     if (numSamples == 0) {
         g_tio_nodata[0]++;
         return;
     }
-    numSamples = MIN(numSamples, sizeof(buffer) / (3 * sizeof(int16_t)));
     length = 0;
     for (size_t i = 0; i < numSamples; i++) {
         ringbuffer_pop(&rbEcgMaskTx, &maskVal, 1);
@@ -687,7 +1178,10 @@ send_ecg_signals(void)
         memcpy(&buffer[length], &txVal, sizeof(int16_t));
         length += sizeof(int16_t);
     }
-    pack_and_enqueue_tio_packet(0, 0, buffer, length);
+    g_ecgTxGroup.pumped++;
+    if (pack_and_enqueue_tio_packet(0, 0, buffer, length)) {
+        g_ecgTxGroup.delivered++;
+    }
 }
 
 static void
@@ -741,19 +1235,20 @@ ppg_display_sample(ppg_tx_display_state_t *state, float32_t sample)
 static void
 send_ppg_signals(void)
 {
-    uint8_t buffer[240];
+    /* Sized for the drift-drain maximum, not the nominal packet. */
+    uint8_t buffer[TIO_PPG_MAX_SAMPLES_PER_PKT * (sizeof(uint16_t) + 2 * sizeof(int16_t))];
     float32_t val1, val2;
     float32_t txVal1, txVal2;
     int16_t txValI16;
     uint32_t length;
     uint8_t qos = (uint8_t)(ppgMetResults.qos / 25);
     uint16_t mask = (uint16_t)(qos << SIG_MASK_QOS_OFFSET);
-    size_t numSamples = MIN(ringbuffer_len(&rbPpg1Tx), ringbuffer_len(&rbPpg2Tx));
+    /* Single shared count for both rings -- see the alignment note above. */
+    size_t numSamples = tio_tx_group_prepare(&g_ppgTxGroup);
     if (numSamples == 0) {
         g_tio_nodata[1]++;
         return;
     }
-    numSamples = MIN(numSamples, sizeof(buffer) / (sizeof(uint16_t) + 2 * sizeof(int16_t)));
     length = 0;
     for (size_t i = 0; i < numSamples; i++) {
         memcpy(&buffer[length], &mask, sizeof(uint16_t));
@@ -769,7 +1264,10 @@ send_ppg_signals(void)
         memcpy(&buffer[length], &txValI16, sizeof(int16_t));
         length += sizeof(int16_t);
     }
-    pack_and_enqueue_tio_packet(1, 0, buffer, length);
+    g_ppgTxGroup.pumped++;
+    if (pack_and_enqueue_tio_packet(1, 0, buffer, length)) {
+        g_ppgTxGroup.delivered++;
+    }
 }
 
 static void
@@ -848,6 +1346,23 @@ SensorIrqTask(void *pvParameters)
 
 static volatile uint32_t g_ecg_seg_runs = 0;
 
+/* Per-stage non-zero-return counts, indexed by tio_stage_err_t.
+ *
+ * Always compiled, unlike the EN_APP_TIMING_LOGS prints these sit beside: with
+ * those prints off (the default) the inference return codes are otherwise
+ * discarded at the `(void)err`, so a persistently failing denoise or
+ * segmentation stage would produce a plausible-looking flat trace and no
+ * indication anywhere that the model never ran. Two increments per 2 s. */
+typedef enum {
+    kStageErrEcgDenoise = 0,
+    kStageErrEcgSegment,
+    kStageErrEcgMetrics,
+    kStageErrPpgMetrics,
+    kStageErrCount
+} tio_stage_err_t;
+
+static volatile uint32_t g_stage_err[kStageErrCount] = {0};
+
 void
 EcgProcessTask(void *pvParameters)
 {
@@ -855,11 +1370,10 @@ EcgProcessTask(void *pvParameters)
     uint32_t err = 0;
     uint32_t tickStart;
     size_t numSamples;
-    uint32_t loopTickStart;
+    TickType_t pumpLastWake = xTaskGetTickCount();
 
     while (true) {
         err = 0;
-        loopTickStart = dwt_cycles();
         service_ecg_flush_request();
 
         ///////////////////////////////////////////////////////////////////
@@ -918,6 +1432,9 @@ EcgProcessTask(void *pvParameters)
 
             ecgMetResults.denoiseIps = ips_from_delta_us(dwt_delta_us(tickStart));
             ecgMetResults.denoiseuIpspw = 1.0e3f * ecgMetResults.denoiseIps / AVG_INFERENCE_POWER;
+            if (err != 0) {
+                g_stage_err[kStageErrEcgDenoise]++;
+            }
 #if EN_APP_TIMING_LOGS
             nsx_printf("[ecg] denoise err=%lu\n", (unsigned long)err);
 #endif
@@ -958,6 +1475,9 @@ EcgProcessTask(void *pvParameters)
 
             ecgMetResults.segmentIps = ips_from_delta_us(dwt_delta_us(tickStart));
             ecgMetResults.segmentuIpspw = 1.0e3f * ecgMetResults.segmentIps / AVG_INFERENCE_POWER;
+            if (err != 0) {
+                g_stage_err[kStageErrEcgSegment]++;
+            }
 #if EN_APP_TIMING_LOGS
             nsx_printf("[ecg] segment err=%lu\n", (unsigned long)err);
 #endif
@@ -989,6 +1509,9 @@ EcgProcessTask(void *pvParameters)
             ecgMetResults.arrhythmiaIpspw = 1.0e3f * ecgMetResults.arrhythmiaIps / AVG_INFERENCE_POWER;
 
             send_ecg_metrics();
+            if (err != 0) {
+                g_stage_err[kStageErrEcgMetrics]++;
+            }
 #if EN_APP_TIMING_LOGS
             nsx_printf("[ecg] metrics err=%lu\n", (unsigned long)err);
 #endif
@@ -996,24 +1519,17 @@ EcgProcessTask(void *pvParameters)
             vTaskDelay(pdMS_TO_TICKS(20));
         }
 
-        send_ecg_signals();
         (void)err;
 
-        /* Rate-limit the whole loop to ~100ms, matching legacy's "Try to
-         * maintain 100ms loop" -- without this, the loop free-runs at raw
-         * sample rate whenever data is flowing, calling send_ecg_signals()
-         * far more often than useful (each call only finds 1-3 fresh TX
-         * samples, producing tiny/mostly-overhead packets that starve the
-         * TileIO queue instead of a few well-filled ~40-sample packets/sec).
-         * This was a real regression from the phase 6 port -- confirmed via
-         * SWO diagnostics showing near-zero ECG/PPG TileIO throughput
-         * despite the pipeline computing correct metrics internally. */
-        {
-            uint32_t loopDeltaUs = dwt_delta_us(loopTickStart);
-            if (loopDeltaUs < 100000u) {
-                vTaskDelay(pdMS_TO_TICKS((100000u - loopDeltaUs) / 1000u));
-            }
-        }
+        /* Wait BEFORE sending, not after. With the send ahead of the wait, a
+         * long iteration (a 250 ms segmentation tick, say) emits at T+250, the
+         * wait correctly returns immediately, and the next near-idle iteration
+         * emits again ~2 ms later -- two packets 2 ms apart, a one-packet
+         * catch-up the design says never happens. Sending immediately after
+         * the wake instead makes inter-packet spacing equal the wake-to-wake
+         * interval, max(work, period), by construction. */
+        tio_pump_wait(&pumpLastWake);
+        send_ecg_signals();
     }
 }
 
@@ -1031,20 +1547,39 @@ EcgProcessTask(void *pvParameters)
 static volatile uint32_t g_ppg_loop_iters = 0;
 static volatile uint32_t g_ppg_samples_pushed = 0;
 
+/* Largest number of samples teed into the PPG TX rings by a single pass of the
+ * loop below, i.e. the OBSERVED structural block.
+ *
+ * TIO_PPG_TX_BLOCK_SAMPLES (13) is an empirical figure taken from the AS7058
+ * watermark interval, not a compile-time bound: with PPG_DS_RATE == 1 the loop
+ * is bounded only by MIN(len(rbPpg1Sensor), len(rbPpg2Sensor)), so a delayed
+ * task could in principle tee up to SENSOR_BUF_LEN-1 samples in one pass and
+ * exceed H. Unlike ECG, whose block is ECG_SEG_VALID_LEN and therefore
+ * statically checkable, this one has to be watched at runtime. If this counter
+ * reports above TIO_PPG_TX_BLOCK_SAMPLES on the bench, that constant is wrong
+ * and H must be re-derived from the real bound. */
+static volatile uint32_t g_ppg_tee_burst_max = 0;
+
 void
 PpgProcessTask(void *pvParameters)
 {
     (void)pvParameters;
-    uint32_t err;
+    uint32_t err = 0;
     bio_spo2_a0_configuration_t spo2Cfg;
     const bio_spo2_a0_configuration_t *pSpo2Cfg;
-    uint32_t loopTickStart;
+    /* Phase-stagger the PPG pump against the ECG pump. Both tasks are created
+     * back-to-back at equal priority and would otherwise anchor to the same
+     * tick and enqueue into the transport in the same millisecond every time,
+     * concentrating the packet budget into bursts instead of spreading it. */
+    TickType_t pumpLastWake = xTaskGetTickCount() + pdMS_TO_TICKS(TIO_PPG_PUMP_PHASE_MS);
 
     while (true) {
         g_ppg_loop_iters++;
-        loopTickStart = dwt_cycles();
         service_ppg_flush_request();
         size_t numSamples = MIN(ringbuffer_len(&rbPpg1Sensor), ringbuffer_len(&rbPpg2Sensor));
+        if (numSamples / PPG_DS_RATE > g_ppg_tee_burst_max) {
+            g_ppg_tee_burst_max = (uint32_t)(numSamples / PPG_DS_RATE);
+        }
         for (size_t i = 0; i < numSamples / PPG_DS_RATE; i++) {
             float32_t sample1, sample2;
             ringbuffer_seek(&rbPpg1Sensor, PPG_DS_RATE - 1);
@@ -1071,6 +1606,9 @@ PpgProcessTask(void *pvParameters)
             ringbuffer_seek(&rbPpg1Met, PPG_MET_VALID_LEN);
             ringbuffer_seek(&rbPpg2Met, PPG_MET_VALID_LEN);
             send_ppg_metrics();
+            if (err != 0) {
+                g_stage_err[kStageErrPpgMetrics]++;
+            }
 #if EN_APP_TIMING_LOGS
             if (err != 0) {
                 nsx_printf("[ppg] metrics err=%lu\n", (unsigned long)err);
@@ -1080,16 +1618,11 @@ PpgProcessTask(void *pvParameters)
             vTaskDelay(pdMS_TO_TICKS(20));
         }
 
-        send_ppg_signals();
+        (void)err; /* only consumed by the EN_APP_TIMING_LOGS print above */
 
-        /* Rate-limit to ~100ms, matching legacy and the same fix applied to
-         * EcgProcessTask above -- see its comment for why this matters. */
-        {
-            uint32_t loopDeltaUs = dwt_delta_us(loopTickStart);
-            if (loopDeltaUs < 100000u) {
-                vTaskDelay(pdMS_TO_TICKS((100000u - loopDeltaUs) / 1000u));
-            }
-        }
+        /* Wait before sending -- see the note in EcgProcessTask. */
+        tio_pump_wait(&pumpLastWake);
+        send_ppg_signals();
     }
 }
 
@@ -1496,6 +2029,106 @@ ReportTask(void *pvParameters)
                    (int)(fabsf(ppgMetResults.pr - (int)ppgMetResults.pr) * 100), (int)ppgMetResults.spo2,
                    (int)(fabsf(ppgMetResults.spo2 - (int)ppgMetResults.spo2) * 100), (int)ppgMetResults.qos,
                    (int)(fabsf(ppgMetResults.qos - (int)ppgMetResults.qos) * 100));
+#endif
+
+#if EN_APP_EMIT_LOGS
+        /* Rate-matched emission health, per signal slot (constants.h "TileIO
+         * latency budget"). Gated separately from EN_APP_DEBUG_LOGS and on by
+         * default: this single 1 Hz line is what the issue #12 acceptance
+         * criteria are read from, and pkt_rate below 10/s is the only direct
+         * symptom of a pump that has lost its cadence. Defaulting it off
+         * alongside EN_APP_TIMING_LOGS would leave a bench run blind.
+         *
+         * ReportTask runs at 1 Hz, so the deltas ARE the per-second rates.
+         *   pkt_rate  -- packets HANDED to the transport; expect 10/s +/- 1.
+         *   deliv     -- of those, the ones the transport accepted. pkt_rate
+         *                without deliv means the host is not receiving,
+         *                however healthy the rest of the line looks.
+         *   trim      -- samples discarded by trim-to-high-water. Expect 0 in
+         *                both clock-drift directions now that the drift drain
+         *                keeps occupancy off H; TIO_TX_TRIM_DRIFT_ALLOWANCE_SPS
+         *                is only a backstop for judging a capture. Sustained
+         *                non-zero trim is a bug, not a policy working.
+         *   drain     -- ticks on which the servo spent an extra sample.
+         *                MIND THE UNITS: this is a PER-SECOND delta while bgt
+         *                is per servo window (64 ticks = 6.4 s). They differ by
+         *                6.4x, so a healthy pair looks like drain=2/s against
+         *                bgt=13 -- do not read that as the drain falling short.
+         *   bgt       -- servo budget, extra samples per SERVO WINDOW. The rate
+         *                it encodes is bgt / (window x pump interval), which
+         *                should equal the producer's drift. Do NOT expect a
+         *                settled value: measured spread is 0..31 clustering
+         *                near multiples of samplesPerPkt. See RESIDUAL
+         *                BEHAVIOUR at tio_tx_group_servo().
+         *   trgh      -- trough the servo last measured, against a target of
+         *                TIO_*_TX_TROUGH_TARGET. There is no hysteresis band;
+         *                the position term has an integer-division deadband,
+         *                which is a different thing, and the shipped servo does
+         *                NOT converge -- measured trgh spread is 3..34 against
+         *                a target of 20. Judge trim and pkt, not this.
+         *                CAUTION: trgh 0 with bgt 0 is ambiguous. It is the
+         *                normal reading for a producer slower than the pump
+         *                (self-throttling, not a fault) AND the reading for a
+         *                producer that has stopped entirely. Distinguish them
+         *                with pkt and the sensor counters, not from this line.
+         *   occ       -- TX occupancy low..high per interval, sampled pre-trim
+         *                and pre-pop. For ECG the low value is the pre-block
+         *                residual R, i.e. how close the next atomic 200-sample
+         *                push will land to H.
+         *   ppg_burst -- high-water mark of one PPG tee pass; must stay <=
+         *                TIO_PPG_TX_BLOCK_SAMPLES or H is mis-derived.
+         *   stage_err -- cumulative non-zero returns from ECG denoise /
+         *                segment / metrics and PPG metrics. Any sustained
+         *                climb invalidates the waveform regardless of rate.
+         *
+         * Split across two lines deliberately: SWO output from concurrent
+         * tasks interleaves and corrupts long lines (issue #11), so no single
+         * line should have to be trusted on its own. */
+        {
+            static uint32_t lastEcgPkts = 0, lastPpgPkts = 0, lastEcgTrim = 0, lastPpgTrim = 0;
+            static uint32_t lastEcgDeliv = 0, lastPpgDeliv = 0, lastEcgDrain = 0, lastPpgDrain = 0;
+            uint32_t ecgPkts = g_ecgTxGroup.pumped, ppgPkts = g_ppgTxGroup.pumped;
+            uint32_t ecgTrim = g_ecgTxGroup.trimmed, ppgTrim = g_ppgTxGroup.trimmed;
+            uint32_t ecgDeliv = g_ecgTxGroup.delivered, ppgDeliv = g_ppgTxGroup.delivered;
+            uint32_t ecgDrain = g_ecgTxGroup.drained, ppgDrain = g_ppgTxGroup.drained;
+            uint32_t ecgOccMin = g_ecgTxGroup.occMin, ecgOccMax = g_ecgTxGroup.occMax;
+            uint32_t ppgOccMin = g_ppgTxGroup.occMin, ppgOccMax = g_ppgTxGroup.occMax;
+            /* Reset the watermarks so the next interval reports afresh. */
+            g_ecgTxGroup.occMin = TIO_OCC_MIN_INIT;
+            g_ecgTxGroup.occMax = 0;
+            g_ppgTxGroup.occMin = TIO_OCC_MIN_INIT;
+            g_ppgTxGroup.occMax = 0;
+            if (ecgOccMin == TIO_OCC_MIN_INIT) {
+                ecgOccMin = 0;
+            }
+            if (ppgOccMin == TIO_OCC_MIN_INIT) {
+                ppgOccMin = 0;
+            }
+            nsx_printf("[tio-emit] ecg(pkt=%lu/s deliv=%lu/s trim=%lu/s drain=%lu/s occ=%lu..%lu "
+                       "bgt=%u trgh=%lu) ppg(pkt=%lu/s deliv=%lu/s trim=%lu/s drain=%lu/s "
+                       "occ=%lu..%lu bgt=%u trgh=%lu)\n",
+                       (unsigned long)(ecgPkts - lastEcgPkts), (unsigned long)(ecgDeliv - lastEcgDeliv),
+                       (unsigned long)(ecgTrim - lastEcgTrim), (unsigned long)(ecgDrain - lastEcgDrain),
+                       (unsigned long)ecgOccMin, (unsigned long)ecgOccMax,
+                       (unsigned)g_ecgTxGroup.extraBudget, (unsigned long)g_ecgTxGroup.servoTrough,
+                       (unsigned long)(ppgPkts - lastPpgPkts), (unsigned long)(ppgDeliv - lastPpgDeliv),
+                       (unsigned long)(ppgTrim - lastPpgTrim), (unsigned long)(ppgDrain - lastPpgDrain),
+                       (unsigned long)ppgOccMin, (unsigned long)ppgOccMax,
+                       (unsigned)g_ppgTxGroup.extraBudget, (unsigned long)g_ppgTxGroup.servoTrough);
+            nsx_printf("[tio-health] trim_tot(ecg=%lu ppg=%lu) ppg_burst=%lu "
+                       "stage_err(den=%lu seg=%lu met=%lu ppgmet=%lu)\n",
+                       (unsigned long)ecgTrim, (unsigned long)ppgTrim, (unsigned long)g_ppg_tee_burst_max,
+                       (unsigned long)g_stage_err[kStageErrEcgDenoise], (unsigned long)g_stage_err[kStageErrEcgSegment],
+                       (unsigned long)g_stage_err[kStageErrEcgMetrics], (unsigned long)g_stage_err[kStageErrPpgMetrics]);
+            lastEcgPkts = ecgPkts;
+            lastPpgPkts = ppgPkts;
+            lastEcgTrim = ecgTrim;
+            lastPpgTrim = ppgTrim;
+            lastEcgDeliv = ecgDeliv;
+            lastPpgDeliv = ppgDeliv;
+            lastEcgDrain = ecgDrain;
+            lastPpgDrain = ppgDrain;
+        }
 #endif
 
         vTaskDelay(pdMS_TO_TICKS(1000));
