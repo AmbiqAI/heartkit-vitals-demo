@@ -248,7 +248,22 @@ typedef enum {
     /* uxTaskGetSystemState() returns 0 -- not a truncated list -- when the   */                   \
     /* array is too small. Counting that is the difference between "cpu% is   */                   \
     /* pinned because the array overflowed" and a silent wrong number.        */                   \
-    X(HKV_CNT_CPU_STAT_OVERFLOW, "cpu",    "stat_overflow", HKV_EMIT_TOTAL)
+    X(HKV_CNT_CPU_STAT_OVERFLOW, "cpu",    "stat_overflow", HKV_EMIT_TOTAL)                        \
+    /* --- ble: radio dispatcher wake rate (issue #19) --------------------- */                    \
+    /* One increment per BleRadioTask iteration, i.e. per wsfOsDispatcher()   */                   \
+    /* return. Reported on the `cpu` line as `ble_wake_ps` rather than on a   */                   \
+    /* subsystem of its own: a new row would break the                        */                   \
+    /* `1000 % HKV_REPORT_LINE_COUNT == 0` assert below, and wake rate is only */                  \
+    /* ever read ALONGSIDE cpu util anyway.                                    */                  \
+    /*                                                                         */                  \
+    /* HOW TO READ IT. Divide by the packet rate (txecg/txppg `deliv_ps` plus  */                  \
+    /* the CPU slot) to get wakes per useful packet. Measured baseline before  */                  \
+    /* issue #19: 205 wakes/s for ~24 packets/s = 8.5 wakes per packet,        */                  \
+    /* against 0 wakes/s while advertising. Anything well above ~2 is the      */                  \
+    /* dispatcher being woken by something that had nothing to send.           */                  \
+    /* On the two boards with no EM9305 radio there is no dispatcher task, so  */                  \
+    /* this stays 0 forever and `ble_hwm` is absent from the line entirely.    */                  \
+    X(HKV_CNT_BLE_WAKE,          "cpu",    "ble_wake",     HKV_EMIT_DELTA)
 /* clang-format on */
 
 #define HKV_COUNTER_ENUM_ROW(id, sub, key, policy) id,
