@@ -5,6 +5,13 @@ project(heartkit-vitals-demo LANGUAGES C CXX ASM)
 
 set(NSX_BOARD "apollo510b_evb" CACHE STRING "Target board")
 
+# Reported verbatim in the HKV boot line so a captured SWO log is
+# self-describing. Deliberately NOT derived from a git describe here: that
+# would make the firmware identity depend on the state of the working tree at
+# configure time and silently relabel a dirty build. A release build is
+# expected to pass -DHKV_FW_VERSION=<tag>; anything else is honestly "dev".
+set(HKV_FW_VERSION "dev" CACHE STRING "Firmware version reported in the HKV boot line")
+
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/nsx/modules.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/nsx/nsx_app_bootstrap.cmake)
 
@@ -25,6 +32,7 @@ nsx_bootstrap_app(
 
 add_executable(heartkit-vitals-demo
     src/main.cc
+    src/obs.c
     src/sensor.c
     src/store.c
     src/metrics.c
@@ -53,6 +61,29 @@ endif()
 
 target_include_directories(heartkit-vitals-demo PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/src
+)
+
+# Board name comes from the CMake variable that actually selected the build,
+# not from an SoC preprocessor macro guessed in C -- the boot line should not
+# be able to disagree with the build it came from.
+#
+# Both strings land unescaped in the boot line, whose fields are separated by
+# spaces and whose records are separated by `|`. A value containing either
+# breaks the format for a whitespace-splitting parser: -DHKV_FW_VERSION="1.2
+# rc1" emits `fw=1.2 rc1 board=...` and silently shifts every later field by
+# one. HKV_FW_VERSION is externally supplied, so validate rather than trust.
+foreach(hkv_ident_var HKV_FW_VERSION NSX_BOARD)
+    if("${${hkv_ident_var}}" MATCHES "[ 	|]")
+        message(FATAL_ERROR
+            "${hkv_ident_var}='${${hkv_ident_var}}' contains a space, tab or '|'. "
+            "It is emitted verbatim into the HKV boot line, where those characters "
+            "are field and record separators, so it would corrupt the line format.")
+    endif()
+endforeach()
+
+target_compile_definitions(heartkit-vitals-demo PRIVATE
+    HKV_BOARD_NAME="${NSX_BOARD}"
+    HKV_FW_VERSION="${HKV_FW_VERSION}"
 )
 
 target_link_libraries(heartkit-vitals-demo PRIVATE

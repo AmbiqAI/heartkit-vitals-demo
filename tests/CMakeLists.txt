@@ -24,10 +24,16 @@ set(HKV_TEST_FLAGS -Wall -Wextra -Werror -g ${HKV_SAN_FLAGS})
 enable_testing()
 
 # Unit under test. Compiled per test binary so each test gets a clean copy.
+#
+# Linking ringbuffer.c into every test is harmless for the ones that do not
+# call it (test_obs_format exercises the header-only src/obs_fmt.h, which is
+# deliberately dependency-free so it CAN be tested on the host -- the rest of
+# src/obs.h needs FreeRTOS and nsx and cannot).
 set(HKV_TEST_SOURCES
     test_ringbuffer.c
     test_ringbuffer_overwrite.c
     test_ringbuffer_model.c
+    test_obs_format.c
 )
 
 foreach(test_src ${HKV_TEST_SOURCES})

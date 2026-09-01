@@ -97,9 +97,26 @@ ecg_physiokit_segmentation_inference(float32_t *data, uint16_t *segMask, uint32_
         segMask[i] = segMask[i] > 0 ? ECG_SEG_QRS : ECG_SEG_NONE;
         segMask[i] |= ((qosMask & SIG_MASK_QOS_MASK) << SIG_MASK_QOS_OFFSET);
     }
+    /* Gated to match ecg_arrhythmia.cc, and not merely for volume.
+     *
+     * This is the DSP segmentation path (SegmentationModeDsp, selectable over
+     * UIO at runtime), and it runs once per ~2 s window on EcgProcessTask. It
+     * was emitting 1 + numPeaks raw nsx_printf lines per window in steady
+     * state -- not a bring-up or error path. Those calls share am_util_stdio's
+     * single file-static g_prfbuf with the serialized HKV report lines (see
+     * src/obs.h) and are NOT covered by its lock, so in DSP mode they
+     * reproduce exactly the interleaved-buffer corruption that issue #11
+     * exists to remove.
+     *
+     * The mask write below is real work and stays unconditional; only the
+     * prints are gated. */
+#if EN_MODEL_VERBOSE_LOGS
     nsx_printf("ECG SEG PK numPeaks: %d\n", numPeaks);
+#endif
     for (size_t i = 0; i < numPeaks; i++) {
+#if EN_MODEL_VERBOSE_LOGS
         nsx_printf("ECG SEG PK %d: %d\n", i, peaksMetrics[i]);
+#endif
         segMask[peaksMetrics[i]] |= (ECG_FID_PEAK_QRS << ECG_MASK_FID_PEAK_OFFSET);
     }
     // ecg_segmentation_extract_fiducials(segMask, data);
