@@ -481,9 +481,22 @@ extern "C" {
  * With the earlier 32-tick window (1.64 blocks) some windows caught one trough
  * and some caught two, so the measured minimum alternated by that same 10 and
  * the servo's rate term differentiated the artifact: measured trough
- * alternating 13<->23 and budget slamming 0<->10 every window. At 64 ticks
- * (3.3 blocks) every window contains at least three troughs, so the minimum is
- * consistently the bottom of the alternation and is stable to a sample or two.
+ * alternating 13<->23 and budget slamming 0<->10 every window.
+ *
+ * HONEST RESULT: widening to 64 ticks did NOT fix that. Measured after the
+ * change, the budget spread WIDENED to 0..31 and the trough to 3..34. The
+ * aliasing analysis above is sound as far as it goes, but it was not the whole
+ * cause, and 64 ticks is 3.28 block periods -- still not an integer multiple,
+ * so the count and phase of the troughs captured per window keep changing. A
+ * fixed-length window cannot be an integer multiple of a block period set by
+ * an independent, drifting producer clock. See the RESIDUAL BEHAVIOUR block at
+ * tio_tx_group_servo() in main.cc for the measured distributions, why it is
+ * shipped anyway, and what to investigate instead. Do not assume this constant
+ * solved the dither.
+ *
+ * The window is nonetheless kept at 64 rather than reverted to 32, because the
+ * larger window came with the corrected four-term peak bound and both variants
+ * meet acceptance identically -- safety margin over a tighter-looking counter.
  *
  * The cost is convergence speed: one budget step per window is 1/6.4 s, and
  * cold start takes roughly 8 windows (~50 s). That is the right trade -- the
@@ -510,7 +523,15 @@ extern "C" {
  * anti-windup clamp: a stalled producer parks the budget here-or-zero rather
  * than accumulating a debt it would later spend as a burst. Reaching this
  * ceiling in steady state means drift exceeds what the servo can correct and
- * the trim will start absorbing the remainder. */
+ * the trim will start absorbing the remainder.
+ *
+ * MEASURED 2026-09-01: the budget was observed at 31 -- one below this cap --
+ * on 13 lines of a 107 s settled ECG window, at ~2.4% producer drift. It is
+ * not pinned there, but it does reach it intermittently as part of the dither
+ * documented at tio_tx_group_servo(). If you find it sitting AT the cap, know
+ * that it was already touching 31 at normal drift, so the cap is probably not
+ * the problem; and note that this clamp is what keeps the budget from becoming
+ * a burst, so raising it is not automatically the right response. */
 #define TIO_TX_SERVO_MAX_BUDGET (32)
 
 /* Largest packet either signal slot can emit -- sizes the sender stack buffers

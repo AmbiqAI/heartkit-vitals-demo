@@ -881,37 +881,79 @@ tio_tx_group_avail(const tio_tx_group_t *group)
  *
  * STABILITY, which matters more here than convergence speed:
  *  - The error signal is the per-window MINIMUM, and the window is asserted to
- *    span at least one producer block. So the servo sees the trough, not the
- *    2 s sawtooth whose 200-sample swing would otherwise swamp the ~2/s drift
- *    it is trying to measure.
+ *    span at least three producer blocks. So the servo sees the trough, not
+ *    the 2 s sawtooth whose 200-sample swing would otherwise swamp the ~2/s
+ *    drift it is trying to measure.
  *  - The budget is clamped to [0, TIO_TX_SERVO_MAX_BUDGET], so there is no
  *    windup: a producer that stops entirely parks the budget at 0 rather than
  *    accumulating a debt to spend later as a burst.
- *  - Convergence is monotone from below, so the trough approaches target
- *    without overshooting into the trim.
- *  - It settles from both directions. Producer fast: trough rises, budget
+ *  - It responds from both directions. Producer fast: trough rises, budget
  *    rises, extra draining. Producer slow: trough falls, budget falls to 0 and
  *    the pump self-throttles by skipping, which is the correct response since
  *    samples cannot be manufactured.
  *
- * RESIDUAL BEHAVIOUR, measured and accepted. The trough does not sit exactly
- * on target and the budget does not sit exactly still:
+ * Those are the properties the law was designed for, and they hold. What does
+ * NOT hold is convergence to a stable operating point -- an earlier version of
+ * this comment claimed a monotone approach to target, and hardware disproved
+ * it. See RESIDUAL BEHAVIOUR below before trusting any stability claim here.
  *
- *  - The trough settles ABOVE target, by up to PULL_DIV, because the position
- *    term's integer division has no restoring force inside its deadband.
- *  - It alternates a further ~samplesPerPkt because the producer block period
- *    is a non-integer number of pump ticks; the window is sized so the
- *    measured minimum is stable despite it, but the underlying occupancy still
- *    alternates.
- *  - The budget therefore dithers by a sample or two window to window.
+ * RESIDUAL BEHAVIOUR: THE SERVO DOES NOT CONVERGE. Read this before tuning it.
  *
- * None of this is a defect to chase. Both bounds are accounted for in the peak
- * static_assert above, so the trim cannot fire; the trough stays a full packet
- * clear of empty, so emission stays at 10 pkt/s; and the dither is a fraction
- * of a sample per second of rate error. An earlier 32-tick window turned this
- * same quantisation into a genuine 0<->10 budget slam -- see
- * TIO_TX_SERVO_WINDOW_TICKS for why the window length is the fix and damping
- * the gain would have been treating the symptom. */
+ * It holds the stream inside its acceptance envelope, but it does not settle
+ * on a stable budget. Measured on hardware 2026-09-01, ECG, over a 107 s
+ * settled window (judged after the ~50 s convergence time):
+ *
+ *   bgt   0 x13, 7 x6, 9 x4, 10 x31, 13 x7, 19 x7, 20 x26, 31 x13
+ *         -- a 0..31 spread clustering near multiples of samplesPerPkt,
+ *            not the stable ~15 the design intends.
+ *   trgh  3..34 spread, against a target of 20.
+ *
+ * WHY IT IS SHIPPED ANYWAY. Every quantity that matters is comfortably inside
+ * bounds, and the dither is a fraction of a sample per second of rate error
+ * that never accumulates:
+ *
+ *   trim  0/s on every line -- no sample is ever discarded.
+ *   pkt   mean 9.96/s, no interval below 9 -- no emission gap.
+ *   occ   observed peak ~209 against H = 250, ~41 samples of real margin
+ *         (the four-term static_assert above bounds the theoretical worst
+ *         case at 238, and the observed peak sits well under even that).
+ *
+ * The controlled variable misbehaving while every controlled OUTCOME is in
+ * spec means the loop is sloppy, not unsafe. It was not worth further tuning
+ * passes against a bench.
+ *
+ * WHAT DID NOT FIX IT, so nobody re-derives a false premise. The block-period
+ * aliasing diagnosis at TIO_TX_SERVO_WINDOW_TICKS is real -- the block period
+ * genuinely is a non-integer 19.53 pump ticks and the trough genuinely does
+ * alternate by a packet -- but widening the window from 32 to 64 ticks did NOT
+ * remove the dither. It WIDENED it: the earlier 32-tick window gave bgt 0<->10
+ * and trgh 13<->23, tighter than the 0..31 and 3..34 above. So aliasing is at
+ * most part of the cause. The likely reason widening failed is that 64 ticks
+ * is 3.28 block periods -- still not an integer multiple, so the number of
+ * troughs captured per window and their phases keep changing, and the
+ * per-window minimum keeps stepping by packet-sized amounts. A fixed-length
+ * window cannot be an integer multiple of a block period that is set by an
+ * independent, drifting producer clock.
+ *
+ * WHAT TO INVESTIGATE NEXT, if a future maintainer wants real convergence: do
+ * not tune the gains -- make the MEASUREMENT synchronous with the producer.
+ * Detect the block push (an occupancy jump of ~block samples) and latch the
+ * trough once per block rather than once per fixed window. That removes the
+ * phase beat at its source rather than averaging over it, and it makes the
+ * rate term a true per-block imbalance. It is a structural change to the error
+ * signal, which is why it was out of scope here.
+ *
+ * ALSO RECORDED: bgt was observed at 31 against TIO_TX_SERVO_MAX_BUDGET of 32
+ * on 13 of those lines. It is not pinned, but it is close, so if someone later
+ * finds it sitting at the cap they should know it was already reaching 31
+ * intermittently at ~2.4% producer drift -- and that the cap is what stops the
+ * budget becoming a burst, so raising it is not automatically the right move.
+ *
+ * Two smaller, understood contributors to the offset, both benign: the trough
+ * settles ABOVE target by up to PULL_DIV because the position term's integer
+ * division has no restoring force inside its deadband, and the underlying
+ * occupancy alternates by ~samplesPerPkt from the block quantisation. Both are
+ * carried in the peak static_assert above. */
 static void
 tio_tx_group_servo(tio_tx_group_t *group)
 {
