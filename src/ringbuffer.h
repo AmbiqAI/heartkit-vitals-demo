@@ -21,8 +21,9 @@
  * "empty" (head == tail). The storage index is the value folded back into
  * `[0, size)`. Treat `head`/`tail` as opaque: only zero-initialise them.
  *
- * Constraint: `size` must be <= UINT32_MAX/4 so that index arithmetic cannot
- * overflow. Every buffer in this project is orders of magnitude below that.
+ * Constraint: `size` must be <= RINGBUFFER_MAX_SIZE so that index arithmetic
+ * cannot overflow. Every buffer in this project is orders of magnitude below
+ * that.
  *
  * ## Concurrency: single-producer / single-consumer, lock free
  *
@@ -35,6 +36,11 @@
  * `ringbuffer_len()`/`ringbuffer_space()` only read both indices, so a stale
  * read is conservative: the producer may under-estimate free space and the
  * consumer may under-estimate available data, never the reverse.
+ *
+ * If the invariant is nevertheless violated (e.g. a `ringbuffer_flush()`
+ * racing a `ringbuffer_seek()`/`ringbuffer_pop()` leaves tail past head),
+ * `ringbuffer_len()` clamps to `size` so every operation fails CLOSED: the
+ * ring reads as full or empty and no write can run past the backing array.
  *
  * There are no locks or critical sections by design: `ringbuffer_push()` is
  * called from the AS7058 interrupt service path, which has a bounded service
@@ -54,6 +60,16 @@ extern "C" {
 
 #include <stdint.h>
 #include <stddef.h>
+
+/**
+ * @brief Largest legal value for rb_config_t::size.
+ *
+ * Index arithmetic works in [0, 2*size) and transiently evaluates up to
+ * 3*size, so size must stay below UINT32_MAX/3. UINT32_MAX/4 is the safer
+ * round bound. Declarations should static_assert their size against this,
+ * e.g. `_Static_assert(MY_BUF_LEN <= RINGBUFFER_MAX_SIZE, "ring too large");`
+ */
+#define RINGBUFFER_MAX_SIZE (UINT32_MAX / 4u)
 
 typedef struct {
     void *buffer;    /**< Backing storage, must hold `size` elements of `dlen` bytes */

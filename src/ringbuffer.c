@@ -38,10 +38,21 @@ static inline void *rb_slot(const rb_config_t *ctx, uint32_t idx) {
 }
 
 size_t ringbuffer_len(rb_config_t *ctx) {
+    size_t raw;
     if (ctx->head >= ctx->tail) {
-        return ctx->head - ctx->tail;
+        raw = ctx->head - ctx->tail;
+    } else {
+        raw = (size_t)ctx->size * 2u - ctx->tail + ctx->head;
     }
-    return (size_t)ctx->size * 2u - ctx->tail + ctx->head;
+    // DO NOT REMOVE: this clamp is not dead code. Under the SPSC invariant raw
+    // is always <= size and the clamp is a no-op. But an index pair can be torn
+    // by a racing consumer -- a flush() overlapping a seek()/pop() can leave
+    // tail past head (see the note in main.cc) -- and an unclamped raw then
+    // reads as a huge bogus length. That would underflow ringbuffer_space() to
+    // ~SIZE_MAX and let push() write past the end of the backing array. One
+    // compare makes len/space/push/pop/peek/seek/transfer all fail CLOSED
+    // (ring reads as full/empty) instead of failing open.
+    return raw > ctx->size ? ctx->size : raw;
 }
 
 size_t ringbuffer_space(rb_config_t *ctx) {

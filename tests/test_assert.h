@@ -2,8 +2,10 @@
  * @file test_assert.h
  * @brief Minimal host-test assertion macros (no framework, no dependencies).
  *
- * Each test file defines its own main() and returns TEST_RESULT(), which is
- * the number of failed checks. ctest treats a non-zero exit code as failure.
+ * Each test file defines its own main() and returns TEST_RESULT(). The failure
+ * COUNT is printed, but the exit status is only 0 or 1: an exit status is
+ * truncated to 8 bits, so returning the raw count would make exactly 256
+ * failures look like success.
  */
 #ifndef HKV_TEST_ASSERT_H
 #define HKV_TEST_ASSERT_H
@@ -47,6 +49,6 @@ static const char *g_test_name = "<none>";
     } while (0)
 
 #define TEST_RESULT()                                                                                                  \
-    (fprintf(stderr, "%s: %d check failure(s)\n", __FILE__, g_test_failures), g_test_failures)
+    (fprintf(stderr, "%s: %d check failure(s)\n", __FILE__, g_test_failures), g_test_failures ? 1 : 0)
 
 #endif // HKV_TEST_ASSERT_H

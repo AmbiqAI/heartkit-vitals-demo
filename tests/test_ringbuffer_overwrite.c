@@ -124,10 +124,14 @@ static void test_push_overwrite_null_evicted(void) {
     CHECK_MEM(out, want, sizeof(want));
 }
 
-/* Sustained produce/consume across many wraps. The chunk size (3) is coprime
- * with both size (8) and the index domain (16), so this walks every index
- * alignment. Under the old implementation the ring silently emptied itself
- * once head lapped tail; here the FIFO order must hold indefinitely. */
+/* Walks every index alignment. The chunk size (3) is coprime with both the
+ * size (8) and the index domain (16), so head/tail land on every residue and
+ * the [0, 2*size) wrap arithmetic gets exercised at each one.
+ *
+ * Scope note: occupancy never exceeds 3 of 8 here, so the ring never fills and
+ * this does NOT exercise the lapping bug -- it passes against the old
+ * implementation too. It is index-arithmetic coverage only. High-occupancy
+ * behaviour is covered by test_sustained_high_occupancy() below. */
 static void test_sustained_wrap_preserves_fifo_order(void) {
     TEST_CASE("sustained_wrap_preserves_fifo_order");
     test_ring_t r;
@@ -183,6 +187,111 @@ static void test_stalled_consumer_reports_loss(void) {
     CHECK_MEM(out, want, sizeof(want));
 }
 
+/* Sustained operation AT capacity, which is where the old implementation
+ * broke. Phase 1 pushes 5 and pops 3 so occupancy ratchets up to full and the
+ * producer starts taking real short writes; phase 2 then runs balanced 3/3
+ * traffic while the ring stays saturated. Throughout, whatever the ring
+ * accepted must come back out in FIFO order with nothing skipped or
+ * duplicated -- the old code silently discarded the entire contents once head
+ * lapped tail. */
+static void test_sustained_high_occupancy(void) {
+    TEST_CASE("sustained_high_occupancy");
+    test_ring_t r;
+    int32_t chunk[5];
+    int32_t out[5];
+    /* Shadow FIFO of exactly what the ring accepted. Short writes create gaps
+     * in the value stream, so the expected output is NOT contiguous and has to
+     * be modelled rather than computed. */
+    int32_t expect[RB_SIZE];
+    size_t expect_count = 0;
+    int32_t next_write = 0;
+    size_t total_offered = 0;
+    size_t total_accepted = 0;
+    size_t total_read = 0;
+    int saw_short_write = 0;
+    int saw_full = 0;
+    ring_init(&r);
+
+#define SHADOW_PUSH(src, n)                                                                                            \
+    do {                                                                                                               \
+        for (size_t si = 0; si < (n); si++) {                                                                          \
+            expect[expect_count++] = (src)[si];                                                                        \
+        }                                                                                                              \
+    } while (0)
+
+#define SHADOW_POP(got, n)                                                                                             \
+    do {                                                                                                               \
+        CHECK(expect_count >= (n));                                                                                    \
+        for (size_t si = 0; si < (n); si++) {                                                                          \
+            CHECK_EQ((got)[si], expect[si]);                                                                           \
+        }                                                                                                              \
+        memmove(expect, expect + (n), (expect_count - (n)) * sizeof(int32_t));                                         \
+        expect_count -= (n);                                                                                           \
+    } while (0)
+
+    /* Phase 1: producer outruns consumer, occupancy ratchets up to full. */
+    for (int iter = 0; iter < 20; iter++) {
+        fill_seq(chunk, next_write, 5);
+        size_t pushed = ringbuffer_push(&r.rb, chunk, 5);
+        if (pushed < 5) {
+            saw_short_write = 1;
+        }
+        SHADOW_PUSH(chunk, pushed);
+        total_offered += 5;
+        total_accepted += pushed;
+        next_write += 5;
+        CHECK(ringbuffer_len(&r.rb) <= RB_SIZE);
+        CHECK_EQ(ringbuffer_len(&r.rb), expect_count);
+        CHECK_EQ(ringbuffer_len(&r.rb) + ringbuffer_space(&r.rb), RB_SIZE);
+        if (ringbuffer_len(&r.rb) == RB_SIZE) {
+            saw_full = 1; /* saturation happens mid-cycle, right after the push */
+        }
+
+        size_t popped = ringbuffer_pop(&r.rb, out, 3);
+        SHADOW_POP(out, popped);
+        total_read += popped;
+        CHECK_EQ(ringbuffer_len(&r.rb), expect_count);
+    }
+    CHECK(saw_short_write); /* the whole point: loss is reportable, not silent */
+    CHECK(saw_full);        /* and the ring genuinely reached capacity */
+
+    /* Phase 2: balanced 3-in/3-out traffic at the high-occupancy fixed point
+     * the ratchet settled on. Occupancy oscillates just below capacity, so the
+     * head/tail pair keeps crossing the storage wrap under load. */
+    for (int iter = 0; iter < 50; iter++) {
+        size_t popped = ringbuffer_pop(&r.rb, out, 3);
+        CHECK_EQ(popped, 3);
+        SHADOW_POP(out, popped);
+        total_read += popped;
+
+        fill_seq(chunk, next_write, 3);
+        size_t pushed = ringbuffer_push(&r.rb, chunk, 3);
+        CHECK_EQ(pushed, 3);
+        SHADOW_PUSH(chunk, pushed);
+        total_offered += 3;
+        total_accepted += pushed;
+        next_write += 3;
+        CHECK_EQ(ringbuffer_len(&r.rb), expect_count);
+        CHECK(ringbuffer_len(&r.rb) <= RB_SIZE);
+        CHECK_EQ(ringbuffer_len(&r.rb) + ringbuffer_space(&r.rb), RB_SIZE);
+    }
+
+    /* Drain and confirm the ring gave back exactly what it accepted. */
+    while (ringbuffer_len(&r.rb) > 0) {
+        size_t popped = ringbuffer_pop(&r.rb, out, 3);
+        CHECK(popped > 0);
+        SHADOW_POP(out, popped);
+        total_read += popped;
+    }
+    CHECK_EQ(expect_count, 0);
+    CHECK_EQ(ringbuffer_len(&r.rb), 0);
+    CHECK_EQ(total_read, total_accepted);
+    CHECK(total_accepted < total_offered); /* some was refused, and we know how much */
+
+#undef SHADOW_PUSH
+#undef SHADOW_POP
+}
+
 int main(void) {
     test_capacity_equals_size();
     test_push_overwrite_no_eviction_when_space();
@@ -190,6 +299,7 @@ int main(void) {
     test_push_overwrite_longer_than_capacity();
     test_push_overwrite_null_evicted();
     test_sustained_wrap_preserves_fifo_order();
+    test_sustained_high_occupancy();
     test_stalled_consumer_reports_loss();
     return TEST_RESULT();
 }
