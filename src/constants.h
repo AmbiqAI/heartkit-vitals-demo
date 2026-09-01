@@ -392,18 +392,20 @@ extern "C" {
  * the invariant -- it only fails in the other direction. Hardware run
  * 2026-09-01 measured the PPG producer ~1.1% faster than a fixed
  * 10-samples-per-100-ms pump: occupancy pinned at H and the trim discarded
- * ~1.1 samples/s permanently, forever, in a perfectly healthy system. ECG,
- * which happens to sit on the slow side of the same comparison, trimmed zero.
+ * ~1.1 samples/s permanently, forever, in a perfectly healthy system. A second
+ * capture found ECG doing the same at ~1.8 samples/s and ~2.4% fast.
  *
- * So the pump tracks the producer instead of assuming it: above a setpoint it
- * pops one extra sample per tick (TIO_TX_DRIFT_CATCHUP_SAMPLES) to drain
+ * So the pump tracks the producer instead of assuming it: above the setpoint
+ * it pops one extra sample per tick (TIO_TX_DRIFT_CATCHUP_SAMPLES) to drain
  * accumulated drift, and below the packet size it emits nothing at all. Both
  * corrections are bounded by what the ring holds, so neither can push the
- * average above the producer's true rate. The transient excess is bounded by
- * H - setpoint = one packet = 100 ms of signal, drained over ~1 s, which is
- * inside the 250 ms jitter budget and far inside the host's 500 ms playout
- * delay. Permanent loss is the thing worth avoiding; 100 ms of transient
- * latency is not. */
+ * average above the producer's true rate.
+ *
+ * The cost of the skip is jitter, not loss: no sample is discarded, the next
+ * packet simply arrives one pump interval later. That is absorbed by the
+ * host's 500 ms playout buffer and produces no waveform discontinuity, which
+ * is the trade this whole file exists to make -- permanent loss is what is
+ * worth avoiding, a bounded arrival delay is not. */
 
 /* Pump period for the ECG and PPG signal slots. At configTICK_RATE_HZ = 1000
  * this is exactly 100 ticks, so pdMS_TO_TICKS() is exact and the pump can be
@@ -432,47 +434,56 @@ extern "C" {
 #define TIO_ECG_SAMPLES_PER_PKT (10)
 #define TIO_PPG_SAMPLES_PER_PKT (10)
 
-/* Drift drain. When TX occupancy sits above its setpoint (H minus one packet)
- * the producer is running fractionally faster than the pump's nominal
+/* Drift drain. When TX occupancy sits above its setpoint (the target trough,
+ * below) the producer is running fractionally faster than the pump's nominal
  * 10-per-100-ms, so the pump pops this many extra samples per tick until
  * occupancy falls back. One extra sample is a 10% drain rate against drift
- * measured in tenths of a percent, so it clears in about a second and then
- * stops; the setpoint sits a full packet below H, so the drain always engages
- * before the trim would and steady-state loss goes to zero in BOTH drift
- * directions (the slow direction is already handled by skipping a tick when
- * fewer than a full packet is available).
+ * measured in single percent, so it clears quickly and then stops; the
+ * setpoint is low enough that the drain engages across most of the decay
+ * rather than at the last moment, and steady-state loss goes to zero in BOTH
+ * drift directions (the slow direction is already handled by skipping a tick
+ * when fewer than a full packet is available).
  *
  * Packets are therefore 10 or 11 samples, i.e. 60 or 66 B of payload. The
  * TimedSignal header carries the length and the host reads dlen, so variable
  * packet size is fine on the wire. */
 #define TIO_TX_DRIFT_CATCHUP_SAMPLES (1)
 
-/* KNOWN LIMITATION, measured on hardware 2026-09-01 and not yet fixed.
+/* Drift-drain SETPOINT: the TX occupancy the pump aims to sit at between
+ * producer blocks, i.e. the target steady-state trough. The drain pops the
+ * extra sample on any tick whose occupancy is above this.
  *
- * The drain's realised capacity depends on the PRODUCER'S SHAPE, not just on
- * this constant. It can only act on pump ticks where occupancy sits above the
- * setpoint, so per producer block the number of such ticks is roughly
+ * Derived from the trough, NOT from H. The hard constraint is that a full
+ * structural block must still fit underneath H when it lands on the trough,
+ * otherwise the trim fires on the very next tick and discards fresh signal:
  *
- *     (peak_occupancy - setpoint) / samplesPerPkt
+ *     setpoint + block <= H
  *
- * PPG has a continuous producer: occupancy hovers at the setpoint, nearly
- * every tick qualifies, capacity ~10 samples/s against ~1.1 samples/s of
- * drift. Measured trim went to 0, as designed.
+ * Since H is itself block + samplesPerPkt + slack, that resolves to
+ * setpoint <= samplesPerPkt + slack = 50 for both slots, and taking the
+ * equality makes the setpoint exactly the non-block part of H. Asserted in
+ * main.cc for both slots so a future window-size change fails the build.
  *
- * ECG has a block producer: one atomic 200-sample push per 2 s, after which
- * occupancy decays by samplesPerPkt per tick. Only about ONE tick per block
- * sits above the setpoint, so capacity is ~1 sample per 2 s = 0.5 samples/s --
- * against a measured producer excess of ~2.4 samples/s. The trim absorbs the
- * ~1.8 samples/s difference indefinitely, which is what the bench capture
- * shows. This is a drain CAPACITY limit, not a mis-tuned setpoint, and it is
- * not caused by the pump missing ticks (measured ECG pkt rate is ~10.06/s; a
- * starved pump would read below 10/s).
+ * Why this replaced a setpoint derived as H - samplesPerPkt (240 for ECG):
+ * hardware 2026-09-01 measured ECG trimming ~1.8 samples/s indefinitely. The
+ * drain can only act on ticks whose occupancy exceeds the setpoint, and ECG's
+ * producer pushes one atomic 200-sample block per 2 s, after which occupancy
+ * decays ~samplesPerPkt per tick. With the setpoint just under H, only about
+ * ONE tick per block qualified -- ~0.5 samples/s of capacity against a
+ * measured ~2.4 samples/s producer excess, so the trim absorbed the rest
+ * forever. PPG never showed it because its continuous producer leaves
+ * occupancy hovering, so nearly every tick qualifies. Same code, opposite
+ * outcome, entirely explained by producer shape.
  *
- * Do not "fix" this by raising H: peak occupancy is already H - pkt + block =
- * 440 against ECG_TX_BUF_LEN 500. The real options are to give the drain more
- * qualifying ticks (a lower ECG setpoint) or more per-tick authority (a larger
- * catch-up for block producers). Size either from the occ/drain telemetry in
- * ReportTask rather than by guessing -- that is what it was added for. */
+ * At a setpoint of 50 the drain qualifies across essentially the whole decay
+ * (~14 ticks per ECG block instead of 1), which is ~7 samples/s of capacity
+ * against the 2.4 samples/s needed. Deliberately over-provisioned: the excess
+ * is self-limiting, because once occupancy falls below the setpoint the drain
+ * stops, and if the ring runs dry the pump skips the tick rather than emitting
+ * a short packet. Larger drift settles at a slightly higher trough instead of
+ * trimming, for any drift up to ~7%. */
+#define TIO_ECG_TX_SETPOINT (TIO_ECG_TX_HIGH_WATER - TIO_ECG_TX_BLOCK_SAMPLES)
+#define TIO_PPG_TX_SETPOINT (TIO_PPG_TX_HIGH_WATER - TIO_PPG_TX_BLOCK_SAMPLES)
 
 /* Largest packet either signal slot can emit -- sizes the sender stack buffers
  * and must account for the drift drain above, not just the nominal size. */

@@ -677,8 +677,8 @@ static volatile uint32_t g_tio_nodata[3] = {0};
 //      which is a small drift allowance rather than a hard zero.
 //   2. Emit AT MOST ONE packet, of TIO_*_SAMPLES_PER_PKT samples, plus
 //      TIO_TX_DRIFT_CATCHUP_SAMPLES more when occupancy is above the setpoint
-//      (H - samplesPerPkt). If a full packet is not available, emit nothing
-//      this tick rather than a short packet.
+//      (the target steady-state trough). If a full packet is not available,
+//      emit nothing this tick rather than a short packet.
 //
 //      The nominal count assumes the producer runs at exactly the pump's
 //      nominal rate; it does not. The two corrections -- skip a tick when
@@ -709,7 +709,8 @@ typedef struct {
     rb_config_t *rings[3];   /* parallel TX taps, must stay sample-aligned */
     uint8_t numRings;
     uint16_t highWater;      /* H, samples (constants.h) */
-    uint16_t samplesPerPkt;  /* fixed packet size, samples */
+    uint16_t samplesPerPkt;  /* nominal packet size, samples */
+    uint16_t setpoint;       /* target steady-state trough (constants.h) */
     volatile uint32_t trimmed;   /* samples discarded by trim-to-high-water */
     /* `pumped` counts ticks on which a full packet was assembled and handed to
      * the transport. `delivered` counts those the transport actually accepted.
@@ -751,12 +752,14 @@ static tio_tx_group_t g_ecgTxGroup = {{&rbEcgMaskTx, &rbEcgRawTx, &rbEcgDenTx},
                                       3,
                                       TIO_ECG_TX_HIGH_WATER,
                                       TIO_ECG_SAMPLES_PER_PKT,
+                                      TIO_ECG_TX_SETPOINT,
                                       0, 0, 0, 0, 0,
                                       TIO_OCC_MIN_INIT};
 static tio_tx_group_t g_ppgTxGroup = {{&rbPpg1Tx, &rbPpg2Tx, NULL},
                                       2,
                                       TIO_PPG_TX_HIGH_WATER,
                                       TIO_PPG_SAMPLES_PER_PKT,
+                                      TIO_PPG_TX_SETPOINT,
                                       0, 0, 0, 0, 0,
                                       TIO_OCC_MIN_INIT};
 
@@ -773,12 +776,20 @@ static_assert(TIO_ECG_TX_HIGH_WATER - TIO_ECG_SAMPLES_PER_PKT + TIO_ECG_TX_BLOCK
 static_assert(TIO_PPG_TX_HIGH_WATER - TIO_PPG_SAMPLES_PER_PKT + TIO_PPG_TX_BLOCK_SAMPLES <= PPG_TX_BUF_LEN,
               "PPG TX peak occupancy (H - pkt + block) exceeds ring capacity");
 
-/* The drift drain must engage strictly before the trim would, or it cannot
- * prevent the loss it exists to prevent. */
-static_assert(TIO_ECG_TX_HIGH_WATER - TIO_ECG_SAMPLES_PER_PKT > TIO_ECG_TX_BLOCK_SAMPLES,
-              "ECG drift-drain setpoint must sit above the structural block");
-static_assert(TIO_PPG_TX_HIGH_WATER - TIO_PPG_SAMPLES_PER_PKT > TIO_PPG_TX_BLOCK_SAMPLES,
-              "PPG drift-drain setpoint must sit above the structural block");
+/* The setpoint is the target steady-state trough, so a full structural block
+ * landing on it must still fit under H -- otherwise the trim fires on the very
+ * next tick and discards fresh signal. This replaces an earlier assert that
+ * required the setpoint to sit ABOVE the block, which had it backwards: that
+ * is what starved the ECG drain of qualifying ticks. */
+static_assert(TIO_ECG_TX_SETPOINT + TIO_ECG_TX_BLOCK_SAMPLES <= TIO_ECG_TX_HIGH_WATER,
+              "ECG setpoint + block must fit under H");
+static_assert(TIO_PPG_TX_SETPOINT + TIO_PPG_TX_BLOCK_SAMPLES <= TIO_PPG_TX_HIGH_WATER,
+              "PPG setpoint + block must fit under H");
+
+/* The trough must leave room for a whole packet, or the pump would skip on
+ * every tick that sits exactly at the setpoint. */
+static_assert(TIO_ECG_TX_SETPOINT > TIO_ECG_SAMPLES_PER_PKT, "ECG setpoint must exceed one packet");
+static_assert(TIO_PPG_TX_SETPOINT > TIO_PPG_SAMPLES_PER_PKT, "PPG setpoint must exceed one packet");
 
 /* Payload must stay within what the TileIO slot framing accepts (240 B was the
  * bound the pre-fix senders were written against). */
@@ -830,18 +841,20 @@ tio_tx_group_prepare(tio_tx_group_t *group)
     }
     /* Drift drain. Occupancy above the setpoint means the producer's true rate
      * is above the pump's nominal one; left alone, occupancy would climb to H
-     * and the trim would then discard the difference forever (measured on
-     * hardware as ~1.1 PPG samples/s, permanently). Popping one extra sample
-     * per tick drains it at ~10%, far faster than any plausible clock drift
-     * accumulates, so occupancy settles just below the setpoint and the trim
-     * never fires.
+     * and the trim would then discard the difference forever.
+     *
+     * The setpoint is the TARGET TROUGH (constants.h), sized so a full block
+     * still fits under H on top of it. Deriving it from H instead -- as this
+     * code first did -- left only one qualifying tick per ECG block and the
+     * drain could not keep up; see the setpoint derivation for the measured
+     * numbers.
      *
      * This cannot breach the 1x invariant: the pop comes out of a ring, so it
-     * can only return samples the producer already produced. The setpoint sits
-     * one full packet below H, so the drain always engages before the trim
-     * would, and the excess it works off is bounded by that one packet. */
+     * can only return samples the producer already produced. Over-draining is
+     * self-limiting -- the drain stops below the setpoint, and if the ring runs
+     * dry the pump skips the tick rather than emitting a short packet. */
     size_t numSamples = group->samplesPerPkt;
-    size_t setpoint = (size_t)(group->highWater - group->samplesPerPkt);
+    size_t setpoint = (size_t)group->setpoint;
     if (avail > setpoint) {
         numSamples = group->samplesPerPkt + TIO_TX_DRIFT_CATCHUP_SAMPLES;
         if (numSamples > avail) {
