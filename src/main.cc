@@ -721,12 +721,44 @@ typedef struct {
      * g_tio_enqueue_ok/g_tio_enqueue_fail and g_tio_usb_drop. */
     volatile uint32_t pumped;
     volatile uint32_t delivered;
+    /* Ticks on which the drift drain fired (popped the extra sample). This is
+     * the drain's REALISED capacity, which is not the same as its configured
+     * rate: the drain can only act on ticks where occupancy sits above the
+     * setpoint, so a producer that delivers one large atomic block gives it
+     * far fewer opportunities than a continuous producer does. Comparing this
+     * against the trim rate says directly whether the drain is keeping up. */
+    volatile uint32_t drained;
+    /* Occupancy watermarks, sampled pre-trim and pre-pop -- the true peak the
+     * producer created, including whatever the trim is about to discard.
+     * ReportTask resets them each interval so the log shows a progression
+     * rather than a lifetime extreme.
+     *
+     * For a block-structured producer like ECG, occMin IS the pre-block
+     * residual R: the sawtooth trough is the last pump tick before the next
+     * block lands. That is the quantity currently being inferred rather than
+     * measured, so it is the one worth having.
+     *
+     * Diagnostics, not control inputs. ReportTask's reset is a plain 32-bit
+     * store racing the pump's update; both are atomic on Cortex-M, so the
+     * worst case is one interval reporting a slightly narrow range. */
+    volatile uint32_t occMax;
+    volatile uint32_t occMin;
 } tio_tx_group_t;
 
-static tio_tx_group_t g_ecgTxGroup = {
-    {&rbEcgMaskTx, &rbEcgRawTx, &rbEcgDenTx}, 3, TIO_ECG_TX_HIGH_WATER, TIO_ECG_SAMPLES_PER_PKT, 0, 0, 0};
-static tio_tx_group_t g_ppgTxGroup = {
-    {&rbPpg1Tx, &rbPpg2Tx, NULL}, 2, TIO_PPG_TX_HIGH_WATER, TIO_PPG_SAMPLES_PER_PKT, 0, 0, 0};
+#define TIO_OCC_MIN_INIT (0xFFFFFFFFu)
+
+static tio_tx_group_t g_ecgTxGroup = {{&rbEcgMaskTx, &rbEcgRawTx, &rbEcgDenTx},
+                                      3,
+                                      TIO_ECG_TX_HIGH_WATER,
+                                      TIO_ECG_SAMPLES_PER_PKT,
+                                      0, 0, 0, 0, 0,
+                                      TIO_OCC_MIN_INIT};
+static tio_tx_group_t g_ppgTxGroup = {{&rbPpg1Tx, &rbPpg2Tx, NULL},
+                                      2,
+                                      TIO_PPG_TX_HIGH_WATER,
+                                      TIO_PPG_SAMPLES_PER_PKT,
+                                      0, 0, 0, 0, 0,
+                                      TIO_OCC_MIN_INIT};
 
 /* Peak ring occupancy is not H: the trim runs BEFORE the pop, so the producer
  * can land a full structural block on top of (H - samplesPerPkt) samples that
@@ -773,6 +805,14 @@ static size_t
 tio_tx_group_prepare(tio_tx_group_t *group)
 {
     size_t avail = tio_tx_group_avail(group);
+    /* Sample occupancy before the trim and before the pop, so the watermarks
+     * reflect what the producer actually created. */
+    if ((uint32_t)avail > group->occMax) {
+        group->occMax = (uint32_t)avail;
+    }
+    if ((uint32_t)avail < group->occMin) {
+        group->occMin = (uint32_t)avail;
+    }
     if (avail > group->highWater) {
         /* Discard the stale oldest samples, keep the newest H. One `drop`,
          * applied to every ring, so the group stays aligned across the trim. */
@@ -807,6 +847,7 @@ tio_tx_group_prepare(tio_tx_group_t *group)
         if (numSamples > avail) {
             numSamples = avail;
         }
+        group->drained++;
     }
     return numSamples;
 }
@@ -1761,25 +1802,60 @@ ReportTask(void *pvParameters)
          *                keeps occupancy off H; TIO_TX_TRIM_DRIFT_ALLOWANCE_SPS
          *                is only a backstop for judging a capture. Sustained
          *                non-zero trim is a bug, not a policy working.
+         *   drain     -- ticks on which the drift drain fired. This is its
+         *                REALISED capacity. A continuous producer (PPG) leaves
+         *                occupancy hovering at the setpoint, so nearly every
+         *                tick can drain. A block producer (ECG) creates a
+         *                sawtooth that decays ~samplesPerPkt per tick, so only
+         *                (peak - setpoint)/samplesPerPkt ticks per block sit
+         *                above the setpoint -- roughly ONE. If drain is
+         *                saturated at ~1 per producer block while trim is
+         *                non-zero, the drain is capacity-limited by the
+         *                producer's block structure, not mis-tuned.
+         *   occ       -- TX occupancy low..high per interval, sampled pre-trim
+         *                and pre-pop. For ECG the low value is the pre-block
+         *                residual R, i.e. how close the next atomic 200-sample
+         *                push will land to H.
          *   ppg_burst -- high-water mark of one PPG tee pass; must stay <=
          *                TIO_PPG_TX_BLOCK_SAMPLES or H is mis-derived.
          *   stage_err -- cumulative non-zero returns from ECG denoise /
          *                segment / metrics and PPG metrics. Any sustained
-         *                climb invalidates the waveform regardless of rate. */
+         *                climb invalidates the waveform regardless of rate.
+         *
+         * Split across two lines deliberately: SWO output from concurrent
+         * tasks interleaves and corrupts long lines (issue #11), so no single
+         * line should have to be trusted on its own. */
         {
             static uint32_t lastEcgPkts = 0, lastPpgPkts = 0, lastEcgTrim = 0, lastPpgTrim = 0;
-            static uint32_t lastEcgDeliv = 0, lastPpgDeliv = 0;
+            static uint32_t lastEcgDeliv = 0, lastPpgDeliv = 0, lastEcgDrain = 0, lastPpgDrain = 0;
             uint32_t ecgPkts = g_ecgTxGroup.pumped, ppgPkts = g_ppgTxGroup.pumped;
             uint32_t ecgTrim = g_ecgTxGroup.trimmed, ppgTrim = g_ppgTxGroup.trimmed;
             uint32_t ecgDeliv = g_ecgTxGroup.delivered, ppgDeliv = g_ppgTxGroup.delivered;
-            nsx_printf("[tio-emit] ecg(pkt_rate=%lu/s deliv=%lu/s trim=%lu/s trim_tot=%lu) "
-                       "ppg(pkt_rate=%lu/s deliv=%lu/s trim=%lu/s trim_tot=%lu) ppg_burst=%lu "
-                       "stage_err(ecg den=%lu seg=%lu met=%lu, ppg met=%lu)\n",
+            uint32_t ecgDrain = g_ecgTxGroup.drained, ppgDrain = g_ppgTxGroup.drained;
+            uint32_t ecgOccMin = g_ecgTxGroup.occMin, ecgOccMax = g_ecgTxGroup.occMax;
+            uint32_t ppgOccMin = g_ppgTxGroup.occMin, ppgOccMax = g_ppgTxGroup.occMax;
+            /* Reset the watermarks so the next interval reports afresh. */
+            g_ecgTxGroup.occMin = TIO_OCC_MIN_INIT;
+            g_ecgTxGroup.occMax = 0;
+            g_ppgTxGroup.occMin = TIO_OCC_MIN_INIT;
+            g_ppgTxGroup.occMax = 0;
+            if (ecgOccMin == TIO_OCC_MIN_INIT) {
+                ecgOccMin = 0;
+            }
+            if (ppgOccMin == TIO_OCC_MIN_INIT) {
+                ppgOccMin = 0;
+            }
+            nsx_printf("[tio-emit] ecg(pkt=%lu/s deliv=%lu/s trim=%lu/s drain=%lu/s occ=%lu..%lu) "
+                       "ppg(pkt=%lu/s deliv=%lu/s trim=%lu/s drain=%lu/s occ=%lu..%lu)\n",
                        (unsigned long)(ecgPkts - lastEcgPkts), (unsigned long)(ecgDeliv - lastEcgDeliv),
-                       (unsigned long)(ecgTrim - lastEcgTrim), (unsigned long)ecgTrim,
+                       (unsigned long)(ecgTrim - lastEcgTrim), (unsigned long)(ecgDrain - lastEcgDrain),
+                       (unsigned long)ecgOccMin, (unsigned long)ecgOccMax,
                        (unsigned long)(ppgPkts - lastPpgPkts), (unsigned long)(ppgDeliv - lastPpgDeliv),
-                       (unsigned long)(ppgTrim - lastPpgTrim), (unsigned long)ppgTrim,
-                       (unsigned long)g_ppg_tee_burst_max,
+                       (unsigned long)(ppgTrim - lastPpgTrim), (unsigned long)(ppgDrain - lastPpgDrain),
+                       (unsigned long)ppgOccMin, (unsigned long)ppgOccMax);
+            nsx_printf("[tio-health] trim_tot(ecg=%lu ppg=%lu) ppg_burst=%lu "
+                       "stage_err(den=%lu seg=%lu met=%lu ppgmet=%lu)\n",
+                       (unsigned long)ecgTrim, (unsigned long)ppgTrim, (unsigned long)g_ppg_tee_burst_max,
                        (unsigned long)g_stage_err[kStageErrEcgDenoise], (unsigned long)g_stage_err[kStageErrEcgSegment],
                        (unsigned long)g_stage_err[kStageErrEcgMetrics], (unsigned long)g_stage_err[kStageErrPpgMetrics]);
             lastEcgPkts = ecgPkts;
@@ -1788,6 +1864,8 @@ ReportTask(void *pvParameters)
             lastPpgTrim = ppgTrim;
             lastEcgDeliv = ecgDeliv;
             lastPpgDeliv = ppgDeliv;
+            lastEcgDrain = ecgDrain;
+            lastPpgDrain = ppgDrain;
         }
 #endif
 

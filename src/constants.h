@@ -447,6 +447,33 @@ extern "C" {
  * packet size is fine on the wire. */
 #define TIO_TX_DRIFT_CATCHUP_SAMPLES (1)
 
+/* KNOWN LIMITATION, measured on hardware 2026-09-01 and not yet fixed.
+ *
+ * The drain's realised capacity depends on the PRODUCER'S SHAPE, not just on
+ * this constant. It can only act on pump ticks where occupancy sits above the
+ * setpoint, so per producer block the number of such ticks is roughly
+ *
+ *     (peak_occupancy - setpoint) / samplesPerPkt
+ *
+ * PPG has a continuous producer: occupancy hovers at the setpoint, nearly
+ * every tick qualifies, capacity ~10 samples/s against ~1.1 samples/s of
+ * drift. Measured trim went to 0, as designed.
+ *
+ * ECG has a block producer: one atomic 200-sample push per 2 s, after which
+ * occupancy decays by samplesPerPkt per tick. Only about ONE tick per block
+ * sits above the setpoint, so capacity is ~1 sample per 2 s = 0.5 samples/s --
+ * against a measured producer excess of ~2.4 samples/s. The trim absorbs the
+ * ~1.8 samples/s difference indefinitely, which is what the bench capture
+ * shows. This is a drain CAPACITY limit, not a mis-tuned setpoint, and it is
+ * not caused by the pump missing ticks (measured ECG pkt rate is ~10.06/s; a
+ * starved pump would read below 10/s).
+ *
+ * Do not "fix" this by raising H: peak occupancy is already H - pkt + block =
+ * 440 against ECG_TX_BUF_LEN 500. The real options are to give the drain more
+ * qualifying ticks (a lower ECG setpoint) or more per-tick authority (a larger
+ * catch-up for block producers). Size either from the occ/drain telemetry in
+ * ReportTask rather than by guessing -- that is what it was added for. */
+
 /* Largest packet either signal slot can emit -- sizes the sender stack buffers
  * and must account for the drift drain above, not just the nominal size. */
 #define TIO_ECG_MAX_SAMPLES_PER_PKT (TIO_ECG_SAMPLES_PER_PKT + TIO_TX_DRIFT_CATCHUP_SAMPLES)
