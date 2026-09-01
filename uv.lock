@@ -11,7 +11,7 @@ dependencies = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "neuralspotx", specifier = ">=0.7.4" }]
+requires-dist = [{ name = "neuralspotx", specifier = ">=0.7.17" }]
 
 [[package]]
 name = "jinja2"
@@ -101,15 +101,15 @@ wheels = [
 
 [[package]]
 name = "neuralspotx"
-version = "0.7.8"
+version = "0.7.17"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "jinja2" },
     { name = "pyyaml" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ce/b3/d077e2e99ffe44b4f35cd289eae1880271631a66a2655896664171f9be80/neuralspotx-0.7.8.tar.gz", hash = "sha256:9429995fbb4661976b795717b02242dfa67cb5150651ccf81c120a1da4b8117e", size = 296366, upload-time = "2026-07-12T04:24:50.059Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/5a/f0/ac15ae6736e4662300de6e5522c060c7c493fbb62f24a147ca19a9128de3/neuralspotx-0.7.17.tar.gz", hash = "sha256:662b895d57c6693d0afd4b26104119499e9da137d9664d50eb01770fca5889e6", size = 319108, upload-time = "2026-08-15T19:19:49.498Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/67/f0/4cb8e9ef054e27669f38ad984217208782fc0600eed45c08b8a36862daa8/neuralspotx-0.7.8-py3-none-any.whl", hash = "sha256:6e7a4657da9e60eb40b956e869b58111034a3a31bafe7595b16fee45222f49eb", size = 297586, upload-time = "2026-07-12T04:24:48.545Z" },
+    { url = "https://files.pythonhosted.org/packages/95/7d/3fa2702ac56cf74e5e60c842a4253a3290d0184c6791ebef128181384bb3/neuralspotx-0.7.17-py3-none-any.whl", hash = "sha256:1289cd67eb27475159a4f9083338ee81648fcc115783db4f467ec96c9ca0fbdb", size = 311680, upload-time = "2026-08-15T19:19:48.144Z" },
 ]
 
 [[package]]
