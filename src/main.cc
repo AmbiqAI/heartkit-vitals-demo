@@ -676,9 +676,9 @@ static volatile uint32_t g_tio_nodata[3] = {0};
 //      exposed as a counter -- see the trim acceptance rate in constants.h,
 //      which is a small drift allowance rather than a hard zero.
 //   2. Emit AT MOST ONE packet, of TIO_*_SAMPLES_PER_PKT samples, plus
-//      TIO_TX_DRIFT_CATCHUP_SAMPLES more when occupancy is above the setpoint
-//      (the target steady-state trough). If a full packet is not available,
-//      emit nothing this tick rather than a short packet.
+//      TIO_TX_DRIFT_CATCHUP_SAMPLES more while the trough servo still has
+//      budget for this window. If a full packet is not available, emit
+//      nothing this tick rather than a short packet.
 //
 //      The nominal count assumes the producer runs at exactly the pump's
 //      nominal rate; it does not. The two corrections -- skip a tick when
@@ -710,7 +710,14 @@ typedef struct {
     uint8_t numRings;
     uint16_t highWater;      /* H, samples (constants.h) */
     uint16_t samplesPerPkt;  /* nominal packet size, samples */
-    uint16_t setpoint;       /* target steady-state trough (constants.h) */
+    uint16_t troughTarget;   /* target steady-state trough (constants.h) */
+    /* Trough servo state. See tio_tx_group_servo() for the control argument. */
+    uint16_t servoTicks;         /* ticks elapsed in the current servo window */
+    uint16_t extraSpent;         /* extra samples already spent this window */
+    uint32_t servoTroughMin;     /* running min occupancy, current window */
+    uint32_t servoTroughPrev;    /* previous window's trough, for the rate term */
+    volatile uint16_t extraBudget;  /* servo output: extra samples per window */
+    volatile uint32_t servoTrough;  /* last completed window's trough (log) */
     volatile uint32_t trimmed;   /* samples discarded by trim-to-high-water */
     /* `pumped` counts ticks on which a full packet was assembled and handed to
      * the transport. `delivered` counts those the transport actually accepted.
@@ -722,12 +729,9 @@ typedef struct {
      * g_tio_enqueue_ok/g_tio_enqueue_fail and g_tio_usb_drop. */
     volatile uint32_t pumped;
     volatile uint32_t delivered;
-    /* Ticks on which the drift drain fired (popped the extra sample). This is
-     * the drain's REALISED capacity, which is not the same as its configured
-     * rate: the drain can only act on ticks where occupancy sits above the
-     * setpoint, so a producer that delivers one large atomic block gives it
-     * far fewer opportunities than a continuous producer does. Comparing this
-     * against the trim rate says directly whether the drain is keeping up. */
+    /* Ticks on which the servo spent an extra sample. Compare against
+     * extraBudget: if drained tracks the budget the servo is in control, and
+     * if it falls short the guard is holding the pump off a near-empty ring. */
     volatile uint32_t drained;
     /* Occupancy watermarks, sampled pre-trim and pre-pop -- the true peak the
      * producer created, including whatever the trim is about to discard.
@@ -752,14 +756,16 @@ static tio_tx_group_t g_ecgTxGroup = {{&rbEcgMaskTx, &rbEcgRawTx, &rbEcgDenTx},
                                       3,
                                       TIO_ECG_TX_HIGH_WATER,
                                       TIO_ECG_SAMPLES_PER_PKT,
-                                      TIO_ECG_TX_SETPOINT,
+                                      TIO_ECG_TX_TROUGH_TARGET,
+                                      0, 0, TIO_OCC_MIN_INIT, TIO_ECG_TX_TROUGH_TARGET, 0, 0,
                                       0, 0, 0, 0, 0,
                                       TIO_OCC_MIN_INIT};
 static tio_tx_group_t g_ppgTxGroup = {{&rbPpg1Tx, &rbPpg2Tx, NULL},
                                       2,
                                       TIO_PPG_TX_HIGH_WATER,
                                       TIO_PPG_SAMPLES_PER_PKT,
-                                      TIO_PPG_TX_SETPOINT,
+                                      TIO_PPG_TX_TROUGH_TARGET,
+                                      0, 0, TIO_OCC_MIN_INIT, TIO_PPG_TX_TROUGH_TARGET, 0, 0,
                                       0, 0, 0, 0, 0,
                                       TIO_OCC_MIN_INIT};
 
@@ -776,20 +782,25 @@ static_assert(TIO_ECG_TX_HIGH_WATER - TIO_ECG_SAMPLES_PER_PKT + TIO_ECG_TX_BLOCK
 static_assert(TIO_PPG_TX_HIGH_WATER - TIO_PPG_SAMPLES_PER_PKT + TIO_PPG_TX_BLOCK_SAMPLES <= PPG_TX_BUF_LEN,
               "PPG TX peak occupancy (H - pkt + block) exceeds ring capacity");
 
-/* The setpoint is the target steady-state trough, so a full structural block
- * landing on it must still fit under H -- otherwise the trim fires on the very
- * next tick and discards fresh signal. This replaces an earlier assert that
- * required the setpoint to sit ABOVE the block, which had it backwards: that
- * is what starved the ECG drain of qualifying ticks. */
-static_assert(TIO_ECG_TX_SETPOINT + TIO_ECG_TX_BLOCK_SAMPLES <= TIO_ECG_TX_HIGH_WATER,
-              "ECG setpoint + block must fit under H");
-static_assert(TIO_PPG_TX_SETPOINT + TIO_PPG_TX_BLOCK_SAMPLES <= TIO_PPG_TX_HIGH_WATER,
-              "PPG setpoint + block must fit under H");
+/* A full structural block landing on the target trough must still fit under H,
+ * or the trim fires on the very next tick and discards fresh signal. */
+static_assert(TIO_ECG_TX_TROUGH_TARGET + TIO_ECG_TX_BLOCK_SAMPLES <= TIO_ECG_TX_HIGH_WATER,
+              "ECG trough target + block must fit under H");
+static_assert(TIO_PPG_TX_TROUGH_TARGET + TIO_PPG_TX_BLOCK_SAMPLES <= TIO_PPG_TX_HIGH_WATER,
+              "PPG trough target + block must fit under H");
 
-/* The trough must leave room for a whole packet, or the pump would skip on
- * every tick that sits exactly at the setpoint. */
-static_assert(TIO_ECG_TX_SETPOINT > TIO_ECG_SAMPLES_PER_PKT, "ECG setpoint must exceed one packet");
-static_assert(TIO_PPG_TX_SETPOINT > TIO_PPG_SAMPLES_PER_PKT, "PPG setpoint must exceed one packet");
+/* The trough must leave a whole packet in hand, or the pump would skip on
+ * every tick that sits at target -- which is the emission gap this exists to
+ * prevent. */
+static_assert(TIO_ECG_TX_TROUGH_TARGET > TIO_ECG_SAMPLES_PER_PKT, "ECG trough target must exceed one packet");
+static_assert(TIO_PPG_TX_TROUGH_TARGET > TIO_PPG_SAMPLES_PER_PKT, "PPG trough target must exceed one packet");
+
+/* The servo window must span at least one whole producer block, or the
+ * per-window minimum is a point on the sawtooth rather than its trough and the
+ * servo would chase the block structure instead of the drift. ECG is the
+ * binding case: block/samplesPerPkt ticks to drain one block. */
+static_assert(TIO_TX_SERVO_WINDOW_TICKS >= (TIO_ECG_TX_BLOCK_SAMPLES / TIO_ECG_SAMPLES_PER_PKT),
+              "servo window must span at least one ECG producer block");
 
 /* Payload must stay within what the TileIO slot framing accepts (240 B was the
  * bound the pre-fix senders were written against). */
@@ -808,6 +819,87 @@ tio_tx_group_avail(const tio_tx_group_t *group)
     return avail;
 }
 
+/* Trough servo. Runs once per servo window, not per tick.
+ *
+ * WHAT IT CORRECTS. The producer and the pump are on different clocks, so the
+ * producer delivers 100 +/- a few tenths of a percent samples per second while
+ * the pump nominally takes exactly 100. The residual is a standing RATE error
+ * of a couple of samples per second, and correcting a rate error is the job
+ * here -- not correcting instantaneous occupancy.
+ *
+ * WHY A THRESHOLD COULD NOT DO IT. The previous design popped an extra sample
+ * on every tick whose occupancy exceeded a setpoint. That asks one number to
+ * be two things at once: the target trough (which must satisfy
+ * trough + block <= H, so <= 50) and the drain trigger (which for a block
+ * producer must sit near the peak, ~200, so that only the few ticks per block
+ * actually needed qualify). For ECG those are incompatible, and measurement
+ * confirmed both failure modes -- setpoint 240 under-drained and trimmed
+ * ~1.8 samples/s forever; setpoint 50 over-drained, emptied the ring and
+ * produced whole seconds with no ECG packet at all.
+ *
+ * HOW THIS ONE WORKS. Each window, compare the measured trough against the
+ * target and nudge a BUDGET of extra samples by one. The budget is the rate
+ * correction; the trough is the error signal. The pump then spends at most
+ * that many extra samples over the following window, at most one per tick, and
+ * only while occupancy is comfortably above target. Corrections are therefore
+ * bounded by construction and the trough is held near target instead of being
+ * driven to either rail.
+ *
+ * CONTROL LAW, and why it is not simply "nudge the budget toward the target".
+ * The plant is an integrator: the budget sets a RATE, and the trough is the
+ * accumulated position. Driving an integrator with a position error alone
+ * (budget += step when the trough is high) is a double integrator and it limit
+ * cycles -- simulated against the measured drift it swings the trough 0 -> 64
+ * -> 0 with an ~80 s period, which would trim at the peak and skip at the
+ * floor. So the law has two terms:
+ *
+ *   budget += (trough - trough_prev)          rate term
+ *           + (trough - target) / PULL_DIV    position term
+ *
+ * The rate term is the whole correction and it is dead-beat: the trough moved
+ * by exactly the imbalance between production and consumption over the window,
+ * so adding that difference to the budget cancels the drift in ONE window and
+ * leaves the trough wherever it sits. The position term is what then walks the
+ * trough back to target, gently, over a first-order tail of ~PULL_DIV windows.
+ * Integer division gives it a natural deadband: inside +/-PULL_DIV samples of
+ * target it contributes zero and the servo holds still.
+ *
+ * STABILITY, which matters more here than convergence speed:
+ *  - The error signal is the per-window MINIMUM, and the window is asserted to
+ *    span at least one producer block. So the servo sees the trough, not the
+ *    2 s sawtooth whose 200-sample swing would otherwise swamp the ~2/s drift
+ *    it is trying to measure.
+ *  - The budget is clamped to [0, TIO_TX_SERVO_MAX_BUDGET], so there is no
+ *    windup: a producer that stops entirely parks the budget at 0 rather than
+ *    accumulating a debt to spend later as a burst.
+ *  - Convergence is monotone from below, so the trough approaches target
+ *    without overshooting into the trim.
+ *  - It settles from both directions. Producer fast: trough rises, budget
+ *    rises, extra draining. Producer slow: trough falls, budget falls to 0 and
+ *    the pump self-throttles by skipping, which is the correct response since
+ *    samples cannot be manufactured. */
+static void
+tio_tx_group_servo(tio_tx_group_t *group)
+{
+    int32_t trough = (int32_t)group->servoTroughMin;
+    int32_t rate = trough - (int32_t)group->servoTroughPrev;
+    int32_t pull = (trough - (int32_t)group->troughTarget) / TIO_TX_SERVO_PULL_DIV;
+    int32_t budget = (int32_t)group->extraBudget + rate + pull;
+
+    if (budget < 0) {
+        budget = 0;
+    } else if (budget > TIO_TX_SERVO_MAX_BUDGET) {
+        budget = TIO_TX_SERVO_MAX_BUDGET;
+    }
+    group->extraBudget = (uint16_t)budget;
+
+    group->servoTroughPrev = (uint32_t)trough;
+    group->servoTrough = (uint32_t)trough;
+    group->servoTroughMin = TIO_OCC_MIN_INIT;
+    group->extraSpent = 0;
+    group->servoTicks = 0;
+}
+
 /* Trim to high-water, then decide whether and how much to emit. Returns the
  * number of samples to pop from EVERY ring of the group, or 0 to emit nothing
  * this tick. Never returns less than samplesPerPkt (no short packets) and
@@ -824,6 +916,14 @@ tio_tx_group_prepare(tio_tx_group_t *group)
     if ((uint32_t)avail < group->occMin) {
         group->occMin = (uint32_t)avail;
     }
+    /* Servo error signal: the minimum occupancy seen this window, sampled at
+     * tick start so it reflects what the pump actually had to work with. */
+    if ((uint32_t)avail < group->servoTroughMin) {
+        group->servoTroughMin = (uint32_t)avail;
+    }
+    if (++group->servoTicks >= TIO_TX_SERVO_WINDOW_TICKS) {
+        tio_tx_group_servo(group);
+    }
     if (avail > group->highWater) {
         /* Discard the stale oldest samples, keep the newest H. One `drop`,
          * applied to every ring, so the group stays aligned across the trim. */
@@ -839,27 +939,26 @@ tio_tx_group_prepare(tio_tx_group_t *group)
          * the tick rather than emit a short packet. */
         return 0;
     }
-    /* Drift drain. Occupancy above the setpoint means the producer's true rate
-     * is above the pump's nominal one; left alone, occupancy would climb to H
-     * and the trim would then discard the difference forever.
+    /* Spend the servo's budget: at most one extra sample per tick, at most
+     * extraBudget per window, and only while occupancy stays a full packet
+     * clear of the target trough.
      *
-     * The setpoint is the TARGET TROUGH (constants.h), sized so a full block
-     * still fits under H on top of it. Deriving it from H instead -- as this
-     * code first did -- left only one qualifying tick per ECG block and the
-     * drain could not keep up; see the setpoint derivation for the measured
-     * numbers.
+     * That guard is what stops the over-draining that emptied the ring under
+     * the old threshold design: however large the budget, the pump stops
+     * taking extra as soon as occupancy approaches target, so the correction
+     * can never pull the trough down to where the next tick has to skip.
      *
-     * This cannot breach the 1x invariant: the pop comes out of a ring, so it
-     * can only return samples the producer already produced. Over-draining is
-     * self-limiting -- the drain stops below the setpoint, and if the ring runs
-     * dry the pump skips the tick rather than emitting a short packet. */
+     * The 1x invariant remains structural rather than tuned: the pop comes out
+     * of a ring, so it can only ever return samples the producer has already
+     * produced. */
     size_t numSamples = group->samplesPerPkt;
-    size_t setpoint = (size_t)group->setpoint;
-    if (avail > setpoint) {
+    if (group->extraSpent < group->extraBudget &&
+        avail > (size_t)(group->troughTarget + group->samplesPerPkt)) {
         numSamples = group->samplesPerPkt + TIO_TX_DRIFT_CATCHUP_SAMPLES;
         if (numSamples > avail) {
             numSamples = avail;
         }
+        group->extraSpent++;
         group->drained++;
     }
     return numSamples;
@@ -1815,16 +1914,20 @@ ReportTask(void *pvParameters)
          *                keeps occupancy off H; TIO_TX_TRIM_DRIFT_ALLOWANCE_SPS
          *                is only a backstop for judging a capture. Sustained
          *                non-zero trim is a bug, not a policy working.
-         *   drain     -- ticks on which the drift drain fired. This is its
-         *                REALISED capacity. A continuous producer (PPG) leaves
-         *                occupancy hovering at the setpoint, so nearly every
-         *                tick can drain. A block producer (ECG) creates a
-         *                sawtooth that decays ~samplesPerPkt per tick, so only
-         *                (peak - setpoint)/samplesPerPkt ticks per block sit
-         *                above the setpoint -- roughly ONE. If drain is
-         *                saturated at ~1 per producer block while trim is
-         *                non-zero, the drain is capacity-limited by the
-         *                producer's block structure, not mis-tuned.
+         *   drain     -- ticks on which the servo spent an extra sample.
+         *                Should track bgt below; falling short of it means the
+         *                guard is holding the pump off a near-empty ring.
+         *   bgt       -- servo budget, extra samples per servo window. This is
+         *                the rate correction it has converged on: bgt /
+         *                (window * pump interval) should equal the producer's
+         *                drift. A budget pinned at TIO_TX_SERVO_MAX_BUDGET
+         *                means drift exceeds what the servo can correct.
+         *   trgh      -- trough the servo last measured, against a target of
+         *                TIO_*_TX_TROUGH_TARGET. This is the controlled
+         *                variable: converged means trgh sits within the
+         *                hysteresis band of target and bgt has stopped moving.
+         *                trgh at 0 with bgt at 0 means the producer is slower
+         *                than the pump, which is self-throttling, not a fault.
          *   occ       -- TX occupancy low..high per interval, sampled pre-trim
          *                and pre-pop. For ECG the low value is the pre-block
          *                residual R, i.e. how close the next atomic 200-sample
@@ -1858,14 +1961,17 @@ ReportTask(void *pvParameters)
             if (ppgOccMin == TIO_OCC_MIN_INIT) {
                 ppgOccMin = 0;
             }
-            nsx_printf("[tio-emit] ecg(pkt=%lu/s deliv=%lu/s trim=%lu/s drain=%lu/s occ=%lu..%lu) "
-                       "ppg(pkt=%lu/s deliv=%lu/s trim=%lu/s drain=%lu/s occ=%lu..%lu)\n",
+            nsx_printf("[tio-emit] ecg(pkt=%lu/s deliv=%lu/s trim=%lu/s drain=%lu/s occ=%lu..%lu "
+                       "bgt=%u trgh=%lu) ppg(pkt=%lu/s deliv=%lu/s trim=%lu/s drain=%lu/s "
+                       "occ=%lu..%lu bgt=%u trgh=%lu)\n",
                        (unsigned long)(ecgPkts - lastEcgPkts), (unsigned long)(ecgDeliv - lastEcgDeliv),
                        (unsigned long)(ecgTrim - lastEcgTrim), (unsigned long)(ecgDrain - lastEcgDrain),
                        (unsigned long)ecgOccMin, (unsigned long)ecgOccMax,
+                       (unsigned)g_ecgTxGroup.extraBudget, (unsigned long)g_ecgTxGroup.servoTrough,
                        (unsigned long)(ppgPkts - lastPpgPkts), (unsigned long)(ppgDeliv - lastPpgDeliv),
                        (unsigned long)(ppgTrim - lastPpgTrim), (unsigned long)(ppgDrain - lastPpgDrain),
-                       (unsigned long)ppgOccMin, (unsigned long)ppgOccMax);
+                       (unsigned long)ppgOccMin, (unsigned long)ppgOccMax,
+                       (unsigned)g_ppgTxGroup.extraBudget, (unsigned long)g_ppgTxGroup.servoTrough);
             nsx_printf("[tio-health] trim_tot(ecg=%lu ppg=%lu) ppg_burst=%lu "
                        "stage_err(den=%lu seg=%lu met=%lu ppgmet=%lu)\n",
                        (unsigned long)ecgTrim, (unsigned long)ppgTrim, (unsigned long)g_ppg_tee_burst_max,

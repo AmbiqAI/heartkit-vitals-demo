@@ -395,11 +395,11 @@ extern "C" {
  * ~1.1 samples/s permanently, forever, in a perfectly healthy system. A second
  * capture found ECG doing the same at ~1.8 samples/s and ~2.4% fast.
  *
- * So the pump tracks the producer instead of assuming it: above the setpoint
- * it pops one extra sample per tick (TIO_TX_DRIFT_CATCHUP_SAMPLES) to drain
- * accumulated drift, and below the packet size it emits nothing at all. Both
- * corrections are bounded by what the ring holds, so neither can push the
- * average above the producer's true rate.
+ * So the pump tracks the producer instead of assuming it: a trough servo
+ * estimates the standing rate error and spends a bounded budget of extra
+ * samples to cancel it, and below the packet size the pump emits nothing at
+ * all. Both corrections are bounded by what the ring holds, so neither can
+ * push the average above the producer's true rate.
  *
  * The cost of the skip is jitter, not loss: no sample is discarded, the next
  * packet simply arrives one pump interval later. That is absorbed by the
@@ -434,56 +434,66 @@ extern "C" {
 #define TIO_ECG_SAMPLES_PER_PKT (10)
 #define TIO_PPG_SAMPLES_PER_PKT (10)
 
-/* Drift drain. When TX occupancy sits above its setpoint (the target trough,
- * below) the producer is running fractionally faster than the pump's nominal
- * 10-per-100-ms, so the pump pops this many extra samples per tick until
- * occupancy falls back. One extra sample is a 10% drain rate against drift
- * measured in single percent, so it clears quickly and then stops; the
- * setpoint is low enough that the drain engages across most of the decay
- * rather than at the last moment, and steady-state loss goes to zero in BOTH
- * drift directions (the slow direction is already handled by skipping a tick
- * when fewer than a full packet is available).
+/* Extra samples the pump may take in a single tick when the trough servo has
+ * budget to spend. Deliberately ONE: the correction needed is a couple of
+ * samples per second against 100 produced, so it only has to be applied on a
+ * few ticks per second, and a larger per-tick step would make each correction
+ * a visible rate excursion rather than a nudge. The servo controls HOW MANY
+ * ticks take the extra; this controls how much each one takes.
  *
  * Packets are therefore 10 or 11 samples, i.e. 60 or 66 B of payload. The
  * TimedSignal header carries the length and the host reads dlen, so variable
  * packet size is fine on the wire. */
 #define TIO_TX_DRIFT_CATCHUP_SAMPLES (1)
 
-/* Drift-drain SETPOINT: the TX occupancy the pump aims to sit at between
- * producer blocks, i.e. the target steady-state trough. The drain pops the
- * extra sample on any tick whose occupancy is above this.
+/* TARGET TROUGH: the TX occupancy the pump aims to sit at between producer
+ * blocks. This is the servo's reference, not a trigger threshold.
  *
- * Derived from the trough, NOT from H. The hard constraint is that a full
- * structural block must still fit underneath H when it lands on the trough,
- * otherwise the trim fires on the very next tick and discards fresh signal:
+ * Three samples' worth of packet = 300 ms of buffered signal. Derivation:
+ * one packet must always be in hand at the trough or the pump skips a tick
+ * and opens an emission gap, plus two pump intervals of slack for scheduling
+ * jitter and for a producer block arriving late.
  *
- *     setpoint + block <= H
+ * Bounded above by the requirement that a full structural block still fits
+ * under H when it lands on the trough, or the trim fires on the very next
+ * tick and discards fresh signal:
  *
- * Since H is itself block + samplesPerPkt + slack, that resolves to
- * setpoint <= samplesPerPkt + slack = 50 for both slots, and taking the
- * equality makes the setpoint exactly the non-block part of H. Asserted in
- * main.cc for both slots so a future window-size change fails the build.
+ *     troughTarget + block <= H
  *
- * Why this replaced a setpoint derived as H - samplesPerPkt (240 for ECG):
- * hardware 2026-09-01 measured ECG trimming ~1.8 samples/s indefinitely. The
- * drain can only act on ticks whose occupancy exceeds the setpoint, and ECG's
- * producer pushes one atomic 200-sample block per 2 s, after which occupancy
- * decays ~samplesPerPkt per tick. With the setpoint just under H, only about
- * ONE tick per block qualified -- ~0.5 samples/s of capacity against a
- * measured ~2.4 samples/s producer excess, so the trim absorbed the rest
- * forever. PPG never showed it because its continuous producer leaves
- * occupancy hovering, so nearly every tick qualifies. Same code, opposite
- * outcome, entirely explained by producer shape.
+ * ECG 30 + 200 = 230 <= 250; PPG 30 + 13 = 43 <= 63. Both asserted in main.cc
+ * so a window-size change fails the build rather than silently trimming. */
+#define TIO_ECG_TX_TROUGH_TARGET (3 * TIO_ECG_SAMPLES_PER_PKT)
+#define TIO_PPG_TX_TROUGH_TARGET (3 * TIO_PPG_SAMPLES_PER_PKT)
+
+/* Servo window, in pump ticks. 32 ticks = 3.2 s, which comfortably spans the
+ * ~2 s ECG producer block -- asserted in main.cc, because a window shorter
+ * than one block would make the measured minimum a point on the sawtooth
+ * rather than its trough, and the servo would chase the block structure
+ * instead of the drift.
  *
- * At a setpoint of 50 the drain qualifies across essentially the whole decay
- * (~14 ticks per ECG block instead of 1), which is ~7 samples/s of capacity
- * against the 2.4 samples/s needed. Deliberately over-provisioned: the excess
- * is self-limiting, because once occupancy falls below the setpoint the drain
- * stops, and if the ring runs dry the pump skips the tick rather than emitting
- * a short packet. Larger drift settles at a slightly higher trough instead of
- * trimming, for any drift up to ~7%. */
-#define TIO_ECG_TX_SETPOINT (TIO_ECG_TX_HIGH_WATER - TIO_ECG_TX_BLOCK_SAMPLES)
-#define TIO_PPG_TX_SETPOINT (TIO_PPG_TX_HIGH_WATER - TIO_PPG_TX_BLOCK_SAMPLES)
+ * This also sets the correction resolution: one budget step per window is
+ * 1/3.2 s = 0.31 samples/s, comfortably finer than the ~2.4 samples/s being
+ * corrected. Cold-start convergence is a few windows, ~10-25 s. Slow on
+ * purpose -- the quantity being tracked drifts by a couple of samples per
+ * second and is not worth chasing quickly. */
+#define TIO_TX_SERVO_WINDOW_TICKS (32)
+
+/* Divisor on the servo's position term: each window it moves the budget by
+ * (trough - target) / this. It is the gentle term -- the rate term does the
+ * actual drift cancellation -- so it is deliberately weak, giving a
+ * first-order approach to target over roughly this many windows (~25 s).
+ *
+ * Being an integer division it also supplies the deadband: while the trough is
+ * within +/-8 samples (80 ms) of target this contributes exactly zero and the
+ * servo holds still rather than dithering. Lowering it would speed the
+ * approach and risk overshooting into the trim. */
+#define TIO_TX_SERVO_PULL_DIV (8)
+
+/* Budget ceiling, in extra samples per window. 16 per 3.2 s = 5 samples/s,
+ * i.e. headroom for ~5% producer drift against the ~2.4% measured. Also the
+ * anti-windup clamp: a stalled producer parks the budget here-or-zero rather
+ * than accumulating a debt it would later spend as a burst. */
+#define TIO_TX_SERVO_MAX_BUDGET (16)
 
 /* Largest packet either signal slot can emit -- sizes the sender stack buffers
  * and must account for the drift drain above, not just the nominal size. */
@@ -507,21 +517,23 @@ extern "C" {
  * nothing cross-checks the two, so the pump corrects for the difference at
  * both ends rather than assuming it away:
  *
- *   * Producer slightly SLOW: the pump finds fewer than a full packet and
- *     skips the tick. Self-throttling, no loss.
- *   * Producer slightly FAST: occupancy rises past the setpoint and the drift
- *     drain (TIO_TX_DRIFT_CATCHUP_SAMPLES) pops an extra sample per tick until
- *     it falls back, so occupancy never reaches H. No loss.
+ *   * Producer slightly SLOW: the trough falls, the servo winds its budget
+ *     down to 0, and the pump self-throttles by skipping a tick whenever it
+ *     holds less than a full packet. No loss; samples cannot be manufactured.
+ *   * Producer slightly FAST: the trough rises, the servo winds its budget up
+ *     and spends extra samples on a few ticks per second until the trough
+ *     returns to target, so occupancy never approaches H. No loss.
  *
- * Before the drain existed, the fast direction lost samples permanently:
- * hardware 2026-09-01 measured PPG at ~1.1 samples/s trimmed indefinitely
- * while ECG, on the slow side, trimmed zero.
+ * Both directions were observed as permanent loss before the servo existed:
+ * hardware measured PPG trimming ~1.1 samples/s and ECG ~1.8 samples/s
+ * indefinitely, each with a threshold drain that could not be tuned to fix one
+ * without breaking the other.
  *
  * TIO_TX_TRIM_DRIFT_ALLOWANCE_SPS is retained only as a backstop for judging a
  * capture, not as an expectation: sustained trim at any appreciable rate now
- * means the drain is not keeping up (drift far larger than the ~1% seen on
- * hardware), H is mis-derived, or the producer is genuinely misbehaving.
- * Any of those is a bug to investigate, not a policy working as intended. */
+ * means the servo is saturated (drift beyond TIO_TX_SERVO_MAX_BUDGET), H is
+ * mis-derived, or the producer is genuinely misbehaving. Any of those is a bug
+ * to investigate, not a policy working as intended. */
 
 /* Backstop tolerance when judging a bench capture, in samples/s. Expect 0.
  * 0.5% of a 100 Hz stream is 0.5 samples/s; round up to 1. */
