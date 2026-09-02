@@ -25,8 +25,7 @@
 #   dist/<tag>/<board-dir>/{firmware.bin,downloadfw.jlink,
 #                           flash_mac.command,flash_win.bat,flash_linux.sh}
 #   dist/heartkit-vitals-demo-<tag>-<board-dir>-firmware.zip   (one per board)
-#   dist/heartkit-vitals-demo-<tag>-firmware.zip               (whole drop,
-#                                        only when the drop has >1 board)
+#   dist/heartkit-vitals-demo-<tag>-firmware.zip               (whole drop)
 #
 # Naming is load bearing. heartkit-vitals-demo-v500-firmware.zip is the name
 # already attached to the v5.0.0 GitHub release, and apollo510b/ and
@@ -54,8 +53,10 @@ BOARDS=()
 VALIDATION_BOARDS=()
 VALIDATION_TEXTS=()
 
-# Firmware sources are compared against this tag in BUILD-INFO (issue #33).
-REF_TAG="v5.0.0"
+# BUILD-INFO says whether the firmware sources still match the tag this package
+# claims to be (issue #33). The tag is derived from --version, never hard-coded,
+# so packaging v5.0.1 compares against v5.0.1.
+REF_TAG=""
 REF_PATHS=(src config boards CMakeLists.txt nsx.yml nsx.lock)
 
 # Default hardware validation statement for a board with no --validation-note.
@@ -74,6 +75,21 @@ first_line() { local v; v="$(cat)"; printf '%s' "${v%%$'\n'*}"; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 note() { printf '==> %s\n' "$*"; }
 warn() { printf 'warning: %s\n' "$*" >&2; }
+
+# Nothing that ships should carry an absolute path from the machine that built
+# it: it is noise for an FAE and it leaks the packager's home directory. Paths
+# under the repo become repo relative, anything else under $HOME becomes ~/.
+relpath() {
+  local p="$1"
+  # Literal tilde for a reader, kept in a variable so it is never read as a
+  # path this script should expand.
+  local tilde='~'
+  case "$p" in
+    "${REPO_DIR}/"*) p="${p#"${REPO_DIR}/"}" ;;
+    "${HOME:-/nonexistent}/"*) p="${tilde}/${p#"${HOME}/"}" ;;
+  esac
+  printf '%s' "$p"
+}
 
 usage() {
   cat <<'USAGE'
@@ -109,7 +125,9 @@ while [ $# -gt 0 ]; do
     --validation-note)
       [ $# -ge 2 ] || die "--validation-note needs a value"
       case "$2" in
-        *=*) VALIDATION_BOARDS+=("${2%%=*}"); VALIDATION_TEXTS+=("${2#*=}") ;;
+        *=*)
+          [ -n "${2#*=}" ] || die "--validation-note text must not be empty (got: $2)"
+          VALIDATION_BOARDS+=("${2%%=*}"); VALIDATION_TEXTS+=("${2#*=}") ;;
         *) die "--validation-note must look like BOARD=text, got: $2" ;;
       esac
       shift 2 ;;
@@ -145,6 +163,10 @@ _core="${VERSION#v}"
 _base="${_core%%-*}"
 _suffix="${_core#"$_base"}"
 TAG="v${_base//./}${_suffix}"
+
+# The tag BUILD-INFO compares the firmware sources against is the version being
+# packaged, not a fixed release.
+REF_TAG="$VERSION"
 
 # Board -> package folder and SoC. SoC names come from nsx.yml
 # (targets.supported.<board>.soc); folder names match the v410 drop.
@@ -237,7 +259,7 @@ NSX_PKG_DIR="$(uv run python -c 'import neuralspotx,os;print(os.path.dirname(neu
 IF_SOURCE="TODO(verify): could not locate the installed neuralspotx package"
 if [ -n "$NSX_PKG_DIR" ] && [ -d "$NSX_PKG_DIR" ]; then
   if grep -rq -- "-if SWD" "$NSX_PKG_DIR"; then
-    IF_SOURCE="$(grep -rl -- "-if SWD" "$NSX_PKG_DIR" | first_line)"
+    IF_SOURCE="$(relpath "$(grep -rl -- "-if SWD" "$NSX_PKG_DIR" | first_line)")"
   else
     die "TODO(verify): '-if SWD' not found in ${NSX_PKG_DIR}; do not guess the interface"
   fi
@@ -259,15 +281,20 @@ GIT_DESCRIBE="$(git -C "$REPO_DIR" describe --tags --always --dirty 2>/dev/null 
 # Whether the firmware sources still match the release tag. A packaged image
 # built from a tree that has moved on from the tag is not the tagged firmware,
 # so say which paths moved.
+# The comparison is against the WORKING TREE, not HEAD: the image is built from
+# the files on disk, so an uncommitted or untracked edit under src/ changes the
+# firmware even though HEAD still matches the tag.
 if git -C "$REPO_DIR" rev-parse -q --verify "refs/tags/${REF_TAG}" >/dev/null 2>&1; then
-  if git -C "$REPO_DIR" diff --quiet "$REF_TAG" HEAD -- "${REF_PATHS[@]}" 2>/dev/null; then
+  _tracked="$(git -C "$REPO_DIR" diff --name-only "$REF_TAG" -- "${REF_PATHS[@]}" 2>/dev/null || true)"
+  _untracked="$(git -C "$REPO_DIR" status --porcelain --untracked-files=all -- "${REF_PATHS[@]}" 2>/dev/null | sed 's/^...//' || true)"
+  _changed="$(printf '%s\n%s\n' "$_tracked" "$_untracked" | sed '/^[[:space:]]*$/d' | LC_ALL=C sort -u | tr '\n' ' ')"
+  if [ -z "${_changed// /}" ]; then
     SOURCES_VS_TAG="yes"
   else
-    _changed="$(git -C "$REPO_DIR" diff --name-only "$REF_TAG" HEAD -- "${REF_PATHS[@]}" 2>/dev/null | tr '\n' ' ')"
-    SOURCES_VS_TAG="no (differs in: ${_changed% })"
+    SOURCES_VS_TAG="no (working tree modified: ${_changed% })"
   fi
 else
-  SOURCES_VS_TAG="TODO(verify): tag ${REF_TAG} not found in this checkout"
+  SOURCES_VS_TAG="n/a (tag not found)"
 fi
 
 # ---------------------------------------------------------------------------
@@ -340,9 +367,11 @@ package_board() {
   [ -f "$FACTS_FILE" ] || die "SoC facts file not found: ${FACTS_FILE}"
 
   local FACTS_DEVICE FACTS_SPEED LOAD_ADDRESS
-  FACTS_DEVICE="$(sed -n "s/.*NSX_SEGGER_DEVICE[[:space:]]*\"\([^\"]*\)\".*/\1/p" "$FACTS_FILE" | first_line)"
-  FACTS_SPEED="$(sed -n "s/.*NSX_SEGGER_IF_SPEED[[:space:]]*\"\([^\"]*\)\".*/\1/p" "$FACTS_FILE" | first_line)"
-  LOAD_ADDRESS="$(sed -n "s/.*NSX_SEGGER_PF_ADDR[[:space:]]*\"\([^\"]*\)\".*/\1/p" "$FACTS_FILE" | first_line)"
+  # Anchored on set(...) so a comment mentioning the variable cannot be read as
+  # its value, the same way the board override below is parsed.
+  FACTS_DEVICE="$(sed -n 's/^[[:space:]]*set(NSX_SEGGER_DEVICE[[:space:]]*"\([^"]*\)".*/\1/p' "$FACTS_FILE" | first_line)"
+  FACTS_SPEED="$(sed -n 's/^[[:space:]]*set(NSX_SEGGER_IF_SPEED[[:space:]]*"\([^"]*\)".*/\1/p' "$FACTS_FILE" | first_line)"
+  LOAD_ADDRESS="$(sed -n 's/^[[:space:]]*set(NSX_SEGGER_PF_ADDR[[:space:]]*"\([^"]*\)".*/\1/p' "$FACTS_FILE" | first_line)"
 
   [ -n "$FACTS_DEVICE" ]  || die "TODO(verify): NSX_SEGGER_DEVICE not found in ${FACTS_FILE}"
   [ -n "$FACTS_SPEED" ]   || die "TODO(verify): NSX_SEGGER_IF_SPEED not found in ${FACTS_FILE}"
@@ -467,7 +496,11 @@ MISMATCH
   local CMAKE_TOOLCHAIN CMAKE_BUILD_TYPE
   CMAKE_TOOLCHAIN="$(sed -n 's/^CMAKE_TOOLCHAIN_FILE:[^=]*=\(.*\)$/\1/p' "$CACHE_FILE" 2>/dev/null | first_line)"
   CMAKE_BUILD_TYPE="$(sed -n 's/^CMAKE_BUILD_TYPE:[^=]*=\(.*\)$/\1/p' "$CACHE_FILE" 2>/dev/null | first_line)"
-  [ -n "$CMAKE_TOOLCHAIN" ]  || CMAKE_TOOLCHAIN="TODO(verify): not found in ${CACHE_FILE}"
+  if [ -n "$CMAKE_TOOLCHAIN" ]; then
+    CMAKE_TOOLCHAIN="$(relpath "$CMAKE_TOOLCHAIN")"
+  else
+    CMAKE_TOOLCHAIN="TODO(verify): not found in ${CACHE_FILE}"
+  fi
   [ -n "$CMAKE_BUILD_TYPE" ] || CMAKE_BUILD_TYPE="(unset)"
 
   local BIN_SHA BIN_SIZE
@@ -568,8 +601,10 @@ compare_against_v410() {
   local ref="${V410_REF_DIR}/${board_dir}"
   local f matched=0 differed=0 missing=0 diff_list=""
 
+  # The reference lives on the packager's machine. Its path goes to the console
+  # only; BUILD-INFO ships to customers and must not carry it.
   if [ ! -d "$ref" ]; then
-    printf 'not compared (v4.1.0 reference not present at %s)' "$ref"
+    printf 'not compared (v4.1.0 reference not available)'
     warn "v4.1.0 reference folder not found, skipping the byte comparison for ${board_dir}: ${ref}"
     return 0
   fi
@@ -632,84 +667,138 @@ state_value() {
   sed -n "s/^$2=//p" "${STATE_DIR}/$1.env" | first_line
 }
 
-# FLASH.md. With a single board it renders exactly as it always has. With more
-# than one, the board specific values become placeholders and a table of the
-# boards in the drop is appended, because one set of instructions has to serve
-# every folder.
-if [ "${#BOARD_DIRS[@]}" -eq 1 ]; then
-  R_BOARD="$(state_value "${BOARD_DIRS[0]}" BOARD)"
-  R_BOARD_DIR="${BOARD_DIRS[0]}"
-  R_DEVICE="$(state_value "${BOARD_DIRS[0]}" DEVICE)"
-  R_SPEED="$(state_value "${BOARD_DIRS[0]}" SPEED)"
-  R_ADDR="$(state_value "${BOARD_DIRS[0]}" ADDR)"
-  render "${TEMPLATE_DIR}/FLASH.md" "${PKG_ROOT}/FLASH.md"
-else
-  _names=""
-  _addr_common="$(state_value "${BOARD_DIRS[0]}" ADDR)"
-  for _d in "${BOARD_DIRS[@]}"; do
-    _names="${_names}, $(state_value "$_d" BOARD)"
-    [ "$(state_value "$_d" ADDR)" = "$_addr_common" ] || _addr_common="<load address>"
-  done
-  R_BOARD="${_names#, }"
-  R_BOARD_DIR="<board>"
-  R_DEVICE="<device>"
-  R_SPEED="<speed>"
-  R_ADDR="$_addr_common"
-  render "${TEMPLATE_DIR}/FLASH.md" "${PKG_ROOT}/FLASH.md"
+# write_flash_md <destination> <board-dir>...
+# One board renders exactly the way the published single-board FLASH.md does.
+# More than one turns the board specific values into `<board>` and adds a boards
+# table, because one set of instructions has to serve every folder. The manual
+# fallback is the exception: a fenced command must never contain a placeholder,
+# because `<device>` is a shell redirection and a reader who pastes the line
+# gets "no such file: device". Each board gets its own concrete command instead.
+write_flash_md() {
+  local dest="$1"; shift
+  local dirs=("$@") d names="" addr_common repl first=1
+
+  if [ "${#dirs[@]}" -eq 1 ]; then
+    R_BOARD="$(state_value "${dirs[0]}" BOARD)"
+    R_BOARD_DIR="${dirs[0]}"
+    R_DEVICE="$(state_value "${dirs[0]}" DEVICE)"
+    R_SPEED="$(state_value "${dirs[0]}" SPEED)"
+    R_ADDR="$(state_value "${dirs[0]}" ADDR)"
+    render "${TEMPLATE_DIR}/FLASH.md" "$dest"
+  else
+    addr_common="$(state_value "${dirs[0]}" ADDR)"
+    for d in "${dirs[@]}"; do
+      names="${names}, $(state_value "$d" BOARD)"
+      [ "$(state_value "$d" ADDR)" = "$addr_common" ] || addr_common="<load address>"
+    done
+    R_BOARD="${names#, }"
+    R_BOARD_DIR="<board>"
+    # Sentinel, not a placeholder: no @ signs, so render()'s leftover check
+    # still fires on anything genuinely unsubstituted.
+    R_DEVICE="__PER_BOARD_COMMAND__"
+    R_SPEED="__PER_BOARD_COMMAND__"
+    R_ADDR="$addr_common"
+    render "${TEMPLATE_DIR}/FLASH.md" "$dest"
+
+    repl="$(mktemp -t flash-cmds)"
+    for d in "${dirs[@]}"; do
+      [ "$first" -eq 1 ] || printf '\n' >> "$repl"
+      first=0
+      printf '# %s (%s), run from inside the %s folder\n' \
+        "$(state_value "$d" BOARD)" "$d" "$d" >> "$repl"
+      printf 'JLinkExe -nogui 1 -device %s -if SWD -speed %s -commandfile downloadfw.jlink\n' \
+        "$(state_value "$d" DEVICE)" "$(state_value "$d" SPEED)" >> "$repl"
+    done
+    awk -v f="$repl" '/__PER_BOARD_COMMAND__/ {
+        while ((getline line < f) > 0) print line
+        close(f); next
+      } { print }' "$dest" > "${dest}.tmp"
+    mv "${dest}.tmp" "$dest"
+    rm -f "$repl"
+    if grep -q '__PER_BOARD_COMMAND__' "$dest"; then
+      die "per-board command sentinel left in ${dest}"
+    fi
+
+    {
+      printf '\n## Boards in this package\n\n'
+      printf 'Each board has its own folder. Where the instructions above show\n'
+      printf '`<board>`, use the folder for the board being flashed.\n\n'
+      printf '| Folder | NSX board | J-Link device | Speed (kHz) | Load address |\n'
+      printf '| --- | --- | --- | --- | --- |\n'
+      for d in "${dirs[@]}"; do
+        printf '| `%s` | `%s` | `%s` | %s | `%s` |\n' \
+          "$d" "$(state_value "$d" BOARD)" "$(state_value "$d" DEVICE)" \
+          "$(state_value "$d" SPEED)" "$(state_value "$d" ADDR)"
+      done
+    } >> "$dest"
+  fi
 
   {
-    printf '\n## Boards in this package\n\n'
-    printf 'Each board has its own folder. Substitute the row for the board being\n'
-    printf 'flashed wherever the instructions above show `<board>`, `<device>`,\n'
-    printf '`<speed>` or `<load address>`.\n\n'
-    printf '| Folder | NSX board | J-Link device | Speed (kHz) | Load address |\n'
-    printf '| --- | --- | --- | --- | --- |\n'
-    for _d in "${BOARD_DIRS[@]}"; do
-      printf '| `%s` | `%s` | `%s` | %s | `%s` |\n' \
-        "$_d" "$(state_value "$_d" BOARD)" "$(state_value "$_d" DEVICE)" \
-        "$(state_value "$_d" SPEED)" "$(state_value "$_d" ADDR)"
-    done
-  } >> "${PKG_ROOT}/FLASH.md"
-fi
-chmod 644 "${PKG_ROOT}/FLASH.md"
+    printf '\n## Archives\n\n'
+    printf 'Extract one archive per folder, or use the combined archive; do not merge\n'
+    printf 'several per-board archives into one folder, or SHA256SUMS will only cover\n'
+    printf 'the last one.\n'
+  } >> "$dest"
+  chmod 644 "$dest"
+}
 
-# RELEASE.md. Real release notes replace the placeholder before SHA256SUMS is
-# written, so the checksum always covers the text that actually ships.
-R_BOARD="${BOARD_DIRS[0]}"; R_BOARD_DIR="${BOARD_DIRS[0]}"
-R_DEVICE="$(state_value "${BOARD_DIRS[0]}" DEVICE)"
-R_SPEED="$(state_value "${BOARD_DIRS[0]}" SPEED)"
-R_ADDR="$(state_value "${BOARD_DIRS[0]}" ADDR)"
-render "${TEMPLATE_DIR}/RELEASE.md" "${PKG_ROOT}/RELEASE.md"
-if [ -n "$NOTES_FILE" ]; then
-  cp "$NOTES_FILE" "${PKG_ROOT}/RELEASE.md"
-  note "Release notes taken from ${NOTES_FILE}"
-fi
-chmod 644 "${PKG_ROOT}/RELEASE.md"
-
-# BUILD-INFO.txt: one drop-level header plus the section each board wrote when
-# it was packaged.
-{
-  cat <<HEADER
+# write_build_info <destination> <board-dir>...
+# Common header plus the section each named board wrote when it was packaged.
+write_build_info() {
+  local dest="$1"; shift
+  local dirs=("$@") d
+  {
+    cat <<HEADER
 HeartKit Vitals demo firmware package
 =====================================
 
 Version        : ${VERSION}
 Package tag    : ${TAG}
 Application    : ${APP_NAME}
-Boards         : ${BOARD_DIRS[*]}
+Boards         : ${dirs[*]}
 Assembled (UTC): $(date -u '+%Y-%m-%d %H:%M:%SZ')
 
-Each board is built and packaged by its own run of tools/release/package.sh,
-so the provenance below is recorded per board and reflects the tree that board
-was built from.
+Each board is built and packaged separately; the provenance below is recorded
+per board.
 
 HEADER
-  for _d in "${BOARD_DIRS[@]}"; do
-    cat "${STATE_DIR}/${_d}.section"
-    printf '\n'
-  done
-} > "${PKG_ROOT}/BUILD-INFO.txt"
-chmod 644 "${PKG_ROOT}/BUILD-INFO.txt"
+    for d in "${dirs[@]}"; do
+      cat "${STATE_DIR}/${d}.section"
+      printf '\n'
+    done
+  } > "$dest"
+  chmod 644 "$dest"
+}
+
+write_flash_md "${PKG_ROOT}/FLASH.md" "${BOARD_DIRS[@]}"
+
+# RELEASE.md. Real release notes replace the placeholder before SHA256SUMS is
+# written, so the checksum always covers the text that actually ships. Adding a
+# board to an existing drop must never overwrite notes already in place, so the
+# placeholder is only written when there is nothing there yet.
+RELEASE_IS_PLACEHOLDER=0
+PLACEHOLDER_TMP="$(mktemp -t release-placeholder)"
+R_BOARD="${BOARD_DIRS[0]}"; R_BOARD_DIR="${BOARD_DIRS[0]}"
+R_DEVICE="$(state_value "${BOARD_DIRS[0]}" DEVICE)"
+R_SPEED="$(state_value "${BOARD_DIRS[0]}" SPEED)"
+R_ADDR="$(state_value "${BOARD_DIRS[0]}" ADDR)"
+render "${TEMPLATE_DIR}/RELEASE.md" "$PLACEHOLDER_TMP"
+if [ -n "$NOTES_FILE" ]; then
+  cp "$NOTES_FILE" "${PKG_ROOT}/RELEASE.md"
+  note "Release notes taken from ${NOTES_FILE}"
+elif [ -f "${PKG_ROOT}/RELEASE.md" ]; then
+  note "Keeping the RELEASE.md already in ${PKG_ROOT} (no --notes given)"
+  if cmp -s "${PKG_ROOT}/RELEASE.md" "$PLACEHOLDER_TMP"; then
+    RELEASE_IS_PLACEHOLDER=1
+  fi
+else
+  cp "$PLACEHOLDER_TMP" "${PKG_ROOT}/RELEASE.md"
+  RELEASE_IS_PLACEHOLDER=1
+fi
+rm -f "$PLACEHOLDER_TMP"
+chmod 644 "${PKG_ROOT}/RELEASE.md"
+
+write_build_info "${PKG_ROOT}/BUILD-INFO.txt" "${BOARD_DIRS[@]}"
 
 # SHA256SUMS covers every packaged file, with paths relative to the package
 # root so `shasum -a 256 -c SHA256SUMS` works from the extracted folder. Written
@@ -732,9 +821,14 @@ for _d in "${BOARD_DIRS[@]}"; do
   _stage="dist/.${TAG}-zip-${_d}"
   rm -rf "$_stage"
   mkdir -p "${_stage}/${TAG}"
-  cp -p "${PKG_ROOT}/RELEASE.md" "${PKG_ROOT}/FLASH.md" "${PKG_ROOT}/BUILD-INFO.txt" "${_stage}/${TAG}/"
+  cp -p "${PKG_ROOT}/RELEASE.md" "${_stage}/${TAG}/"
   cp -p "${PKG_ROOT}/${_d}-firmware.map" "${_stage}/${TAG}/"
   cp -Rp "${PKG_ROOT}/${_d}" "${_stage}/${TAG}/"
+  # FLASH.md and BUILD-INFO.txt are re-rendered for this board alone. Copying
+  # the drop's versions would document boards and files the archive does not
+  # carry, and would send the reader to a folder that is not in it.
+  write_flash_md "${_stage}/${TAG}/FLASH.md" "$_d"
+  write_build_info "${_stage}/${TAG}/BUILD-INFO.txt" "$_d"
   ( cd "${_stage}/${TAG}" && find . -type f ! -name SHA256SUMS -print0 \
       | LC_ALL=C sort -z \
       | xargs -0 "${SHA_CMD[@]}" > SHA256SUMS )
@@ -744,13 +838,12 @@ for _d in "${BOARD_DIRS[@]}"; do
   ZIPS+=("dist/${_zip}")
 done
 
-# Combined zip covering the whole drop, only when there is more than one board.
-# This name is the one already attached to the v5.0.0 GitHub release.
-if [ "${#BOARD_DIRS[@]}" -gt 1 ]; then
-  COMBINED_ZIP="${APP_NAME}-${TAG}-firmware.zip"
-  ( cd dist && rm -f "$COMBINED_ZIP" && zip -q -r -X "$COMBINED_ZIP" "$TAG" )
-  ZIPS+=("dist/${COMBINED_ZIP}")
-fi
+# Combined zip covering the whole drop. This name is the one already attached to
+# the v5.0.0 GitHub release, so it is always rebuilt and the old file is removed
+# first: a stale archive must never survive under a name people download.
+COMBINED_ZIP="${APP_NAME}-${TAG}-firmware.zip"
+( cd dist && rm -f "$COMBINED_ZIP" && zip -q -r -X "$COMBINED_ZIP" "$TAG" )
+ZIPS+=("dist/${COMBINED_ZIP}")
 
 note "Package ready"
 printf '\n'
@@ -762,7 +855,7 @@ for _z in "${ZIPS[@]}"; do
 done
 printf '\n'
 
-if [ -z "$NOTES_FILE" ]; then
+if [ "$RELEASE_IS_PLACEHOLDER" -eq 1 ]; then
   printf '%s\n' \
     '**********************************************************************' \
     'WARNING: this package ships the RELEASE.md placeholder, not release' \
