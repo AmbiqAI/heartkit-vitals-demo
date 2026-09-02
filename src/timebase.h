@@ -25,9 +25,12 @@ extern "C" {
  * low-power clock: the FreeRTOS tick runs fast by the clock ratio and every
  * DWT-measured duration is over-reported by the same factor. See issue #25.
  *
- * Does NOT touch `xTickCount`: ticks already counted stay counted. The one
- * tick straddling the switch is short or long by up to one period; every tick
- * after it is 1 ms again.
+ * Does NOT touch `xTickCount`: ticks already counted stay counted. Only the
+ * SysTick reload is rewritten, so the one tick in flight finishes at the OLD
+ * reload counted at the NEW clock. Switching to high performance it is short
+ * (96000 counts at 250 MHz, about 0.38 ms); switching to low power it is long
+ * (250000 counts at 96 MHz, about 2.6 ms). Every tick after it is 1 ms again.
+ * Do not size a timeout on "one period" for the high-to-low case.
  *
  * Safe to call before `vTaskStartScheduler()`.
  */
