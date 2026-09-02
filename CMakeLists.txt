@@ -43,6 +43,7 @@ add_executable(heartkit-vitals-demo
     src/as7058_profiles.c
     src/ringbuffer.c
     src/stimulus.c
+    src/timebase.c
     src/nstdb_noise.c
     src/generated/as7058_profile_click_ppg_ecg.c
     src/generated/as7058_profile_click_spo2.c
