@@ -228,8 +228,14 @@ def module_pins(lock: dict, boards: list[str]) -> dict[str, dict]:
     for board in sorted(boards):
         for name, mod in sorted(targets[board].get("modules", {}).items()):
             if mod.get("kind") != "git":
-                # `packaged` modules are this repo's own board definitions and
-                # the generated cmake/nsx tooling; both are covered by LICENSE.
+                # `packaged` modules are not this repo's own files: nsx.lock
+                # records them as `project: neuralspotx, kind: packaged`, and
+                # `nsx sync` vendors them in from the neuralspotx packages, the
+                # board definitions into `boards/` and the cmake tooling into
+                # `cmake/nsx`. They are Ambiq's own neuralspotx content rather
+                # than third-party code, and they ship no upstream license text
+                # of their own, so they get no third-party section here. See
+                # NOTICE for how `boards/` is vendored.
                 continue
             resolved = mod.get("resolved", {})
             vendored = resolved.get("vendored_at")
@@ -318,12 +324,31 @@ def is_bundle_file(path: Path) -> bool:
     )
 
 
+def in_license_dir(path: Path) -> bool:
+    """True for anything inside a REUSE-style `LICENSES/` directory.
+
+    Matched case-insensitively on the directory name. The AmbiqSuite bundle
+    directory (`sdk/docs/licenses`) also matches case-insensitively, but it has
+    its own rule and its own documented exclusions, so it stays with
+    is_bundle_file() and is not treated as a REUSE directory.
+    """
+    if any(f"/{d}/" in path.as_posix() for d in LICENSE_BUNDLE_DIRS):
+        return False
+    return path.parent.name.casefold() in {n.casefold() for n in LICENSE_DIR_NAMES}
+
+
 def is_license_dir_file(path: Path) -> bool:
-    return (
-        path.parent.name in LICENSE_DIR_NAMES
-        and path.suffix.lower() in LICENSE_BUNDLE_SUFFIXES
-        and path.name.lower() not in BUNDLE_EXCLUDE
-    )
+    """Every regular file in a `LICENSES/` directory is a notice.
+
+    No suffix filter and no BUNDLE_EXCLUDE here. Both of those exist for the
+    AmbiqSuite bundle: the suffix list matches how that bundle is laid out, and
+    BUNDLE_EXCLUDE encodes a rationale about that bundle's contents (LVGL is not
+    built, so its GPL text would misstate the binary). Neither reasoning
+    transfers to a module that follows the REUSE convention, where a
+    `LICENSES/gpl-3.0.txt` would be a license the module actually ships under.
+    Applying the bundle rules here would drop it silently.
+    """
+    return in_license_dir(path)
 
 
 def collect(module_dir: Path) -> list[Path]:
@@ -331,8 +356,24 @@ def collect(module_dir: Path) -> list[Path]:
     for path in module_dir.rglob("*"):
         # Relative, for the same reason as in declared_licenses().
         if set(path.relative_to(module_dir).parts) & SKIP_DIRS:
+            # Fail closed: nothing in a LICENSES/ directory may be dropped by a
+            # walk rule that exists for build output and VCS metadata.
+            if in_license_dir(path) and path.is_file():
+                sys.exit(
+                    f"error: {rel(path)} sits in a LICENSES/ directory but was skipped\n"
+                    "       by SKIP_DIRS. Every file in such a directory is a notice.\n"
+                    "       Move it out of the skipped path or handle it explicitly."
+                )
             continue
         if not path.is_file():
+            # Same reason: a symlink, a broken link or any other non-regular
+            # entry in a LICENSES/ directory is a notice this run cannot read.
+            if in_license_dir(path) and not path.is_dir():
+                sys.exit(
+                    f"error: {rel(path)} sits in a LICENSES/ directory but is not a\n"
+                    "       regular file, so its text cannot be reproduced. Replace it\n"
+                    "       with the license text or handle it explicitly in collect()."
+                )
             continue
         name = path.name.lower()
         if (

@@ -11,9 +11,15 @@ the prebuilt firmware, under Ambiq's agreement with ams-OSRAM, and its source
 is not part of this repository. Building the firmware from source therefore
 requires access to the private `nsx-as7058` module referenced by `nsx.lock`.
 
-Ambiq-authored source files in this repository carry SPDX headers. The board
-definitions under `boards/` do not: they are `kind: packaged` modules vendored
-by `nsx sync` from the packaged neuralspotx board modules, and their on-disk
-content is hashed against `nsx.lock`, so a header added here would be
-overwritten on the next sync and would fail `nsx sync --frozen`. Those headers
-belong upstream in the neuralspotx packages.
+Hand-written Ambiq source files under `config/`, `scripts/`, `src/`, `tests/`
+and `tools/` carry SPDX headers. The files under `src/generated/` do not: they
+are produced by `tools/as7058_json_to_profile.py` from ams-OSRAM AS7058
+configuration presets, are not Ambiq-authored, and carry no header; see
+THIRD-PARTY-NOTICES.md for the ams-OSRAM terms that accompany the AS7058
+material in this repository.
+
+The board definitions under `boards/` do not carry headers either: they are
+`kind: packaged` modules vendored by `nsx sync` from the packaged neuralspotx
+board modules, and their on-disk content is hashed against `nsx.lock`, so a
+header added here would be overwritten on the next sync and would fail
+`nsx sync --frozen`. Those headers belong upstream in the neuralspotx packages.
