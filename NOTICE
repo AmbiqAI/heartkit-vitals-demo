@@ -1,0 +1,12 @@
+HeartKit Vitals Demo
+Copyright (c) 2026, Ambiq
+
+Ambiq-authored code in this repository is licensed under the BSD 3-Clause
+License; see LICENSE. The firmware binaries built from this repository also
+include third-party components that are licensed separately, and the licenses
+and notices for those components are reproduced in THIRD-PARTY-NOTICES.md,
+which ships with every release package. The AS7058 sensor driver is
+proprietary ams-OSRAM software; it is provided in binary form only, as part of
+the prebuilt firmware, under Ambiq's agreement with ams-OSRAM, and its source
+is not part of this repository. Building the firmware from source therefore
+requires access to the private `nsx-as7058` module referenced by `nsx.lock`.

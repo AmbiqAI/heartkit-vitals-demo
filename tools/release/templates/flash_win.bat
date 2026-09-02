@@ -1,4 +1,6 @@
 @echo off
+REM SPDX-License-Identifier: BSD-3-Clause
+REM Copyright (c) 2026, Ambiq
 setlocal
 cd /d "%~dp0"
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) 2026, Ambiq
 /**
  * @file obs_fmt.h
  * @brief Pure value arithmetic for the HKV diagnostic line format.

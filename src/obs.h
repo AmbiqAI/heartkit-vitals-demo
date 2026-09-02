@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) 2026, Ambiq
 /**
  * @file obs.h
  * @brief Application observability: always-on counters, windowed gauges, and

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) 2026, Ambiq
 /**
  * @file sensor.c
  * @brief AS7058 PPG+ECG sensor bring-up (NSX port).

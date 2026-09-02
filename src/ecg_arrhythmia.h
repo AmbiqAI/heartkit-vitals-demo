@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) 2026, Ambiq
 /**
  * @file ecg_arrhythmia.h
  * @author Adam Page (adam.page@ambiq.com)

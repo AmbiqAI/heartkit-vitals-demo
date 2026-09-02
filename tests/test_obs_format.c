@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) 2026, Ambiq
 /**
  * @file test_obs_format.c
  * @brief Host tests for hkv_fx2_from_float (src/obs_fmt.h).

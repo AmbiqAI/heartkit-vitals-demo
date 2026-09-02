@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) 2026, Ambiq
 /**
  * @file ble_bringup.c
  * @brief App-owned TileIO BLE bring-up (apollo510b_evb only).

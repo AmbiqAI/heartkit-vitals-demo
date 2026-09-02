@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) 2026, Ambiq
 /**
  * @file store.h
  * @brief Central store for the NSX port (phase 6: full app orchestration).

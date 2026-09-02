@@ -62,6 +62,7 @@ Attach the WebUSB data cable and confirm the board enumerates as
 | `@BOARD_DIR@/flash_linux.sh` | One-click helper for Linux. |
 | `RELEASE.md` | Release notes. |
 | `BUILD-INFO.txt` | Build provenance and the J-Link parameters with their sources. |
+| `THIRD-PARTY-NOTICES.md` | Licenses and notices for the third-party components in the firmware. |
 | `SHA256SUMS` | Checksums for every file above. |
 | `@BOARD_DIR@-firmware.map` | Linker map, for debugging only. |
 

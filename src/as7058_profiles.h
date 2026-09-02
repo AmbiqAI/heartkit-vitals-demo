@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) 2026, Ambiq
 #ifndef __AS7058_PROFILES_H__
 #define __AS7058_PROFILES_H__
 

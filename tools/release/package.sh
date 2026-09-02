@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, Ambiq
 #
 # Build and assemble a prebuilt firmware package an FAE can flash without the
-# toolchain. macOS and Linux.
+# toolchain. macOS and Linux, with one macOS-only step: THIRD-PARTY-NOTICES.md
+# is generated from an RTF that only `textutil` can convert, so a Linux
+# operator hits a hard stop after the build until a portable converter or a
+# committed text copy exists (tracked on #6). Package on macOS until then.
 #
 #   tools/release/package.sh --version v5.0.0 \
 #                            [--board apollo510b_evb]... \
@@ -20,6 +25,7 @@
 #   dist/<tag>/RELEASE.md
 #   dist/<tag>/FLASH.md
 #   dist/<tag>/BUILD-INFO.txt          (one section per board in the drop)
+#   dist/<tag>/THIRD-PARTY-NOTICES.md  (regenerated from modules/ at package time)
 #   dist/<tag>/SHA256SUMS
 #   dist/<tag>/<board-dir>-firmware.map      (only with --with-maps)
 #   dist/<tag>/<board-dir>/{firmware.bin,downloadfw.jlink,
@@ -829,6 +835,26 @@ chmod 644 "${PKG_ROOT}/RELEASE.md"
 
 write_build_info "${PKG_ROOT}/BUILD-INFO.txt" "${BOARD_DIRS[@]}"
 
+# THIRD-PARTY-NOTICES.md. The binaries in this drop link BSD-3-Clause, MIT,
+# Apache-2.0, Ambiq Apollo SDK License, AmbiqSuite EULA and ams-OSRAM code,
+# and every one of those requires its notice to accompany the binary. It is
+# generated from the modules on disk rather than copied from the repo so the
+# text always matches the tree the images were built from.
+#
+# Written straight into the package with -o: regenerating the repo copy here
+# would dirty the working tree after the provenance above was recorded.
+note "Generating THIRD-PARTY-NOTICES.md"
+uv run python tools/release/gen_third_party_notices.py \
+  -o "${PKG_ROOT}/THIRD-PARTY-NOTICES.md" \
+  || die "could not generate THIRD-PARTY-NOTICES.md"
+chmod 644 "${PKG_ROOT}/THIRD-PARTY-NOTICES.md"
+NOTICES_DRIFTED=0
+if ! cmp -s "${PKG_ROOT}/THIRD-PARTY-NOTICES.md" "${REPO_DIR}/THIRD-PARTY-NOTICES.md"; then
+  NOTICES_DRIFTED=1
+  warn "THIRD-PARTY-NOTICES.md in the package differs from the committed copy;" \
+       "re-run tools/release/gen_third_party_notices.py and commit the result"
+fi
+
 # SHA256SUMS covers every packaged file, with paths relative to the package
 # root so `shasum -a 256 -c SHA256SUMS` works from the extracted folder. Written
 # last, and regenerated over every board present, not just the ones built now.
@@ -851,6 +877,9 @@ for _d in "${BOARD_DIRS[@]}"; do
   rm -rf "$_stage"
   mkdir -p "${_stage}/${TAG}"
   cp -p "${PKG_ROOT}/RELEASE.md" "${_stage}/${TAG}/"
+  # The notices cover the whole module closure, which is the same for every
+  # board in the drop, so each per-board archive carries the same file.
+  cp -p "${PKG_ROOT}/THIRD-PARTY-NOTICES.md" "${_stage}/${TAG}/"
   # The map is optional (--with-maps); an `&&` list here would trip set -e.
   if [ -f "${PKG_ROOT}/${_d}-firmware.map" ]; then
     cp -p "${PKG_ROOT}/${_d}-firmware.map" "${_stage}/${TAG}/"
@@ -892,5 +921,18 @@ if [ "$RELEASE_IS_PLACEHOLDER" -eq 1 ]; then
     '**********************************************************************' \
     'WARNING: this package ships the RELEASE.md placeholder, not release' \
     'notes. It is not ready to hand to an FAE. Re-run with --notes FILE.' \
+    '**********************************************************************' >&2
+fi
+
+# Repeated here on purpose: the mid-run warning is buried in build output, and
+# a drop whose notices do not match the committed ones means the repo no longer
+# documents what the shipped binaries contain.
+if [ "$NOTICES_DRIFTED" -eq 1 ]; then
+  printf '%s\n' \
+    '**********************************************************************' \
+    'WARNING: THIRD-PARTY-NOTICES.md in this package differs from the copy' \
+    'committed in the repo. The package is correct for the tree it was built' \
+    'from; the committed file is stale. Re-run' \
+    'tools/release/gen_third_party_notices.py and commit the result.' \
     '**********************************************************************' >&2
 fi

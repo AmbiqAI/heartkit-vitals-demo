@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) 2026, Ambiq
 /**
  * @file test_assert.h
  * @brief Minimal host-test assertion macros (no framework, no dependencies).

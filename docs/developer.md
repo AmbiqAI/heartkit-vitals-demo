@@ -69,6 +69,11 @@ Use pinned revisions for project-specific module overrides. Do not directly
 edit `modules/` or `cmake/nsx/`; both are generated from the NSX manifest and
 lockfile.
 
+`src/generated/` is likewise generated, from the ams-OSRAM AS7058 GUI presets in
+`assets/` via `tools/as7058_json_to_profile.py`; it carries no SPDX header
+because it inherits the terms of its ams-OSRAM source. See `assets/README.md`
+for asset provenance and `docs/as7058_profiles.md` for regeneration.
+
 ## Clean Working State
 
 Remove only a target build directory:

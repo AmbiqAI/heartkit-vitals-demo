@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, Ambiq
 # Standalone host test project for heartkit-vitals-demo.
 #
 # This is deliberately independent of the NSX bootstrap: `nsx` has no test

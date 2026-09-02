@@ -61,6 +61,10 @@ The built firmware is written to `build/<board>/heartkit-vitals-demo.bin`.
 `pyproject.toml` requires `neuralspotx>=0.7.17`; `uv sync` handles this. Full
 build, flash, validation, and cleanup steps are in `docs/developer.md`.
 
+Building from source requires access to the private `nsx-as7058` module pinned
+in `nsx.lock`; without it `nsx configure` cannot fetch the AS7058 driver. For
+everyone else the prebuilt package in Quick start A is the supported path.
+
 ## Quick start A: flash the prebuilt release binary
 
 No toolchain required. You need the SEGGER J-Link software installed and the
@@ -316,6 +320,21 @@ derivation.
 - `docs/design/streaming-pipeline.md` is the streaming pipeline design record.
 - `DEVELOPMENT_STATUS.md` records current hardware validation and follow-up
   engineering work.
+
+## License
+
+Ambiq-authored code in this repository is licensed under the BSD 3-Clause
+License; see `LICENSE`. The models in `assets/` are covered by the same license
+(provenance in `assets/README.md`).
+
+The firmware binaries also contain third-party components under their own
+terms. `THIRD-PARTY-NOTICES.md` reproduces those licenses and notices; it is
+generated from the modules pinned in `nsx.lock` by
+`tools/release/gen_third_party_notices.py` and ships in every release package.
+
+The AS7058 sensor driver is proprietary ams-OSRAM software. It is distributed
+in binary form only, as part of the prebuilt firmware, under Ambiq's agreement
+with ams-OSRAM; its source is not in this repository. See `NOTICE`.
 
 ## Repository Layout
 
