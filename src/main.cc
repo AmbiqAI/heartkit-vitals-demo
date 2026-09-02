@@ -56,6 +56,7 @@
 #include "ringbuffer.h"
 #include "sensor.h"
 #include "store.h"
+#include "timebase.h"
 
 #include "tflm.h"
 #include "ecg_arrhythmia.h"
@@ -149,6 +150,10 @@ static inline uint32_t
 dwt_delta_us(uint32_t startCycles)
 {
     uint32_t deltaCycles = dwt_cycles() - startCycles;
+    /* Correct as long as SystemCoreClock is truthful, which timebase_sync_to_
+     * core_clock() keeps it (issue #25). An inference that spans a speed-mode
+     * switch is scaled by whichever value is live when it FINISHES, so that
+     * one measurement is wrong; the next one is right. Accepted. */
     return deltaCycles / (SystemCoreClock / 1000000);
 }
 
@@ -159,6 +164,27 @@ static inline float32_t
 ips_from_delta_us(uint32_t deltaUs)
 {
     return 2.0e6f / (float32_t)MAX(deltaUs, 1u);
+}
+
+/* Inference power at a given operating point, in mW. THE ONLY PLACE the LP/HP
+ * inference constants are selected between: the three IPS/W tiles and the
+ * battery model both call this, so the pair in constants.h is never duplicated
+ * at a use site. HP is measurably LESS efficient per inference than LP
+ * (16.7 vs 5.5 mW, #18 runlogs), so a tile pinned to the LP figure over-states
+ * HP efficiency -- see issue #25 AC5.
+ *
+ * TAKES THE MODE, does not read it. appState.speedMode is a live dashboard
+ * control (TIO_UIO_SPEED_MODE_IDX -> set_speed_mode ->
+ * nsx_power_set_performance_mode) and can change between any two reads, so a
+ * caller that also needs the mode for something else (CpuProcessTask needs it
+ * for compute power too) must read it ONCE and pass the same value here.
+ * Otherwise one published window can mix an LP compute figure with an HP
+ * inference figure. The uint8_t read itself needs no lock -- single aligned
+ * byte -- and the worst case is a tile that is one sample stale. */
+static inline float32_t
+inference_power_mw(bool hpMode)
+{
+    return hpMode ? (float32_t)MCU_INFERENCE_POWER_MW_HP : (float32_t)MCU_INFERENCE_POWER_MW_LP;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -539,6 +565,11 @@ set_speed_mode(uint8_t mode)
     if (appState.speedMode != mode) {
         appState.speedMode = mode;
         nsx_power_set_performance_mode(appState.speedMode ? NSX_POWER_PERF_HIGH : NSX_POWER_PERF_LOW);
+        /* The core clock just changed under the software timebase. Without
+         * this the FreeRTOS tick keeps its old period in CPU cycles and runs
+         * fast (or slow) by the clock ratio, and every dwt_delta_us() is
+         * scaled by a stale SystemCoreClock. Issue #25. */
+        timebase_sync_to_core_clock();
         hkv_log_begin("app");
         hkv_log_u32("speed_mode", appState.speedMode);
         hkv_log_end();
@@ -1475,13 +1506,15 @@ EcgProcessTask(void *pvParameters)
             __asm volatile("" ::: "memory");
             hkv_count(HKV_CNT_PIPE_DEN_RUNS);
             /* DASHBOARD CHANGE: the uIps/W divisor is now the sourced
-             * MCU_INFERENCE_POWER_MW_LP (5.5 mW) where it used to be
-             * AVG_INFERENCE_POWER (7.87 mW, unsourced), so all three *uIpspw
-             * values read ~43% higher than on any earlier build. Efficiency did
-             * not change; the power figure divided into it did. These stay
-             * fixed at the LP figure and do NOT follow appState.speedMode the
-             * way the battery model below now does. */
-            ecgMetResults.denoiseuIpspw = 1.0e3f * ecgMetResults.denoiseIps / MCU_INFERENCE_POWER_MW_LP;
+             * inference power for the CURRENT operating point (5.5 mW LP,
+             * 16.7 mW HP) where it used to be AVG_INFERENCE_POWER (7.87 mW,
+             * unsourced), so in LP all three *uIpspw values read ~43% higher
+             * than on any earlier build. Efficiency did not change; the power
+             * figure divided into it did. These now follow appState.speedMode
+             * the same way the battery model below does -- see
+             * inference_power_mw() and issue #25 AC5. */
+            ecgMetResults.denoiseuIpspw =
+                1.0e3f * ecgMetResults.denoiseIps / inference_power_mw(appState.speedMode != 0);
             if (err != 0) {
                 hkv_count(HKV_CNT_PIPE_ERR_ECG_DEN);
             }
@@ -1525,8 +1558,9 @@ EcgProcessTask(void *pvParameters)
              * branch for why source order alone does not bind the compiler. */
             __asm volatile("" ::: "memory");
             hkv_count(HKV_CNT_PIPE_SEG_RUNS);
-            /* ~43% higher than earlier builds -- see the denoise branch. */
-            ecgMetResults.segmentuIpspw = 1.0e3f * ecgMetResults.segmentIps / MCU_INFERENCE_POWER_MW_LP;
+            /* Follows the operating point -- see the denoise branch. */
+            ecgMetResults.segmentuIpspw =
+                1.0e3f * ecgMetResults.segmentIps / inference_power_mw(appState.speedMode != 0);
             if (err != 0) {
                 hkv_count(HKV_CNT_PIPE_ERR_ECG_SEG);
             }
@@ -1561,8 +1595,9 @@ EcgProcessTask(void *pvParameters)
              * store past the volatile increment. */
             __asm volatile("" ::: "memory");
             hkv_count(HKV_CNT_PIPE_MET_RUNS);
-            /* ~43% higher than earlier builds -- see the denoise branch. */
-            ecgMetResults.arrhythmiaIpspw = 1.0e3f * ecgMetResults.arrhythmiaIps / MCU_INFERENCE_POWER_MW_LP;
+            /* Follows the operating point -- see the denoise branch. */
+            ecgMetResults.arrhythmiaIpspw =
+                1.0e3f * ecgMetResults.arrhythmiaIps / inference_power_mw(appState.speedMode != 0);
 
             send_ecg_metrics();
             if (err != 0) {
@@ -1883,17 +1918,21 @@ CpuProcessTask(void *pvParameters)
              *     :152), which divides DWT cycles by SystemCoreClock;
              *   - the denominator comes from the FreeRTOS tick, and
              *     configCPU_CLOCK_HZ is also SystemCoreClock.
-             * Nothing updates SystemCoreClock on a performance-mode change, so
-             * it stays at 96 MHz even when the core is running at 250 MHz. In
-             * HP mode the measured durations AND this window are therefore both
-             * over-reported by the same 250/96 = 2.604x, the factors cancel in
-             * the ratio, and the duty that comes out is true wall-time duty.
-             * DO NOT move this window to a real wall clock (RTC / STIMER) while
-             * dwt_delta_us() still scales by SystemCoreClock: that breaks the
-             * cancellation and HP duty over-reports by 2.6x, which clamps
-             * inferenceFrac to busy and bills everything at inference power.
-             * The two have to change together -- see the SystemCoreClock /
-             * SysTick timebase issue, which owns that fix. */
+             * HISTORY, and why the invariant is still worth stating. Before
+             * issue #25 nothing updated SystemCoreClock on a performance-mode
+             * change, so it stayed at 96 MHz while the core ran at 250 MHz: in
+             * HP mode the measured durations AND this window were both
+             * over-reported by the same 250/96 = 2.604x and the factors
+             * CANCELLED, which is the only reason the duty was right. Issue
+             * #25 removed the need for that cancellation --
+             * timebase_sync_to_core_clock() now makes SystemCoreClock truthful
+             * and holds the tick at 1 ms -- so both terms are individually
+             * correct and the ratio is correct for the honest reason.
+             * The invariant survives the fix: DO NOT move this window to a
+             * different clock (RTC / STIMER) from the one dwt_delta_us()
+             * divides by. If the two ever disagree again, HP duty skews,
+             * inferenceFrac clamps to busy, and everything gets billed at
+             * inference power. They have to change together. */
             const TickType_t windowEndTicks = xTaskGetTickCount();
             const float32_t publishWindowSec =
                 (float32_t)(uint32_t)(windowEndTicks - publishWindowStart) / (float32_t)configTICK_RATE_HZ;
@@ -1959,8 +1998,7 @@ CpuProcessTask(void *pvParameters)
              * while drawing ~3x the power. Sleep power is shared. See the
              * constant pairs and their sources in constants.h. */
             const bool hpMode = (appState.speedMode != 0);
-            const float32_t inferencePowerMw =
-                hpMode ? (float32_t)MCU_INFERENCE_POWER_MW_HP : (float32_t)MCU_INFERENCE_POWER_MW_LP;
+            const float32_t inferencePowerMw = inference_power_mw(hpMode);
             const float32_t computePowerMw =
                 hpMode ? (float32_t)MCU_COMPUTE_POWER_MW_HP : (float32_t)MCU_COMPUTE_POWER_MW_LP;
 
@@ -2494,6 +2532,11 @@ main(void)
     nsx_itm_printf_enable();
 
     NSX_TRY(nsx_power_configure(&nsxPwrCfg) != NSX_STATUS_SUCCESS, "Power Init failed.\n");
+    /* nsx_power_configure() applied perf_mode, so the core may now be at the
+     * high-performance clock while SystemCoreClock still reads the boot value.
+     * Fix it here, before vTaskStartScheduler() programs SysTick from it.
+     * Issue #25. */
+    timebase_sync_to_core_clock();
     nsx_delay_us(200000);
 
 #if AS7058_USE_SPI
