@@ -327,14 +327,18 @@ def is_bundle_file(path: Path) -> bool:
 def in_license_dir(path: Path) -> bool:
     """True for anything inside a REUSE-style `LICENSES/` directory.
 
-    Matched case-insensitively on the directory name. The AmbiqSuite bundle
-    directory (`sdk/docs/licenses`) also matches case-insensitively, but it has
-    its own rule and its own documented exclusions, so it stays with
-    is_bundle_file() and is not treated as a REUSE directory.
+    Matched case-insensitively on every ancestor directory name, not just the
+    direct parent: a module is free to group its notices in subdirectories, and
+    matching the parent alone dropped `LICENSES/sub/Zlib.txt` silently. The
+    AmbiqSuite bundle directory (`sdk/docs/licenses`) also matches
+    case-insensitively, but it has its own rule and its own documented
+    exclusions, so it stays with is_bundle_file() and is not treated as a REUSE
+    directory.
     """
     if any(f"/{d}/" in path.as_posix() for d in LICENSE_BUNDLE_DIRS):
         return False
-    return path.parent.name.casefold() in {n.casefold() for n in LICENSE_DIR_NAMES}
+    names = {n.casefold() for n in LICENSE_DIR_NAMES}
+    return any(parent.name.casefold() in names for parent in path.parents)
 
 
 def is_license_dir_file(path: Path) -> bool:
@@ -491,9 +495,14 @@ def render(boards: list[str], modules: dict[str, dict]) -> str:
     w(
         "The AS7058 sensor driver (`modules/nsx-as7058`) is proprietary ams-OSRAM "
         "software supplied to Ambiq under agreement. It is distributed only in "
-        "binary form as part of the prebuilt firmware; its source is not in this "
-        "repository and building from source requires access to the private "
-        "`nsx-as7058` module."
+        "binary form as part of the prebuilt firmware; the driver source is not "
+        "in this repository and building from source requires access to the "
+        "private `nsx-as7058` module. Other AS7058 material is in this "
+        "repository: the sensor configuration presets exported from the "
+        "ams-OSRAM GUI (`assets/Life_metrics_Click_*.json`) and the C profiles "
+        "generated from them under `src/generated/`. That material is not "
+        "Ambiq-authored and is not covered by this repository's BSD 3-Clause "
+        "License; see `assets/README.md` for its provenance."
     )
     w("")
     w(

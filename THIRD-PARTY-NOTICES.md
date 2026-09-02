@@ -6,7 +6,7 @@ The HeartKit Vitals demo firmware is built from Ambiq-authored source in this re
 
 Boards covered: `apollo330mP_evb`, `apollo510_evb`, `apollo510b_evb`.
 
-The AS7058 sensor driver (`modules/nsx-as7058`) is proprietary ams-OSRAM software supplied to Ambiq under agreement. It is distributed only in binary form as part of the prebuilt firmware; its source is not in this repository and building from source requires access to the private `nsx-as7058` module.
+The AS7058 sensor driver (`modules/nsx-as7058`) is proprietary ams-OSRAM software supplied to Ambiq under agreement. It is distributed only in binary form as part of the prebuilt firmware; the driver source is not in this repository and building from source requires access to the private `nsx-as7058` module. Other AS7058 material is in this repository: the sensor configuration presets exported from the ams-OSRAM GUI (`assets/Life_metrics_Click_*.json`) and the C profiles generated from them under `src/generated/`. That material is not Ambiq-authored and is not covered by this repository's BSD 3-Clause License; see `assets/README.md` for its provenance.
 
 LVGL is not built into this firmware, so the GPL-3.0 text carried in the AmbiqSuite license bundle (`sdk/docs/licenses/gpl-3.0.txt`, annotated "Tied to LVGL" in that bundle's `filelist.txt`) is deliberately not reproduced here: no GPL-licensed component is linked into the shipped image.
 
