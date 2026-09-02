@@ -3,7 +3,8 @@
 # Build and assemble a prebuilt firmware package an FAE can flash without the
 # toolchain. macOS and Linux.
 #
-#   tools/release/package.sh --version v5.0.0 [--board apollo510b_evb]
+#   tools/release/package.sh --version v5.0.0 [--board apollo510b_evb] \
+#                            [--notes RELEASE-NOTES.md]
 #
 # Output layout mirrors the firmware drops the FAEs already use (v400, v410):
 #
@@ -29,6 +30,7 @@ TEMPLATE_DIR="${SCRIPT_DIR}/templates"
 
 VERSION=""
 BOARD="apollo510b_evb"
+NOTES_FILE=""
 
 # `head -1` under `set -o pipefail` makes the upstream command die of SIGPIPE
 # (status 141) and takes the whole script with it. Read the stream fully instead.
@@ -40,9 +42,12 @@ note() { printf '==> %s\n' "$*"; }
 usage() {
   cat <<'USAGE'
 Usage: tools/release/package.sh --version vX.Y.Z [--board apollo510b_evb]
+                                [--notes RELEASE-NOTES.md]
 
   --version   Release version, for example v5.0.0. Required.
   --board     NSX board name. Defaults to apollo510b_evb.
+  --notes     Markdown file to ship as RELEASE.md. Without it the package
+              ships the placeholder template, which is not release ready.
 USAGE
 }
 
@@ -50,12 +55,19 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --version) [ $# -ge 2 ] || die "--version needs a value"; VERSION="$2"; shift 2 ;;
     --board)   [ $# -ge 2 ] || die "--board needs a value";   BOARD="$2";   shift 2 ;;
+    --notes)   [ $# -ge 2 ] || die "--notes needs a value";   NOTES_FILE="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) usage >&2; die "unknown argument: $1" ;;
   esac
 done
 
 [ -n "$VERSION" ] || { usage >&2; die "--version is required"; }
+if [ -n "$NOTES_FILE" ]; then
+  [ -f "$NOTES_FILE" ] || die "--notes file not found: $NOTES_FILE"
+  [ -r "$NOTES_FILE" ] || die "--notes file is not readable: $NOTES_FILE"
+  [ -s "$NOTES_FILE" ] || die "--notes file is empty: $NOTES_FILE"
+  NOTES_FILE="$(cd -- "$(dirname -- "$NOTES_FILE")" && pwd)/$(basename -- "$NOTES_FILE")"
+fi
 [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.+][0-9A-Za-z.-]+)?$ ]] \
   || die "version must look like v5.0.0 (optional -suffix), got: $VERSION"
 
@@ -221,6 +233,14 @@ render "${TEMPLATE_DIR}/flash_win.bat"      "${BOARD_PKG}/flash_win.bat"
 render "${TEMPLATE_DIR}/FLASH.md"           "${PKG_ROOT}/FLASH.md"
 render "${TEMPLATE_DIR}/RELEASE.md"         "${PKG_ROOT}/RELEASE.md"
 
+# Real release notes replace the placeholder before SHA256SUMS is written, so
+# the checksum always covers the text that actually ships.
+if [ -n "$NOTES_FILE" ]; then
+  cp "$NOTES_FILE" "${PKG_ROOT}/RELEASE.md"
+  chmod 644 "${PKG_ROOT}/RELEASE.md"
+  note "Release notes taken from ${NOTES_FILE}"
+fi
+
 # flash_win.bat keeps LF line endings, byte-for-byte matching the v410 drop the
 # FAEs already use. Do not "fix" this to CRLF without re-validating on Windows.
 
@@ -301,3 +321,11 @@ printf 'Package  : %s\n' "$PKG_ROOT"
 printf 'Archive  : %s\n' "$ZIP_PATH"
 printf 'SHA-256  : %s\n' "$ZIP_SHA"
 printf '\n'
+
+if [ -z "$NOTES_FILE" ]; then
+  printf '%s\n' \
+    '**********************************************************************' \
+    'WARNING: this package ships the RELEASE.md placeholder, not release' \
+    'notes. It is not ready to hand to an FAE. Re-run with --notes FILE.' \
+    '**********************************************************************' >&2
+fi
