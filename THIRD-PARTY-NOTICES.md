@@ -1854,7 +1854,7 @@ TinyUSB is bundled under the optional `nsx-ambiq-usb` module, not the core
 #### `modules/nsx-ambiq-sdk/modules/nsx-ambiqsuite/sdk/docs/licenses/Ambiq-Software-License-Terms.pdf`
 
 ```
-[Not reproduced inline: `modules/nsx-ambiq-sdk/modules/nsx-ambiqsuite/sdk/docs/licenses/Ambiq-Software-License-Terms.pdf` is a binary PDF. See that file.]
+[Not reproduced inline: `modules/nsx-ambiq-sdk/modules/nsx-ambiqsuite/sdk/docs/licenses/Ambiq-Software-License-Terms.pdf` is a binary PDF carrying the same AmbiqSuite software agreement whose text is reproduced from `LICENSE.rtf` in this section.]
 ```
 
 #### `modules/nsx-ambiq-sdk/modules/nsx-ambiqsuite/sdk/docs/licenses/Expat_QRCode_gen.txt`

@@ -845,7 +845,9 @@ uv run python tools/release/gen_third_party_notices.py \
   -o "${PKG_ROOT}/THIRD-PARTY-NOTICES.md" \
   || die "could not generate THIRD-PARTY-NOTICES.md"
 chmod 644 "${PKG_ROOT}/THIRD-PARTY-NOTICES.md"
+NOTICES_DRIFTED=0
 if ! cmp -s "${PKG_ROOT}/THIRD-PARTY-NOTICES.md" "${REPO_DIR}/THIRD-PARTY-NOTICES.md"; then
+  NOTICES_DRIFTED=1
   warn "THIRD-PARTY-NOTICES.md in the package differs from the committed copy;" \
        "re-run tools/release/gen_third_party_notices.py and commit the result"
 fi
@@ -916,5 +918,18 @@ if [ "$RELEASE_IS_PLACEHOLDER" -eq 1 ]; then
     '**********************************************************************' \
     'WARNING: this package ships the RELEASE.md placeholder, not release' \
     'notes. It is not ready to hand to an FAE. Re-run with --notes FILE.' \
+    '**********************************************************************' >&2
+fi
+
+# Repeated here on purpose: the mid-run warning is buried in build output, and
+# a drop whose notices do not match the committed ones means the repo no longer
+# documents what the shipped binaries contain.
+if [ "$NOTICES_DRIFTED" -eq 1 ]; then
+  printf '%s\n' \
+    '**********************************************************************' \
+    'WARNING: THIRD-PARTY-NOTICES.md in this package differs from the copy' \
+    'committed in the repo. The package is correct for the tree it was built' \
+    'from; the committed file is stale. Re-run' \
+    'tools/release/gen_third_party_notices.py and commit the result.' \
     '**********************************************************************' >&2
 fi

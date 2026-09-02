@@ -107,6 +107,15 @@ REQUIRED_PATHS = [
     "modules/nsx-pmu-armv8m/LICENSE",
     "modules/nsx-ambiq-sdk/modules/nsx-core/LICENSE",
     "modules/nsx-ambiq-sdk/modules/nsx-freertos/sdk/third_party/FreeRTOS-Kernel/LICENSE.md",
+    # TinyUSB and micro-ecc are compiled into the image, not just vendored:
+    # tusb.c.obj, usbd.c.obj, tusb_fifo.c.obj, usbd_control.c.obj and
+    # dcd_apollo5.c.obj come out of libnsx_ambiq_usb.a, and uECC.c.obj places
+    # uECC_make_key/uECC_shared_secret/uECC_valid_public_key in the apollo510b
+    # link map. Their notices are therefore not optional.
+    "modules/nsx-ambiq-sdk/modules/nsx-ambiq-usb/sdk/third_party/tinyusb/source/LICENSE",
+    "modules/nsx-ambiq-sdk/modules/nsx-cordio/sdk/third_party/uecc/license.txt",
+    # The AmbiqSuite payload's own statement of what it bundles and why.
+    "modules/nsx-ambiq-sdk/modules/nsx-ambiqsuite/THIRD-PARTY-PAYLOAD.md",
     "modules/nsx-ambiq-sdk/modules/nsx-ambiqsuite/sdk/docs/licenses/LICENSE.rtf",
     "modules/nsx-ambiq-sdk/modules/nsx-ambiqsuite/sdk/docs/licenses/SEGGER-RTT-license.txt",
     "modules/nsx-ambiq-sdk/modules/nsx-ambiqsuite/sdk/docs/licenses/ThinkSi-license.txt",
@@ -243,7 +252,10 @@ def declared_licenses(root: Path) -> dict[Path, tuple[str, Path]]:
 
     out: dict[Path, tuple[str, Path]] = {}
     for manifest in sorted(root.rglob("nsx-module.yaml")):
-        if set(manifest.parts) & SKIP_DIRS:
+        # Relative to the module root, never the absolute path: a checkout under
+        # /home/runner/build/... would otherwise match SKIP_DIRS on an ancestor
+        # directory and silently skip the entire tree.
+        if set(manifest.relative_to(root).parts) & SKIP_DIRS:
             continue
         try:
             with manifest.open(encoding="utf-8") as fh:
@@ -296,7 +308,8 @@ def is_bundle_file(path: Path) -> bool:
 def collect(module_dir: Path) -> list[Path]:
     found: list[Path] = []
     for path in module_dir.rglob("*"):
-        if set(path.parts) & SKIP_DIRS:
+        # Relative, for the same reason as in declared_licenses().
+        if set(path.relative_to(module_dir).parts) & SKIP_DIRS:
             continue
         if not path.is_file():
             continue
@@ -309,19 +322,25 @@ def collect(module_dir: Path) -> list[Path]:
 def read_text(path: Path) -> str:
     """License text, verbatim apart from line-ending and trailing-space cleanup.
 
-    RTF is converted to plain text with macOS `textutil` when it is available;
-    without it the reader is pointed at the file and at the PDF beside it,
-    because a mangled license text is worse than a pointer to the real one.
+    RTF is converted to plain text with macOS `textutil`. Without a converter
+    this exits non-zero rather than emitting a placeholder: the RTF here is the
+    AmbiqSuite software agreement, and a drop that omits it is not shippable.
     """
     if path.suffix.lower() == ".rtf":
+        # Fail closed. The AmbiqSuite agreement is the license for the largest
+        # binary component in the drop; a package without its text is a package
+        # that must not ship. A pointer would be worse than useless here,
+        # because it would name a file under the gitignored `modules/` tree that
+        # is not in the package at all.
         textutil = shutil.which("textutil")
         if not textutil:
-            return (
-                f"[Not reproduced inline: `{rel(path)}` is RTF and no converter "
-                "(macOS `textutil`) was available when this file was generated. "
-                "The same agreement is provided as "
-                "`sdk/docs/licenses/Ambiq-Software-License-Terms.pdf` in the "
-                "AmbiqSuite payload; both files ship inside the module tree.]"
+            sys.exit(
+                f"error: {rel(path)} is RTF and no converter was found.\n"
+                "       This file carries the AmbiqSuite software agreement and its\n"
+                "       text must be reproduced in the notices, so generation stops\n"
+                "       here rather than shipping a package without it.\n"
+                "       Generate the notices on macOS, where `textutil` is present,\n"
+                "       or install an RTF-to-text converter and extend read_text()."
             )
         proc = subprocess.run(
             [textutil, "-convert", "txt", "-stdout", str(path)],
@@ -329,14 +348,20 @@ def read_text(path: Path) -> str:
             check=False,
         )
         if proc.returncode != 0:
-            return (
-                f"[Not reproduced inline: converting `{rel(path)}` with textutil "
-                f"failed (exit {proc.returncode}). See "
-                "`sdk/docs/licenses/Ambiq-Software-License-Terms.pdf`.]"
+            sys.exit(
+                f"error: converting {rel(path)} with textutil failed "
+                f"(exit {proc.returncode}): "
+                f"{proc.stderr.decode('utf-8', errors='replace').strip()}"
             )
         raw = proc.stdout.decode("utf-8", errors="replace")
     elif path.suffix.lower() in REFERENCE_ONLY_SUFFIXES:
-        return f"[Not reproduced inline: `{rel(path)}` is a binary PDF. See that file.]"
+        # Safe to leave as a pointer only because the same AmbiqSuite agreement
+        # is reproduced in full from LICENSE.rtf in this same section.
+        return (
+            f"[Not reproduced inline: `{rel(path)}` is a binary PDF carrying the "
+            "same AmbiqSuite software agreement whose text is reproduced from "
+            "`LICENSE.rtf` in this section.]"
+        )
     else:
         raw = path.read_bytes().decode("utf-8", errors="replace")
 
