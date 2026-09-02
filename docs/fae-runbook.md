@@ -108,11 +108,11 @@ build, that was a timebase defect, fixed in v5.0.0 (#25).
 | One blank band in the trace | Normal after a real interruption. The app is being honest about lost data. Keep talking; it recovers by itself and will not flood to catch up. |
 | Trace lags you by several seconds | Expected, by design. Say so. |
 | BLE will not reconnect | Forget Device, re-scan on `ble`. `apollo510b_evb` only. |
-| Nothing works and there is a queue | Replug, reload the browser tab, reconnect. If that fails, reflash from source per README Quick start B: `uv run nsx flash --app-dir . --board apollo510b_evb` |
+| Nothing works and there is a queue | Replug, reload the browser tab, reconnect. If that fails, reflash from the prebuilt package (README Quick start A), or from source (Quick start B): `uv run nsx flash --app-dir . --board apollo510b_evb` |
 
 ## Links
 
-- Release and prebuilt firmware (available with v5.0.0):
+- Release and prebuilt firmware:
   <https://github.com/AmbiqAI/heartkit-vitals-demo/releases>
 - Full setup and tiles glossary: `../README.md`
 - Streaming design record: `design/streaming-pipeline.md`

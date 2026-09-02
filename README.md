@@ -63,20 +63,31 @@ build, flash, validation, and cleanup steps are in `docs/developer.md`.
 
 ## Quick start A: flash the prebuilt release binary
 
-Available with the v5.0.0 release. Until that release is published, use Quick
-start B.
+No toolchain required. You need the SEGGER J-Link software installed and the
+EVB connected on its programming/debug USB port, powered on.
 
-1. Download the firmware package for your board from the repository releases
-   page.
-2. Connect the EVB programming/debug USB cable and turn the board on.
-3. Flash it:
+1. Download `heartkit-vitals-demo-v500-firmware.zip` from the
+   [v5.0.0 release](https://github.com/AmbiqAI/heartkit-vitals-demo/releases/tag/v5.0.0),
+   or from the team OneDrive under
+   `Demos/vital-sign-monitoring/firmware/v500/`.
+2. Unzip it and open the `v500/apollo510b` folder.
+3. Run the helper for your computer: double-click `flash_mac.command` on macOS,
+   run `flash_win.bat` on Windows, or run `./flash_linux.sh` on Linux.
+4. Wait for `Flash completed successfully.`, then move the USB cable to the data
+   connector.
 
-   ```
-   TODO(verify): prebuilt flash command
-   ```
+<!-- Maintainers: these J-Link values are resolved from the SoC facts file
+     (modules/nsx-ambiq-sdk/cmake/socs/facts/apollo510b.cmake) plus any board
+     override in boards/<board>/debug.cmake. They are duplicated here for
+     reader convenience only. If they change, update this line and
+     tools/release/package.sh together. -->
 
-4. Wait for the tool to confirm a successful download, then move the USB cable
-   to the data connector.
+If the helper does not run, flash from inside that same folder with
+`JLinkExe -nogui 1 -device AP510NFA-CBR -if SWD -speed 4000 -commandfile downloadfw.jlink`.
+
+To confirm, check that the board enumerates as `heartkit-vitals-demo` on the
+WebUSB port. Full instructions, including the macOS Gatekeeper workaround, are
+in `v500/FLASH.md`.
 
 ## Connect with Tileio
 
