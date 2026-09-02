@@ -72,6 +72,13 @@ LICENSE_FILENAMES = {
 LICENSE_BUNDLE_DIRS = ("sdk/docs/licenses",)
 LICENSE_BUNDLE_SUFFIXES = {".txt", ".md"}
 
+# ns-cmsis-nn follows the SPDX REUSE convention and keeps its license texts in
+# a top-level `LICENSES/` directory (the Ambiq Apollo SDK License it ships
+# under, plus the Apache-2.0 text of the Arm CMSIS-NN it derives from, which
+# its NOTICE points at). Every text in such a directory is a notice, subject to
+# the same exclusions as the AmbiqSuite bundle.
+LICENSE_DIR_NAMES = {"LICENSES"}
+
 # filelist.txt is a packaging manifest, not a license.
 #
 # gpl-3.0.txt is deliberately NOT reproduced. AmbiqSuite's own
@@ -106,6 +113,8 @@ REQUIRED_PATHS = [
     "modules/helia-rt/THIRD_PARTY_NOTICES.md",
     "modules/ns-cmsis-nn/LICENSE",
     "modules/ns-cmsis-nn/NOTICE",
+    "modules/ns-cmsis-nn/LICENSES/Apache-2.0.txt",
+    "modules/ns-cmsis-nn/LICENSES/LicenseRef-Ambiq-Apollo-SDK.txt",
     "modules/nsx-as7058/license.txt",
     "modules/nsx-physiokit/LICENSE",
     "modules/nsx-pmu-armv8m/LICENSE",
@@ -309,6 +318,14 @@ def is_bundle_file(path: Path) -> bool:
     )
 
 
+def is_license_dir_file(path: Path) -> bool:
+    return (
+        path.parent.name in LICENSE_DIR_NAMES
+        and path.suffix.lower() in LICENSE_BUNDLE_SUFFIXES
+        and path.name.lower() not in BUNDLE_EXCLUDE
+    )
+
+
 def collect(module_dir: Path) -> list[Path]:
     found: list[Path] = []
     for path in module_dir.rglob("*"):
@@ -318,7 +335,12 @@ def collect(module_dir: Path) -> list[Path]:
         if not path.is_file():
             continue
         name = path.name.lower()
-        if name in LICENSE_FILENAMES or name == "license.rtf" or is_bundle_file(path):
+        if (
+            name in LICENSE_FILENAMES
+            or name == "license.rtf"
+            or is_bundle_file(path)
+            or is_license_dir_file(path)
+        ):
             found.append(path)
     return sorted(found, key=lambda p: (p.parent.as_posix(), p.name))
 
