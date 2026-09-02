@@ -160,14 +160,19 @@ figure, from the same bench runlogs dated 2026-02-26.
 Measured on an Apollo510B EVB, 2026-09-01 (issue #25), in 250 MHz
 high-performance mode expect:
 
-- AI throughput about **2x** on this build: average 67.8 inferences per second
-  at 96 MHz against 135.5 at 250 MHz. The bench harness, with the models and
-  arena held in TCM, measured 2.59x; the running demo differs because of memory
-  placement and concurrent load, so 2x is the figure to quote for the demo.
-- The three efficiency tiles about **a third lower** on this build. High-
-  performance mode roughly doubles throughput but costs about three times the
-  inference power (5.5 mW against 16.7 mW, bench runlogs 2026-02-26), so
-  inferences per watt fall to about 0.66 of the low-power value.
+- AI throughput **2 to 3x, varying by model and build**. Two builds of the same
+  code measured average throughput of 67.8 against 135.5 inferences per second,
+  and 66.2 against 182.6. The models execute in place from MRAM with their
+  arenas in shared SRAM, so binary layout changes how the largest model caches
+  and moves the three-stage mean without moving inference duty. The bench
+  harness, with the models and arena held in TCM, measured 2.59x.
+- The three efficiency tiles are **always lower in high performance, by roughly a
+  tenth to a third, depending on the model and build layout**. The tiles are
+  throughput divided by inference power: the earlier build gives 0.66 of the
+  low-power value, the release candidate gives 0.91. The direction is firm
+  because energy per inference rises about 17 percent in high-performance mode
+  (bench runlogs 2026-02-26, issue #18); the size of the drop moves with the same
+  binary layout effect as throughput, so quote the direction, not a percentage.
 - A lower battery figure: about 15 days modelled at 250 MHz, 14.6 days against a
   measured 22.3 percent busy fraction, compared with 27.7 days at 96 MHz.
 
