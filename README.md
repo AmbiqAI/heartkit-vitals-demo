@@ -70,17 +70,24 @@ EVB connected on its programming/debug USB port, powered on.
    [v5.0.0 release](https://github.com/AmbiqAI/heartkit-vitals-demo/releases/tag/v5.0.0),
    or from the team OneDrive under
    `Demos/vital-sign-monitoring/firmware/v500/`.
-2. Unzip it and open the `apollo510b` folder.
+2. Unzip it and open the `v500/apollo510b` folder.
 3. Run the helper for your computer: double-click `flash_mac.command` on macOS,
    run `flash_win.bat` on Windows, or run `./flash_linux.sh` on Linux.
 4. Wait for `Flash completed successfully.`, then move the USB cable to the data
    connector.
 
+<!-- Maintainers: these J-Link values are resolved from the SoC facts file
+     (modules/nsx-ambiq-sdk/cmake/socs/facts/apollo510b.cmake) plus any board
+     override in boards/<board>/debug.cmake. They are duplicated here for
+     reader convenience only. If they change, update this line and
+     tools/release/package.sh together. -->
+
 If the helper does not run, flash from inside that same folder with
 `JLinkExe -nogui 1 -device AP510NFA-CBR -if SWD -speed 4000 -commandfile downloadfw.jlink`.
 
 To confirm, check that the board enumerates as `heartkit-vitals-demo` on the
-WebUSB port.
+WebUSB port. Full instructions, including the macOS Gatekeeper workaround, are
+in `v500/FLASH.md`.
 
 ## Connect with Tileio
 

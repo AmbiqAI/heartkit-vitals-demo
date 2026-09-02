@@ -26,15 +26,21 @@ the demo.
      manager configured to execute shell scripts.
 3. Wait for the helper to report `Flash completed successfully.`
 
-On macOS, the first run may be blocked by Gatekeeper. Right-click the file,
-choose Open, then confirm.
+On macOS, the first run may be blocked by Gatekeeper. Any one of these clears
+it:
+
+- Right-click `flash_mac.command`, choose Open, then confirm.
+- Remove the quarantine flag: `xattr -d com.apple.quarantine flash_mac.command`
+- Run it from Terminal instead: `./flash_mac.command`
+
+If `flash_linux.sh` will not run, `chmod +x flash_linux.sh` first.
 
 ## Manual fallback
 
 Run J-Link Commander directly from inside the `@BOARD_DIR@` folder:
 
 ```
-JLinkExe -nogui 1 -device @JLINK_DEVICE@ -if SWD -speed @SWD_SPEED@ -CommanderScript downloadfw.jlink
+JLinkExe -nogui 1 -device @JLINK_DEVICE@ -if SWD -speed @SWD_SPEED@ -commandfile downloadfw.jlink
 ```
 
 On Windows the binary is `JLink.exe`. The command file loads `firmware.bin` at

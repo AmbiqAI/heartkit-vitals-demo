@@ -18,9 +18,12 @@
 #   dist/heartkit-vitals-demo-<tag>-firmware.zip
 #
 # Every J-Link parameter is read from the SoC facts file that `nsx flash`
-# itself uses, then cross-checked against the linker script and against the
-# command file NSX generated during this build. Nothing is hard-coded here.
-# Sources are recorded in BUILD-INFO.txt inside the package.
+# uses, then cross-checked against the parameters CMake actually resolved for
+# the flash target, against the linker script, and against the command file
+# NSX generated during this build. The facts file is not the whole story: a
+# board may override the device in boards/<board>/debug.cmake, so the resolved
+# values from build.ninja are authoritative and any divergence is a hard stop.
+# Nothing is hard-coded here. Sources are recorded in BUILD-INFO.txt.
 
 set -euo pipefail
 
@@ -87,6 +90,16 @@ case "$BOARD" in
   *) die "unsupported board: $BOARD (expected one of apollo510b_evb, apollo510_evb, apollo330mP_evb)" ;;
 esac
 
+# The table above is complete, but only apollo510b_evb has been validated end
+# to end for release packaging (rendered helpers diffed against the v410 drop,
+# parameters cross-checked four ways). The other boards resolve different
+# J-Link devices via boards/<board>/debug.cmake and have not been exercised, so
+# refuse rather than ship an unvalidated package.
+case "$BOARD" in
+  apollo510b_evb) ;;
+  *) die "board ${BOARD} is not validated for release packaging; only apollo510b_evb is supported for this drop" ;;
+esac
+
 cd "$REPO_DIR"
 
 for tool in uv zip; do
@@ -117,10 +130,22 @@ trap 'rm -f "$BUILD_LOG"' EXIT
 note "Building ${APP_NAME} for ${BOARD} (${VERSION})"
 
 # Force the app sources to recompile so the packaged image matches the tree.
-touch src/* 2>/dev/null || die "could not touch src/*"
+# Must recurse: src/generated/*.c is missed by a plain src/* glob.
+find src -type f -exec touch {} + || die "could not touch sources under src/"
+
+# Discard any previous build tree. Reusing one lets a stale toolchain path or
+# build type decide what ships. A fresh configure also makes --frozen mean
+# something: it re-resolves and fails on nsx.yml / nsx.lock / modules drift.
+rm -rf "$BUILD_DIR"
 
 set +e
-uv run nsx build --app-dir "$REPO_DIR" --board "$BOARD" 2>&1 | tee "$BUILD_LOG"
+uv run nsx configure --app-dir "$REPO_DIR" --board "$BOARD" --frozen 2>&1 | tee "$BUILD_LOG"
+configure_rc="${PIPESTATUS[0]}"
+set -e
+[ "$configure_rc" -eq 0 ] || die "nsx configure --frozen exited with status ${configure_rc}"
+
+set +e
+uv run nsx build --app-dir "$REPO_DIR" --board "$BOARD" 2>&1 | tee -a "$BUILD_LOG"
 build_rc="${PIPESTATUS[0]}"
 set -e
 
@@ -167,6 +192,32 @@ if [ -n "$NSX_PKG_DIR" ] && [ -d "$NSX_PKG_DIR" ]; then
   else
     die "TODO(verify): '-if SWD' not found in ${NSX_PKG_DIR}; do not guess the interface"
   fi
+fi
+
+# Cross-check 0: what CMake actually resolved for the flash target. This is
+# the value `nsx flash` would use, including any boards/<board>/debug.cmake
+# override of the SoC facts, so a divergence means the packaged helpers would
+# disagree with the tool.
+NINJA_FILE="${BUILD_DIR}/build.ninja"
+[ -f "$NINJA_FILE" ] || die "TODO(verify): ${NINJA_FILE} not found; cannot confirm the resolved J-Link parameters"
+FLASH_CMD="$(grep -E "^[[:space:]]*COMMAND = .*JLink.*-commandfile [^ ]*flash_cmds\.jlink" "$NINJA_FILE" | first_line)"
+[ -n "$FLASH_CMD" ] || die "TODO(verify): no J-Link flash COMMAND found in ${NINJA_FILE}"
+RESOLVED_DEVICE="$(printf '%s\n' "$FLASH_CMD" | sed -n 's/.*-device[[:space:]]\{1,\}\([^[:space:]]*\).*/\1/p')"
+RESOLVED_SPEED="$(printf '%s\n' "$FLASH_CMD" | sed -n 's/.*-speed[[:space:]]\{1,\}\([^[:space:]]*\).*/\1/p')"
+RESOLVED_IF="$(printf '%s\n' "$FLASH_CMD" | sed -n 's/.*-if[[:space:]]\{1,\}\([^[:space:]]*\).*/\1/p')"
+[ -n "$RESOLVED_DEVICE" ] || die "TODO(verify): could not parse -device from the flash COMMAND in ${NINJA_FILE}"
+[ -n "$RESOLVED_SPEED" ]  || die "TODO(verify): could not parse -speed from the flash COMMAND in ${NINJA_FILE}"
+[ -n "$RESOLVED_IF" ]     || die "TODO(verify): could not parse -if from the flash COMMAND in ${NINJA_FILE}"
+
+if [ "$RESOLVED_DEVICE" != "$JLINK_DEVICE" ] || [ "$RESOLVED_SPEED" != "$SWD_SPEED" ] || [ "$RESOLVED_IF" != "$JLINK_IF" ]; then
+  cat >&2 <<PARAMS
+error: the J-Link parameters CMake resolved differ from the SoC facts file.
+A board-level override (boards/${BOARD}/debug.cmake) is the usual cause.
+Stopping rather than shipping helpers that disagree with \`nsx flash\`.
+  ${FACTS_FILE}          : device=${JLINK_DEVICE} if=${JLINK_IF} speed=${SWD_SPEED}
+  ${NINJA_FILE} (resolved) : device=${RESOLVED_DEVICE} if=${RESOLVED_IF} speed=${RESOLVED_SPEED}
+PARAMS
+  exit 1
 fi
 
 # Cross-check 1: the linker script the build actually uses.
@@ -247,6 +298,19 @@ fi
 chmod 755 "${BOARD_PKG}/flash_mac.command" "${BOARD_PKG}/flash_linux.sh"
 chmod 644 "${BOARD_PKG}/flash_win.bat" "${BOARD_PKG}/downloadfw.jlink"
 
+# Dependency provenance. The app repo's dirty flag does not cover modules/,
+# which is ignored via modules/.gitignore, so check it separately. This exits
+# non-zero and stops the package if a module diverges from nsx.lock.
+MODULES_REPORT="$(uv run python "${SCRIPT_DIR}/verify_modules.py" "$REPO_DIR" "$BOARD")" \
+  || die "dependency module check failed; see the message above"
+
+# Toolchain and build type actually used, straight from the configured cache.
+CACHE_FILE="${BUILD_DIR}/CMakeCache.txt"
+CMAKE_TOOLCHAIN="$(sed -n 's/^CMAKE_TOOLCHAIN_FILE:[^=]*=\(.*\)$/\1/p' "$CACHE_FILE" 2>/dev/null | first_line)"
+CMAKE_BUILD_TYPE="$(sed -n 's/^CMAKE_BUILD_TYPE:[^=]*=\(.*\)$/\1/p' "$CACHE_FILE" 2>/dev/null | first_line)"
+[ -n "$CMAKE_TOOLCHAIN" ]  || CMAKE_TOOLCHAIN="TODO(verify): not found in ${CACHE_FILE}"
+[ -n "$CMAKE_BUILD_TYPE" ] || CMAKE_BUILD_TYPE="(unset)"
+
 GIT_COMMIT="$(git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null || echo unknown)"
 GIT_DIRTY=""
 if ! git -C "$REPO_DIR" diff --quiet HEAD -- 2>/dev/null; then GIT_DIRTY=" (tree dirty)"; fi
@@ -275,7 +339,13 @@ Provenance
 Git commit     : ${GIT_COMMIT}${GIT_DIRTY}
 NSX toolchain  : ${NSX_VERSION}
 nsx.yml pin    : tooling.nsx.version = ${NSX_PINNED}
-Build command  : uv run nsx build --app-dir . --board ${BOARD}
+Build command  : uv run nsx configure --app-dir . --board ${BOARD} --frozen
+                 uv run nsx build --app-dir . --board ${BOARD}
+                 (built from a removed and freshly configured build tree)
+Toolchain file : ${CMAKE_TOOLCHAIN}
+Build type     : ${CMAKE_BUILD_TYPE}
+
+${MODULES_REPORT}
 
 Image
 -----
@@ -286,10 +356,12 @@ J-Link parameters and their sources
 -----------------------------------
 Device         : ${JLINK_DEVICE}
                  ${FACTS_FILE} (NSX_SEGGER_DEVICE)
+                 confirmed against the resolved flash command in ${NINJA_FILE}
 Interface      : ${JLINK_IF}
                  ${IF_SOURCE}
 Speed          : ${SWD_SPEED} kHz
                  ${FACTS_FILE} (NSX_SEGGER_IF_SPEED)
+                 confirmed against the resolved flash command in ${NINJA_FILE}
 Load address   : ${LOAD_ADDRESS}
                  ${FACTS_FILE} (NSX_SEGGER_PF_ADDR)
                  cross-checked against ${LD_PATH} (MCU_MRAM ORIGIN = ${LD_ORIGIN})
