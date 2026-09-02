@@ -1450,8 +1450,29 @@ EcgProcessTask(void *pvParameters)
              * duration has not been written yet and bills it at the previous
              * value. On the first-ever run that value is the store.c seed
              * (1.0), which is a legitimate ips (a 2 s stage) and so cannot be
-             * screened out downstream as a sentinel. Keep these two adjacent.
-             * Same ordering in the segmentation and metrics branches below. */
+             * screened out downstream as a sentinel.
+             *
+             * SOURCE ADJACENCY IS NOT ENOUGH, hence the barrier. `*Ips` is an
+             * ordinary non-volatile store and the counter increment inside
+             * hkv_count() is volatile; C does not order non-volatile accesses
+             * against volatile ones, so the compiler is free to sink the store
+             * past the increment. GCC 15.2 was measured doing exactly that at
+             * the metrics site: recompiling this file with the three barriers
+             * removed puts MET_RUNS (g_hkv_counters+140) at EcgProcessTask
+             * +0x528 and the arrhythmiaIps store (ecgMetResults+24) at +0x532,
+             * i.e. counter first. With the barriers the same store lands at
+             * +0x4f4, ahead of the counter at +0x52e. The empty asm with a
+             * "memory" clobber is what forces that. Same pattern in the
+             * segmentation and metrics branches; do not remove it to "tidy up".
+             *
+             * READING THE DISASSEMBLY -- CHECK THE FIELD OFFSET. Each branch
+             * stores TWO floats into ecgMetResults: the *Ips field (+16 den,
+             * +20 seg, +24 arr) and the *uIpspw field (+32, +36, +40). Only
+             * the *Ips store is ordering-critical. The *uIpspw store is
+             * expected to sit after the counter and its position means
+             * nothing. Comparing the counter against the +40 store instead of
+             * the +24 store makes a correct metrics site look inverted. */
+            __asm volatile("" ::: "memory");
             hkv_count(HKV_CNT_PIPE_DEN_RUNS);
             /* DASHBOARD CHANGE: the uIps/W divisor is now the sourced
              * MCU_INFERENCE_POWER_MW_LP (5.5 mW) where it used to be
@@ -1500,7 +1521,9 @@ EcgProcessTask(void *pvParameters)
             ringbuffer_seek(&rbEcgSeg, ECG_SEG_VALID_LEN);
 
             ecgMetResults.segmentIps = ips_from_delta_us(dwt_delta_us(tickStart));
-            /* Counter after duration -- see the denoise branch. */
+            /* Counter after duration, barrier required -- see the denoise
+             * branch for why source order alone does not bind the compiler. */
+            __asm volatile("" ::: "memory");
             hkv_count(HKV_CNT_PIPE_SEG_RUNS);
             /* ~43% higher than earlier builds -- see the denoise branch. */
             ecgMetResults.segmentuIpspw = 1.0e3f * ecgMetResults.segmentIps / MCU_INFERENCE_POWER_MW_LP;
@@ -1533,7 +1556,10 @@ EcgProcessTask(void *pvParameters)
             ringbuffer_seek(&rbEcgMaskMet, ECG_MET_VALID_LEN);
 
             ecgMetResults.arrhythmiaIps = ips_from_delta_us(dwt_delta_us(tickStart));
-            /* Counter after duration -- see the denoise branch. */
+            /* Counter after duration, barrier required -- see the denoise
+             * branch. This is the site where GCC was observed sinking the
+             * store past the volatile increment. */
+            __asm volatile("" ::: "memory");
             hkv_count(HKV_CNT_PIPE_MET_RUNS);
             /* ~43% higher than earlier builds -- see the denoise branch. */
             ecgMetResults.arrhythmiaIpspw = 1.0e3f * ecgMetResults.arrhythmiaIps / MCU_INFERENCE_POWER_MW_LP;
@@ -1705,8 +1731,13 @@ PpgProcessTask(void *pvParameters)
  * is defensive only: store.c seeds all three *Ips at 1.0, so it never fires in
  * practice, and 1.0 is a legitimate ips (a 2 s stage) and cannot be used as a
  * cold-start sentinel. Cold start is handled instead by publishing each run
- * counter AFTER its duration (see EcgProcessTask), so runsDelta cannot count a
- * run whose duration has not been written yet.
+ * counter AFTER its duration, so runsDelta cannot count a run whose duration
+ * has not been written yet. That ordering is NOT a property of the source
+ * layout: the *Ips stores are non-volatile and the counter increments are
+ * volatile, which C does not order against each other, and GCC was measured
+ * reordering one of the three. It is enforced by an explicit
+ * `__asm volatile("" ::: "memory")` barrier at each of the three sites in
+ * EcgProcessTask. Removing a barrier reintroduces the poisoned first sample.
  *
  * Caveat worth knowing: `ips` is the LAST duration, not the window mean, so a
  * stage whose cost varies is billed at its most recent cost. The 30 s rolling
@@ -1844,6 +1875,25 @@ CpuProcessTask(void *pvParameters)
             /* Inference duty for this window: each stage's own measured run
              * rate x its own measured duration. Counters are free-running and
              * never reset by the reporter, so a local delta is the window. */
+            /* TIMEBASE -- THE TWO TERMS MUST STAY ON THE SAME CLOCK.
+             * Both sides of the duty ratio are derived from SystemCoreClock,
+             * and that is what makes this correct in HP mode rather than a
+             * coincidence worth preserving deliberately:
+             *   - the numerator, 2/ips, comes from dwt_delta_us() (main.cc
+             *     :152), which divides DWT cycles by SystemCoreClock;
+             *   - the denominator comes from the FreeRTOS tick, and
+             *     configCPU_CLOCK_HZ is also SystemCoreClock.
+             * Nothing updates SystemCoreClock on a performance-mode change, so
+             * it stays at 96 MHz even when the core is running at 250 MHz. In
+             * HP mode the measured durations AND this window are therefore both
+             * over-reported by the same 250/96 = 2.604x, the factors cancel in
+             * the ratio, and the duty that comes out is true wall-time duty.
+             * DO NOT move this window to a real wall clock (RTC / STIMER) while
+             * dwt_delta_us() still scales by SystemCoreClock: that breaks the
+             * cancellation and HP duty over-reports by 2.6x, which clamps
+             * inferenceFrac to busy and bills everything at inference power.
+             * The two have to change together -- see the SystemCoreClock /
+             * SysTick timebase issue, which owns that fix. */
             const TickType_t windowEndTicks = xTaskGetTickCount();
             const float32_t publishWindowSec =
                 (float32_t)(uint32_t)(windowEndTicks - publishWindowStart) / (float32_t)configTICK_RATE_HZ;
