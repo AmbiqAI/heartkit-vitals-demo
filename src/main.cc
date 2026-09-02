@@ -1402,7 +1402,6 @@ EcgProcessTask(void *pvParameters)
         ///////////////////////////////////////////////////////////////////
         if (ringbuffer_len(&rbEcgDen) >= ECG_DEN_WINDOW_LEN) {
             tickStart = dwt_cycles();
-            hkv_count(HKV_CNT_PIPE_DEN_RUNS);
             ringbuffer_peek(&rbEcgDen, ecgDenInout, ECG_DEN_WINDOW_LEN);
 
             pk_standardize_f32(ecgDenInout, ecgDenInout, ECG_DEN_WINDOW_LEN, NORM_STD_EPS);
@@ -1444,7 +1443,24 @@ EcgProcessTask(void *pvParameters)
             ringbuffer_seek(&rbEcgDen, ECG_DEN_VALID_LEN);
 
             ecgMetResults.denoiseIps = ips_from_delta_us(dwt_delta_us(tickStart));
-            ecgMetResults.denoiseuIpspw = 1.0e3f * ecgMetResults.denoiseIps / MCU_INFERENCE_POWER_MW;
+            /* Publish the run counter AFTER the duration it belongs to, never
+             * before. CpuProcessTask runs in a different task and pairs this
+             * stage's runsDelta with its *Ips to derive inference duty; with
+             * the count first, a window sampled mid-execution sees a run whose
+             * duration has not been written yet and bills it at the previous
+             * value. On the first-ever run that value is the store.c seed
+             * (1.0), which is a legitimate ips (a 2 s stage) and so cannot be
+             * screened out downstream as a sentinel. Keep these two adjacent.
+             * Same ordering in the segmentation and metrics branches below. */
+            hkv_count(HKV_CNT_PIPE_DEN_RUNS);
+            /* DASHBOARD CHANGE: the uIps/W divisor is now the sourced
+             * MCU_INFERENCE_POWER_MW_LP (5.5 mW) where it used to be
+             * AVG_INFERENCE_POWER (7.87 mW, unsourced), so all three *uIpspw
+             * values read ~43% higher than on any earlier build. Efficiency did
+             * not change; the power figure divided into it did. These stay
+             * fixed at the LP figure and do NOT follow appState.speedMode the
+             * way the battery model below now does. */
+            ecgMetResults.denoiseuIpspw = 1.0e3f * ecgMetResults.denoiseIps / MCU_INFERENCE_POWER_MW_LP;
             if (err != 0) {
                 hkv_count(HKV_CNT_PIPE_ERR_ECG_DEN);
             }
@@ -1456,7 +1472,6 @@ EcgProcessTask(void *pvParameters)
         ///////////////////////////////////////////////////////////////////
         else if (ringbuffer_len(&rbEcgSeg) >= ECG_SEG_WINDOW_LEN) {
             tickStart = dwt_cycles();
-            hkv_count(HKV_CNT_PIPE_SEG_RUNS);
             ringbuffer_peek(&rbEcgSeg, ecgSegInout, ECG_SEG_WINDOW_LEN);
 
             if (appState.segMode == SegmentationModeDsp) {
@@ -1485,7 +1500,10 @@ EcgProcessTask(void *pvParameters)
             ringbuffer_seek(&rbEcgSeg, ECG_SEG_VALID_LEN);
 
             ecgMetResults.segmentIps = ips_from_delta_us(dwt_delta_us(tickStart));
-            ecgMetResults.segmentuIpspw = 1.0e3f * ecgMetResults.segmentIps / MCU_INFERENCE_POWER_MW;
+            /* Counter after duration -- see the denoise branch. */
+            hkv_count(HKV_CNT_PIPE_SEG_RUNS);
+            /* ~43% higher than earlier builds -- see the denoise branch. */
+            ecgMetResults.segmentuIpspw = 1.0e3f * ecgMetResults.segmentIps / MCU_INFERENCE_POWER_MW_LP;
             if (err != 0) {
                 hkv_count(HKV_CNT_PIPE_ERR_ECG_SEG);
             }
@@ -1497,7 +1515,6 @@ EcgProcessTask(void *pvParameters)
         ///////////////////////////////////////////////////////////////////
         else if (MIN(ringbuffer_len(&rbEcgMet), ringbuffer_len(&rbEcgMaskMet)) >= ECG_MET_WINDOW_LEN) {
             tickStart = dwt_cycles();
-            hkv_count(HKV_CNT_PIPE_MET_RUNS);
             ringbuffer_peek(&rbEcgMet, ecgMetData, ECG_MET_WINDOW_LEN);
             ringbuffer_peek(&rbEcgMaskMet, ecgMaskMetData, ECG_MET_WINDOW_LEN);
 
@@ -1516,7 +1533,10 @@ EcgProcessTask(void *pvParameters)
             ringbuffer_seek(&rbEcgMaskMet, ECG_MET_VALID_LEN);
 
             ecgMetResults.arrhythmiaIps = ips_from_delta_us(dwt_delta_us(tickStart));
-            ecgMetResults.arrhythmiaIpspw = 1.0e3f * ecgMetResults.arrhythmiaIps / MCU_INFERENCE_POWER_MW;
+            /* Counter after duration -- see the denoise branch. */
+            hkv_count(HKV_CNT_PIPE_MET_RUNS);
+            /* ~43% higher than earlier builds -- see the denoise branch. */
+            ecgMetResults.arrhythmiaIpspw = 1.0e3f * ecgMetResults.arrhythmiaIps / MCU_INFERENCE_POWER_MW_LP;
 
             send_ecg_metrics();
             if (err != 0) {
@@ -1654,6 +1674,14 @@ PpgProcessTask(void *pvParameters)
 // `busy` is cpuPercUtil, the MEASURED 30 s rolling utilisation, unchanged by
 // this model. It includes demo transport, so it is conservative and needs no
 // duty-cycle argument.
+//
+// THE MODEL FOLLOWS THE OPERATING POINT. INFERENCE and COMPUTE are read per
+// window from the LP/HP constant pair that matches `appState.speedMode`, the
+// dashboard control that calls nsx_power_set_performance_mode() at runtime.
+// Without that, switching to high performance would REPORT more battery life:
+// the same work finishes ~2.6x faster, so both `busy` and the derived
+// inference duty fall, while the real draw is ~3x higher. SLEEP is shared
+// between the two -- Sleep 1 does not depend on the run clock.
 
 /**
  * @brief Wall-time fraction one pipeline stage spent running, over a window.
@@ -1662,12 +1690,23 @@ PpgProcessTask(void *pvParameters)
  * stage's last DWT-timed duration in the legacy 2e6/deltaUs scale (see
  * ips_from_delta_us), which inverts to duration_s = 2/ips; `runsDelta` is that
  * stage's own run counter over `windowSec`, so the cadence is derived rather
- * than hardcoded at the nominal 2 s. A stage switched to DSP or off, or one
- * that stalls, drops out of the sum by itself.
+ * than hardcoded at the nominal 2 s. A stage that stalls drops out of the sum
+ * by itself, because its run counter stops advancing.
  *
- * Returns 0 on cold start -- a stage that has never run has ips == 0, and
- * duration_s = 2/ips would be a divide by zero -- and whenever the stage did
- * not run in this window, which is the same answer for a different reason.
+ * A stage switched to DSP or OFF does NOT drop out. Its hkv_count() still
+ * fires, and metrics_capture_ecg() runs unconditionally in the metrics branch,
+ * so the stage keeps reporting a (much shorter) DWT duration and that time is
+ * billed at inference power. This OVER-bills DSP and off modes, which is the
+ * conservative direction, and it is deliberate: the counters stay a
+ * measurement of what the pipeline actually did rather than a function of the
+ * mode flags. Do not gate the counters on mode to "fix" this.
+ *
+ * Returns 0 whenever the stage did not run in this window. The ips <= 0 guard
+ * is defensive only: store.c seeds all three *Ips at 1.0, so it never fires in
+ * practice, and 1.0 is a legitimate ips (a 2 s stage) and cannot be used as a
+ * cold-start sentinel. Cold start is handled instead by publishing each run
+ * counter AFTER its duration (see EcgProcessTask), so runsDelta cannot count a
+ * run whose duration has not been written yet.
  *
  * Caveat worth knowing: `ips` is the LAST duration, not the window mean, so a
  * stage whose cost varies is billed at its most recent cost. The 30 s rolling
@@ -1687,11 +1726,15 @@ CpuProcessTask(void *pvParameters)
 {
     (void)pvParameters;
     const uint32_t samplesPerPublish = kCpuStatsPublishPeriodMs / kCpuStatsSamplePeriodMs;
-    /* Nominal, not elapsed: the sample loop is paced by vTaskDelay, so the
-     * publish window is samplesPerPublish x kCpuStatsSamplePeriodMs plus the
-     * work itself. Overstating the window slightly understates the derived
-     * inference duty, which errs toward billing time at compute power. */
-    const float32_t kPublishWindowSec = (float32_t)(samplesPerPublish * kCpuStatsSamplePeriodMs) / 1000.0f;
+    /* Elapsed, not nominal. The sample loop is paced by a RELATIVE vTaskDelay,
+     * so each iteration takes the delay plus its own work and the real window
+     * is always longer than samplesPerPublish x kCpuStatsSamplePeriodMs. Using
+     * the nominal value as the duty denominator would understate the window and
+     * therefore OVERSTATE inference duty. Tick deltas remove the argument: the
+     * denominator is the window that actually elapsed. Re-baselined together
+     * with the run counters on every discarded interval below, so the window
+     * and the counter deltas always describe the same span. */
+    TickType_t publishWindowStart = xTaskGetTickCount();
     float32_t cpuUtilSecondAccum = 0.0f;
     uint32_t cpuUtilSecondCount = 0;
     float32_t cpuUtilRolling[kCpuStatsRollingSeconds] = {0};
@@ -1725,6 +1768,14 @@ CpuProcessTask(void *pvParameters)
              * previous published value alone. If stat_overflow is climbing on
              * the `cpu` report line, raise HKV_TASK_STATUS_CAPACITY. */
             hkv_count(HKV_CNT_CPU_STAT_OVERFLOW);
+            /* Discarding the interval means discarding the stage runs inside
+             * it too, exactly as the prevRun re-baseline below does. Without
+             * this, the runs that happened during a skipped interval land in
+             * the next published window and inflate its inference duty. */
+            prevDenRuns = g_hkv_counters[HKV_CNT_PIPE_DEN_RUNS];
+            prevSegRuns = g_hkv_counters[HKV_CNT_PIPE_SEG_RUNS];
+            prevMetRuns = g_hkv_counters[HKV_CNT_PIPE_MET_RUNS];
+            publishWindowStart = xTaskGetTickCount();
             vTaskDelay(pdMS_TO_TICKS(kCpuStatsSamplePeriodMs));
             continue;
         }
@@ -1749,6 +1800,7 @@ CpuProcessTask(void *pvParameters)
             prevDenRuns = g_hkv_counters[HKV_CNT_PIPE_DEN_RUNS];
             prevSegRuns = g_hkv_counters[HKV_CNT_PIPE_SEG_RUNS];
             prevMetRuns = g_hkv_counters[HKV_CNT_PIPE_MET_RUNS];
+            publishWindowStart = xTaskGetTickCount();
             vTaskDelay(pdMS_TO_TICKS(100));
             continue;
         }
@@ -1792,13 +1844,17 @@ CpuProcessTask(void *pvParameters)
             /* Inference duty for this window: each stage's own measured run
              * rate x its own measured duration. Counters are free-running and
              * never reset by the reporter, so a local delta is the window. */
+            const TickType_t windowEndTicks = xTaskGetTickCount();
+            const float32_t publishWindowSec =
+                (float32_t)(uint32_t)(windowEndTicks - publishWindowStart) / (float32_t)configTICK_RATE_HZ;
+            publishWindowStart = windowEndTicks;
             const uint32_t denRuns = g_hkv_counters[HKV_CNT_PIPE_DEN_RUNS];
             const uint32_t segRuns = g_hkv_counters[HKV_CNT_PIPE_SEG_RUNS];
             const uint32_t metRuns = g_hkv_counters[HKV_CNT_PIPE_MET_RUNS];
             const float32_t infFracInstant =
-                stage_duty_frac(denRuns - prevDenRuns, ecgMetResults.denoiseIps, kPublishWindowSec) +
-                stage_duty_frac(segRuns - prevSegRuns, ecgMetResults.segmentIps, kPublishWindowSec) +
-                stage_duty_frac(metRuns - prevMetRuns, ecgMetResults.arrhythmiaIps, kPublishWindowSec);
+                stage_duty_frac(denRuns - prevDenRuns, ecgMetResults.denoiseIps, publishWindowSec) +
+                stage_duty_frac(segRuns - prevSegRuns, ecgMetResults.segmentIps, publishWindowSec) +
+                stage_duty_frac(metRuns - prevMetRuns, ecgMetResults.arrhythmiaIps, publishWindowSec);
             prevDenRuns = denRuns;
             prevSegRuns = segRuns;
             prevMetRuns = metRuns;
@@ -1846,14 +1902,23 @@ CpuProcessTask(void *pvParameters)
             }
             const float32_t idleFrac = 1.0f - busyFrac;
 
-            const float32_t avgPower = (inferenceFrac * (float32_t)MCU_INFERENCE_POWER_MW +
-                                        computeFrac * (float32_t)MCU_COMPUTE_POWER_MW +
+            /* Operating point, read once per window. appState.speedMode is a
+             * live dashboard control (TIO_UIO_SPEED_MODE_IDX -> set_speed_mode
+             * -> nsx_power_set_performance_mode), so the busy-state figures
+             * have to follow it or HP mode reports MORE battery life than LP
+             * while drawing ~3x the power. Sleep power is shared. See the
+             * constant pairs and their sources in constants.h. */
+            const bool hpMode = (appState.speedMode != 0);
+            const float32_t inferencePowerMw =
+                hpMode ? (float32_t)MCU_INFERENCE_POWER_MW_HP : (float32_t)MCU_INFERENCE_POWER_MW_LP;
+            const float32_t computePowerMw =
+                hpMode ? (float32_t)MCU_COMPUTE_POWER_MW_HP : (float32_t)MCU_COMPUTE_POWER_MW_LP;
+
+            const float32_t avgPower = (inferenceFrac * inferencePowerMw + computeFrac * computePowerMw +
                                         idleFrac * (float32_t)MCU_SLEEP_POWER_MW) /
                                        (float32_t)SYSTEM_POWER_MARGIN;
 
             appMetResults.battInferenceFrac = inferenceFrac;
-            appMetResults.battComputeFrac = computeFrac;
-            appMetResults.battIdleFrac = idleFrac;
             appMetResults.battAvgPowerMw = avgPower;
             /* avgPower is bounded below by idle power for any real fraction set,
              * so the guard is defensive against a constant being zeroed rather
@@ -2239,13 +2304,16 @@ report_extra_cpu(void)
     hkv_log_fx2("util", appMetResults.cpuPercUtil);
     hkv_log_fx2("batt_days", appMetResults.batteryDays);
     /* Battery-model breakdown (issue #17), so the three-state split is legible
-     * on SWO instead of only its result. `batt_inf` + `batt_cmp` is the modelled
-     * busy fraction and should track `util`; `batt_inf` pinned equal to it means
-     * the clamp is active, i.e. derived inference duty exceeded measured busy.
-     * Percentages of wall time; batt_pwr is the modelled average in mW. */
+     * on SWO instead of only its result. Only the two INDEPENDENT terms are
+     * emitted: the other two are exact derivations of these and `util`, and
+     * every extra fixed-point field lengthens the hold on the global log mutex.
+     *   batt_cmp  = util - batt_inf     (compute % of wall time)
+     *   batt_idle = 100 - util          (idle % of wall time)
+     * `batt_inf` equal to `util` means the clamp is active, i.e. derived
+     * inference duty exceeded measured busy. batt_inf is a percentage of wall
+     * time; batt_pwr is the modelled average in mW at the LIVE speed mode
+     * (see `speed_mode` on the `app` line -- the two must be read together). */
     hkv_log_fx2("batt_inf", 100.0f * appMetResults.battInferenceFrac);
-    hkv_log_fx2("batt_cmp", 100.0f * appMetResults.battComputeFrac);
-    hkv_log_fx2("batt_idle", 100.0f * appMetResults.battIdleFrac);
     hkv_log_fx2("batt_pwr", appMetResults.battAvgPowerMw);
     hkv_log_fx2("avg_ips", appMetResults.avgAiIps);
     /* Free stack words on the BLE radio dispatcher task, and the tio_ble_init()
