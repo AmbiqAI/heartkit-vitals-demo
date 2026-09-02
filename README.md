@@ -16,7 +16,7 @@ Tileio web dashboard over USB. Apollo510B also supports Tileio over BLE.
   T-wave), and arrhythmia classification. Segmentation bands are drawn on the
   live trace.
 - Derived vitals: heart rate, HRV, pulse rate, SpO2, and PPG quality.
-- Device telemetry alongside the clinical signals: CPU utilization, an estimated
+- Device telemetry alongside the clinical signals: CPU utilization, a modelled
   battery life, AI throughput, and AI efficiency.
 - A runtime speed toggle that moves the SoC between 96 MHz low-power and 250 MHz
   high-performance operation while streaming continues.
@@ -44,26 +44,8 @@ You also need:
   only. Not needed once the board is flashed.
 - Chrome or Edge. Safari does not support WebUSB.
 
-## Quick start A: flash the prebuilt release binary
-
-This is the path for a demo. No toolchain, no build.
-
-1. Download the firmware package for your board from the
-   [v5.0.0 release](https://github.com/AmbiqAI/heartkit-vitals-demo/releases).
-2. Connect the EVB programming/debug USB cable and turn the board on.
-3. Flash it:
-
-   ```
-   TODO(verify): prebuilt flash command
-   ```
-
-4. Wait for the tool to confirm a successful download, then move the USB cable
-   to the data connector.
-
-> **TODO(verify): the v5.0.0 release does not exist yet.** As of 2026-09-01 the
-> newest tag in this repository is `v4.2.0` and `gh release list` returns
-> nothing. Confirm the release, its asset filenames, and the flash command after
-> the release build. Until then, use Quick start B.
+Two ways to get firmware onto the board. Build from source works today. The
+prebuilt package becomes available with the v5.0.0 release.
 
 ## Quick start B: build from source
 
@@ -76,9 +58,25 @@ uv run nsx flash --app-dir . --board apollo510b_evb
 
 The built firmware is written to `build/<board>/heartkit-vitals-demo.bin`.
 
-`pyproject.toml` requires `neuralspotx>=0.7.17`; `uv sync` handles this. See
-issue #21 for the toolchain bump. Full build, flash, validation, and cleanup
-steps are in `docs/developer.md`.
+`pyproject.toml` requires `neuralspotx>=0.7.17`; `uv sync` handles this. Full
+build, flash, validation, and cleanup steps are in `docs/developer.md`.
+
+## Quick start A: flash the prebuilt release binary
+
+Available with the v5.0.0 release. Until that release is published, use Quick
+start B.
+
+1. Download the firmware package for your board from the repository releases
+   page.
+2. Connect the EVB programming/debug USB cable and turn the board on.
+3. Flash it:
+
+   ```
+   TODO(verify): prebuilt flash command
+   ```
+
+4. Wait for the tool to confirm a successful download, then move the USB cable
+   to the data connector.
 
 ## Connect with Tileio
 
@@ -93,8 +91,8 @@ it.
 
 1. Move the USB cable to the board's data connector.
 2. Select Device, interface `usb`, Scan.
-3. Pick the Ambiq device. It enumerates as `heartkit_vitals_demo`, vendor
-   `Ambiq`.
+3. Pick the Ambiq device. It enumerates with the product string
+   `heartkit-vitals-demo` (`src/main.cc`), vendor `Ambiq`.
 4. Select, then Connect. The dashboard should read Connected, and within about
    10 seconds the waveforms move and the numeric tiles leave `--`.
 
@@ -115,51 +113,60 @@ needs.
 ### Tiles glossary
 
 **CPU Usage.** Percent busy, computed as `100 - idle` over a 30-second rolling
-window (issue #8). It includes everything the firmware does, which means the
-USB or BLE transport that exists only to feed this dashboard is counted in the
-number. A deployed product that streams nothing would read lower. BLE reads
-higher than USB for the same reason: measurements in issues #19 and #24 put BLE
-at 37.7 percent against roughly 27 to 28 percent for USB.
+window (`kCpuStatsRollingSeconds` in `src/main.cc`). It includes everything the
+firmware does, which means the USB or BLE transport that exists only to feed
+this dashboard is counted in the number. A deployed product that streams nothing
+would read lower. BLE reads higher than USB for the same reason: measurements
+put BLE at 37.7 percent against roughly 27 to 28 percent for USB (issue #19).
+Attributing the number across subsystems is separate work (issue #8).
 
-**CR2032 Battery Life.** This is an **estimate, not a measurement**. It models
-**MCU energy only; sensor power is deliberately excluded**, because sensor draw
-depends on LED count, drive strength, and sampling duty, none of which are
-properties of the MCU. The model splits time into inference, general compute,
-and sleep, and bills each at its own figure: datasheet values for sleep and
-per-MHz compute, bench measurements for inference (issue #18). The estimate
-assumes 1485 mWh, two CR2032 cells, MCU energy only, sensor excluded. Measured
-27.8 days at 96 MHz on the current build (issue #17).
+**MCU Battery Life (est., excl. sensor).** This is a **model, not a
+measurement**. It covers **MCU energy only; sensor power is deliberately
+excluded**, because sensor draw depends on LED count, drive strength, and
+sampling duty, none of which are properties of the MCU. The model splits time
+into inference, general compute, and sleep, and bills each at its own figure:
+sleep and per-MHz compute from the Apollo510B SoC Datasheet DS-A510B-1p1p0
+Table 39, inference from bench runlogs dated 2026-02-26. Modelled at 27.8 days
+at 96 MHz against a measured 30.4 percent busy fraction (issue #17).
+
+It assumes a 1485 mWh budget (2 x 225 mAh at 3.3 V); the cell capacity is a
+chosen assumption, not a sourced figure (issue #18). The known errors run
+optimistic: the denoise stage has no power measurement and is billed at the
+segmentation figure, and the bench figures were taken on `apollo510_evb`.
 
 What it is not: it is not a product battery specification, it is not a system
 power measurement, and it is not a single-coin-cell figure. The sleep term is a
 projection rather than a measurement of this build, because the demo does not
 actually sleep.
 
-**AI Throughput IPS.** Inferences per second expressed as `2e6 / duration`, the
-scale the host dashboard expects (`ips_from_delta_us` in `src/main.cc`). This is
-a **throughput figure, not a run rate**. It answers "how fast does this model
-execute when it executes", not "how often does it execute". The models actually
-run about once every 2 seconds. Do not read the tile as the model firing
-hundreds of times a second.
+**AI Throughput (max sustained).** Inferences per second expressed as
+`2e6 / duration`, the scale the host dashboard expects (`ips_from_delta_us` in
+`src/main.cc`). This is a **throughput figure, not a run rate**. It answers "how
+fast does this model execute when it executes", not "how often does it execute".
+The models actually run about once every 2 seconds. Do not read the tile as the
+model firing hundreds of times a second.
 
-**IPS/W.** AI efficiency: throughput divided by the modelled inference power.
-There are three of these, one each for denoise, segmentation, and arrhythmia. It
-inherits the estimate caveat from the battery model, because the power term is
-the same modelled figure.
+**Denoise Efficiency (est.)**, **Segment Efficiency (est.)**, and **Arrhythmia
+Efficiency (est.)**. AI efficiency in inferences per watt, one tile per model.
+Each is throughput divided by the modelled inference power, so all three inherit
+the estimate caveat from the battery model: the power term is the same modelled
+figure, from the same bench runlogs dated 2026-02-26.
 
 **Speed toggle.** Switches the SoC at runtime between 96 MHz low-power and
-250 MHz high-performance operation. The battery model carries a separate set of
-figures for each operating point, so the battery tile responds to the toggle.
+250 MHz high-performance operation. **Both modes are supported.** The default is
+96 MHz low power.
 
-> **Caveat: high-performance mode figures are being corrected.** Issue #25
-> reports that the FreeRTOS tick and the DWT timebase do not follow the
-> performance mode. In 250 MHz mode the tick runs 2.604x fast (250/96) and every
-> DWT-measured duration is over-reported by the same factor. The three AI
-> Throughput IPS tiles under-report by 2.604x in HP mode, the battery-life tile
-> is affected, and `uptime_ms` on the HKV observability lines runs fast. **Do not
-> quote any high-performance-mode number from the dashboard until #25 is fixed.**
-> The 96 MHz figures are unaffected. The high-performance toggle is being
-> corrected under #25; until it lands, use low-power mode for the demo.
+In 250 MHz high-performance mode, expect:
+
+- AI throughput about 2.6x higher.
+- The three efficiency tiles about 15 percent **lower**. High-performance mode
+  finishes each inference faster but spends more energy doing it (bench runlogs,
+  2026-02-26).
+- A lower battery figure, a little over 20 days modelled. TODO(verify): confirm
+  on the release build.
+
+If you are looking at an older build, note that a timebase defect made
+high-performance figures read wrong; it was fixed in v5.0.0 (issue #25).
 
 ### Expected behaviour
 
@@ -175,10 +182,9 @@ These are correct and should not be reported as faults.
   11 is a measurement artifact.
 - **Gaps are drawn only on real data loss.** The dashboard breaks the trace
   honestly rather than drawing a smooth line across missing data. A gap after a
-  genuine stall is correct behaviour. In independent validation the demo passed
-  11 of 11 tests with **zero gaps** over both a 3-minute baseline and a
-  10-minute endurance run. The run record is held internally in
-  `USB-TEST-RESULTS/RESULTS.md`; it is not published in this repository.
+  genuine stall is correct behaviour. In hardware validation the demo recorded
+  zero visible ECG gaps over a 3-minute baseline and a 10-minute endurance run
+  (2026-09-01).
 
 ## Troubleshooting
 
@@ -188,6 +194,7 @@ These are correct and should not be reported as faults.
 | No device in the chooser | Check the cable is on the **data** connector, not the debug connector, and that the board is powered. |
 | Tiles stay at `--` | Confirm Settings -> API Mode is **LIVE**, not Emulate, and reload. |
 | Dashboard shows Connected but nothing moves | Replug the data cable, then reconnect. |
+| First data after reopening the dashboard looks stale | Close the tab cleanly with Disconnect, or replug the cable. See known limitations. |
 | BLE will not reconnect | Forget the device in the dashboard, then re-scan on interface `ble`. Only `apollo510b_evb` has BLE. |
 | USB error or disconnect mid-demo | Replug and reconnect. Streaming resumes at the normal rate; the firmware never bursts above real time to catch up. |
 
@@ -230,12 +237,10 @@ derivation.
   browser tab is closed uncleanly with the USB cable left in, the device sees no
   bus event, so the first data shown when the dashboard is reopened can be
   stale. Using a clean Disconnect, or replugging the cable, avoids it.
-- **High-performance-mode timebase (issue #25, open).** See the caveat above.
-  Do not quote 250 MHz dashboard figures.
 - **TimedSignal v2 deferred to v5.1 (issue #5, open).** Owner decision,
   2026-09-01. The demo works correctly without it; the streaming fix landed
   separately and is verified on hardware.
-- **Battery and IPS/W figures are modelled, not measured.** See the tiles
+- **Battery and efficiency figures are modelled, not measured.** See the tiles
   glossary.
 
 ## Documentation
