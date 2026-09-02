@@ -21,16 +21,20 @@
 #   dist/<tag>/FLASH.md
 #   dist/<tag>/BUILD-INFO.txt          (one section per board in the drop)
 #   dist/<tag>/SHA256SUMS
-#   dist/<tag>/<board-dir>-firmware.map
+#   dist/<tag>/<board-dir>-firmware.map      (only with --with-maps)
 #   dist/<tag>/<board-dir>/{firmware.bin,downloadfw.jlink,
 #                           flash_mac.command,flash_win.bat,flash_linux.sh}
 #   dist/heartkit-vitals-demo-<tag>-<board-dir>-firmware.zip   (one per board)
 #   dist/heartkit-vitals-demo-<tag>-firmware.zip               (whole drop)
 #
 # Naming is load bearing. heartkit-vitals-demo-v500-firmware.zip is the name
-# already attached to the v5.0.0 GitHub release, and apollo510b/ and
-# apollo510b-firmware.map are the names already published inside it, so none of
-# them change here; the per-board zips are new names added alongside.
+# already attached to the v5.0.0 GitHub release and apollo510b/ is the folder
+# already published inside it, so neither changes here; the per-board zips are
+# new names added alongside.
+#
+# Linker maps are opt-in (--with-maps) and off by default. The v4.1.0 drop the
+# FAEs already use shipped none, flashing does not need them, and GNU ld writes
+# around a thousand absolute paths from the build machine into each one.
 #
 # Every J-Link parameter is read from the SoC facts file that `nsx flash`
 # uses, then cross-checked against the parameters CMake actually resolved for
@@ -49,6 +53,7 @@ TEMPLATE_DIR="${SCRIPT_DIR}/templates"
 
 VERSION=""
 NOTES_FILE=""
+WITH_MAPS=0
 BOARDS=()
 VALIDATION_BOARDS=()
 VALIDATION_TEXTS=()
@@ -95,7 +100,7 @@ usage() {
   cat <<'USAGE'
 Usage: tools/release/package.sh --version vX.Y.Z [--board BOARD]...
                                 [--boards BOARD,BOARD] [--notes RELEASE-NOTES.md]
-                                [--validation-note 'BOARD=text']...
+                                [--validation-note 'BOARD=text']... [--with-maps]
 
   --version          Release version, for example v5.0.0. Required.
   --board            NSX board name. Repeatable. Defaults to apollo510b_evb.
@@ -106,6 +111,10 @@ Usage: tools/release/package.sh --version vX.Y.Z [--board BOARD]...
   --validation-note  Hardware validation statement for one board, given as
                      'BOARD=text'. Repeatable. Boards without a note record
                      "not flashed on hardware in this release cycle".
+  --with-maps        Also ship the linker map for each board as
+                     <board-folder>-firmware.map. Off by default: the maps are
+                     a debugging aid, not something an FAE flashes, and they
+                     carry absolute paths from the build machine.
 
 Boards already present in dist/<tag>/ from an earlier run are kept; the
 top-level files and the checksums are regenerated over everything present.
@@ -122,6 +131,7 @@ while [ $# -gt 0 ]; do
       for _b in $_list; do [ -n "$_b" ] && BOARDS+=("$_b"); done
       shift 2 ;;
     --notes)   [ $# -ge 2 ] || die "--notes needs a value";   NOTES_FILE="$2"; shift 2 ;;
+    --with-maps) WITH_MAPS=1; shift ;;
     --validation-note)
       [ $# -ge 2 ] || die "--validation-note needs a value"
       case "$2" in
@@ -465,8 +475,14 @@ MISMATCH
 
   cp "$BIN_PATH" "${BOARD_PKG}/firmware.bin"
   chmod 644 "${BOARD_PKG}/firmware.bin"
-  cp "$MAP_PATH" "${PKG_ROOT}/${BOARD_DIR}-firmware.map"
-  chmod 644 "${PKG_ROOT}/${BOARD_DIR}-firmware.map"
+  # The map ships only when asked for. Clear a map left by an earlier run so
+  # the drop never carries one the current invocation did not intend.
+  if [ "$WITH_MAPS" -eq 1 ]; then
+    cp "$MAP_PATH" "${PKG_ROOT}/${BOARD_DIR}-firmware.map"
+    chmod 644 "${PKG_ROOT}/${BOARD_DIR}-firmware.map"
+  else
+    rm -f "${PKG_ROOT}/${BOARD_DIR}-firmware.map"
+  fi
 
   R_BOARD="$BOARD"; R_BOARD_DIR="$BOARD_DIR"
   R_DEVICE="$JLINK_DEVICE"; R_SPEED="$SWD_SPEED"; R_ADDR="$LOAD_ADDRESS"
@@ -733,6 +749,19 @@ write_flash_md() {
     } >> "$dest"
   fi
 
+  # The Contents table lists the linker map. Drop that row when no map is in
+  # the folder being described, so the package never advertises a file it does
+  # not carry.
+  local root maps_present=0 m
+  root="$(dirname "$dest")"
+  for m in "${root}"/*-firmware.map; do
+    [ -f "$m" ] && maps_present=1
+  done
+  if [ "$maps_present" -eq 0 ]; then
+    sed '/-firmware\.map/d' "$dest" > "${dest}.tmp"
+    mv "${dest}.tmp" "$dest"
+  fi
+
   {
     printf '\n## Archives\n\n'
     printf 'Extract one archive per folder, or use the combined archive; do not merge\n'
@@ -822,7 +851,10 @@ for _d in "${BOARD_DIRS[@]}"; do
   rm -rf "$_stage"
   mkdir -p "${_stage}/${TAG}"
   cp -p "${PKG_ROOT}/RELEASE.md" "${_stage}/${TAG}/"
-  cp -p "${PKG_ROOT}/${_d}-firmware.map" "${_stage}/${TAG}/"
+  # The map is optional (--with-maps); an `&&` list here would trip set -e.
+  if [ -f "${PKG_ROOT}/${_d}-firmware.map" ]; then
+    cp -p "${PKG_ROOT}/${_d}-firmware.map" "${_stage}/${TAG}/"
+  fi
   cp -Rp "${PKG_ROOT}/${_d}" "${_stage}/${TAG}/"
   # FLASH.md and BUILD-INFO.txt are re-rendered for this board alone. Copying
   # the drop's versions would document boards and files the archive does not
