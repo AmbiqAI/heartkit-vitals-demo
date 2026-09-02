@@ -1443,7 +1443,45 @@ EcgProcessTask(void *pvParameters)
             ringbuffer_seek(&rbEcgDen, ECG_DEN_VALID_LEN);
 
             ecgMetResults.denoiseIps = ips_from_delta_us(dwt_delta_us(tickStart));
-            ecgMetResults.denoiseuIpspw = 1.0e3f * ecgMetResults.denoiseIps / AVG_INFERENCE_POWER;
+            /* Publish the run counter AFTER the duration it belongs to, never
+             * before. CpuProcessTask runs in a different task and pairs this
+             * stage's runsDelta with its *Ips to derive inference duty; with
+             * the count first, a window sampled mid-execution sees a run whose
+             * duration has not been written yet and bills it at the previous
+             * value. On the first-ever run that value is the store.c seed
+             * (1.0), which is a legitimate ips (a 2 s stage) and so cannot be
+             * screened out downstream as a sentinel.
+             *
+             * SOURCE ADJACENCY IS NOT ENOUGH, hence the barrier. `*Ips` is an
+             * ordinary non-volatile store and the counter increment inside
+             * hkv_count() is volatile; C does not order non-volatile accesses
+             * against volatile ones, so the compiler is free to sink the store
+             * past the increment. GCC 15.2 was measured doing exactly that at
+             * the metrics site: recompiling this file with the three barriers
+             * removed puts MET_RUNS (g_hkv_counters+140) at EcgProcessTask
+             * +0x528 and the arrhythmiaIps store (ecgMetResults+24) at +0x532,
+             * i.e. counter first. With the barriers the same store lands at
+             * +0x4f4, ahead of the counter at +0x52e. The empty asm with a
+             * "memory" clobber is what forces that. Same pattern in the
+             * segmentation and metrics branches; do not remove it to "tidy up".
+             *
+             * READING THE DISASSEMBLY -- CHECK THE FIELD OFFSET. Each branch
+             * stores TWO floats into ecgMetResults: the *Ips field (+16 den,
+             * +20 seg, +24 arr) and the *uIpspw field (+32, +36, +40). Only
+             * the *Ips store is ordering-critical. The *uIpspw store is
+             * expected to sit after the counter and its position means
+             * nothing. Comparing the counter against the +40 store instead of
+             * the +24 store makes a correct metrics site look inverted. */
+            __asm volatile("" ::: "memory");
+            hkv_count(HKV_CNT_PIPE_DEN_RUNS);
+            /* DASHBOARD CHANGE: the uIps/W divisor is now the sourced
+             * MCU_INFERENCE_POWER_MW_LP (5.5 mW) where it used to be
+             * AVG_INFERENCE_POWER (7.87 mW, unsourced), so all three *uIpspw
+             * values read ~43% higher than on any earlier build. Efficiency did
+             * not change; the power figure divided into it did. These stay
+             * fixed at the LP figure and do NOT follow appState.speedMode the
+             * way the battery model below now does. */
+            ecgMetResults.denoiseuIpspw = 1.0e3f * ecgMetResults.denoiseIps / MCU_INFERENCE_POWER_MW_LP;
             if (err != 0) {
                 hkv_count(HKV_CNT_PIPE_ERR_ECG_DEN);
             }
@@ -1455,7 +1493,6 @@ EcgProcessTask(void *pvParameters)
         ///////////////////////////////////////////////////////////////////
         else if (ringbuffer_len(&rbEcgSeg) >= ECG_SEG_WINDOW_LEN) {
             tickStart = dwt_cycles();
-            hkv_count(HKV_CNT_PIPE_SEG_RUNS);
             ringbuffer_peek(&rbEcgSeg, ecgSegInout, ECG_SEG_WINDOW_LEN);
 
             if (appState.segMode == SegmentationModeDsp) {
@@ -1484,7 +1521,12 @@ EcgProcessTask(void *pvParameters)
             ringbuffer_seek(&rbEcgSeg, ECG_SEG_VALID_LEN);
 
             ecgMetResults.segmentIps = ips_from_delta_us(dwt_delta_us(tickStart));
-            ecgMetResults.segmentuIpspw = 1.0e3f * ecgMetResults.segmentIps / AVG_INFERENCE_POWER;
+            /* Counter after duration, barrier required -- see the denoise
+             * branch for why source order alone does not bind the compiler. */
+            __asm volatile("" ::: "memory");
+            hkv_count(HKV_CNT_PIPE_SEG_RUNS);
+            /* ~43% higher than earlier builds -- see the denoise branch. */
+            ecgMetResults.segmentuIpspw = 1.0e3f * ecgMetResults.segmentIps / MCU_INFERENCE_POWER_MW_LP;
             if (err != 0) {
                 hkv_count(HKV_CNT_PIPE_ERR_ECG_SEG);
             }
@@ -1514,7 +1556,13 @@ EcgProcessTask(void *pvParameters)
             ringbuffer_seek(&rbEcgMaskMet, ECG_MET_VALID_LEN);
 
             ecgMetResults.arrhythmiaIps = ips_from_delta_us(dwt_delta_us(tickStart));
-            ecgMetResults.arrhythmiaIpspw = 1.0e3f * ecgMetResults.arrhythmiaIps / AVG_INFERENCE_POWER;
+            /* Counter after duration, barrier required -- see the denoise
+             * branch. This is the site where GCC was observed sinking the
+             * store past the volatile increment. */
+            __asm volatile("" ::: "memory");
+            hkv_count(HKV_CNT_PIPE_MET_RUNS);
+            /* ~43% higher than earlier builds -- see the denoise branch. */
+            ecgMetResults.arrhythmiaIpspw = 1.0e3f * ecgMetResults.arrhythmiaIps / MCU_INFERENCE_POWER_MW_LP;
 
             send_ecg_metrics();
             if (err != 0) {
@@ -1635,17 +1683,102 @@ PpgProcessTask(void *pvParameters)
 // overall utilization average, and a battery-life estimate -- ported from
 // legacy's CpuProcessTask.
 
+///////////////////////////////////////////////////////////////////////////////
+// Battery model -- three MCU states (issue #17)
+///////////////////////////////////////////////////////////////////////////////
+//
+// MCU energy only, sensor excluded. Scope, sources, the margin and the
+// deployment-projection caveat on the sleep term are all documented beside the
+// constants in constants.h; read that header before changing anything here.
+//
+//   idleFrac      = 1 - busy
+//   inferenceFrac = sum over stages of (duration_i x runRate_i), clamped <= busy
+//   computeFrac   = busy - inferenceFrac, clamped >= 0
+//   avgPower_mW   = (inf x INFERENCE + cmp x COMPUTE + idle x SLEEP) / MARGIN
+//   batteryDays   = BATT_POWER_CAP / avgPower_mW / 24
+//
+// `busy` is cpuPercUtil, the MEASURED 30 s rolling utilisation, unchanged by
+// this model. It includes demo transport, so it is conservative and needs no
+// duty-cycle argument.
+//
+// THE MODEL FOLLOWS THE OPERATING POINT. INFERENCE and COMPUTE are read per
+// window from the LP/HP constant pair that matches `appState.speedMode`, the
+// dashboard control that calls nsx_power_set_performance_mode() at runtime.
+// Without that, switching to high performance would REPORT more battery life:
+// the same work finishes ~2.6x faster, so both `busy` and the derived
+// inference duty fall, while the real draw is ~3x higher. SLEEP is shared
+// between the two -- Sleep 1 does not depend on the run clock.
+
+/**
+ * @brief Wall-time fraction one pipeline stage spent running, over a window.
+ *
+ * Both inputs are already measured, so nothing here is assumed: `ips` is the
+ * stage's last DWT-timed duration in the legacy 2e6/deltaUs scale (see
+ * ips_from_delta_us), which inverts to duration_s = 2/ips; `runsDelta` is that
+ * stage's own run counter over `windowSec`, so the cadence is derived rather
+ * than hardcoded at the nominal 2 s. A stage that stalls drops out of the sum
+ * by itself, because its run counter stops advancing.
+ *
+ * A stage switched to DSP or OFF does NOT drop out. Its hkv_count() still
+ * fires, and metrics_capture_ecg() runs unconditionally in the metrics branch,
+ * so the stage keeps reporting a (much shorter) DWT duration and that time is
+ * billed at inference power. This OVER-bills DSP and off modes, which is the
+ * conservative direction, and it is deliberate: the counters stay a
+ * measurement of what the pipeline actually did rather than a function of the
+ * mode flags. Do not gate the counters on mode to "fix" this.
+ *
+ * Returns 0 whenever the stage did not run in this window. The ips <= 0 guard
+ * is defensive only: store.c seeds all three *Ips at 1.0, so it never fires in
+ * practice, and 1.0 is a legitimate ips (a 2 s stage) and cannot be used as a
+ * cold-start sentinel. Cold start is handled instead by publishing each run
+ * counter AFTER its duration, so runsDelta cannot count a run whose duration
+ * has not been written yet. That ordering is NOT a property of the source
+ * layout: the *Ips stores are non-volatile and the counter increments are
+ * volatile, which C does not order against each other, and GCC was measured
+ * reordering one of the three. It is enforced by an explicit
+ * `__asm volatile("" ::: "memory")` barrier at each of the three sites in
+ * EcgProcessTask. Removing a barrier reintroduces the poisoned first sample.
+ *
+ * Caveat worth knowing: `ips` is the LAST duration, not the window mean, so a
+ * stage whose cost varies is billed at its most recent cost. The 30 s rolling
+ * average downstream absorbs most of that.
+ */
+static inline float32_t
+stage_duty_frac(uint32_t runsDelta, float32_t ips, float32_t windowSec)
+{
+    if (runsDelta == 0u || ips <= 0.0f || windowSec <= 0.0f) {
+        return 0.0f;
+    }
+    return (2.0f / ips) * ((float32_t)runsDelta / windowSec);
+}
+
 void
 CpuProcessTask(void *pvParameters)
 {
     (void)pvParameters;
     const uint32_t samplesPerPublish = kCpuStatsPublishPeriodMs / kCpuStatsSamplePeriodMs;
+    /* Elapsed, not nominal. The sample loop is paced by a RELATIVE vTaskDelay,
+     * so each iteration takes the delay plus its own work and the real window
+     * is always longer than samplesPerPublish x kCpuStatsSamplePeriodMs. Using
+     * the nominal value as the duty denominator would understate the window and
+     * therefore OVERSTATE inference duty. Tick deltas remove the argument: the
+     * denominator is the window that actually elapsed. Re-baselined together
+     * with the run counters on every discarded interval below, so the window
+     * and the counter deltas always describe the same span. */
+    TickType_t publishWindowStart = xTaskGetTickCount();
     float32_t cpuUtilSecondAccum = 0.0f;
     uint32_t cpuUtilSecondCount = 0;
     float32_t cpuUtilRolling[kCpuStatsRollingSeconds] = {0};
     float32_t cpuUtilRollingSum = 0.0f;
     uint32_t cpuUtilRollingCount = 0;
     uint32_t cpuUtilRollingIndex = 0;
+    /* Inference-duty ring, advanced in lockstep with cpuUtilRolling above so
+     * both terms of the model describe the same 30 s window. */
+    float32_t infFracRolling[kCpuStatsRollingSeconds] = {0};
+    float32_t infFracRollingSum = 0.0f;
+    uint32_t prevDenRuns = g_hkv_counters[HKV_CNT_PIPE_DEN_RUNS];
+    uint32_t prevSegRuns = g_hkv_counters[HKV_CNT_PIPE_SEG_RUNS];
+    uint32_t prevMetRuns = g_hkv_counters[HKV_CNT_PIPE_MET_RUNS];
     uint32_t runTimeTicks = 0;
     float32_t ecgTaskPerc = 0, ppgTaskPerc = 0, totalTaskPerc = 0;
     uint32_t prevRun = 0, prevEcg = 0, prevPpg = 0, prevIdle = 0;
@@ -1666,6 +1799,14 @@ CpuProcessTask(void *pvParameters)
              * previous published value alone. If stat_overflow is climbing on
              * the `cpu` report line, raise HKV_TASK_STATUS_CAPACITY. */
             hkv_count(HKV_CNT_CPU_STAT_OVERFLOW);
+            /* Discarding the interval means discarding the stage runs inside
+             * it too, exactly as the prevRun re-baseline below does. Without
+             * this, the runs that happened during a skipped interval land in
+             * the next published window and inflate its inference duty. */
+            prevDenRuns = g_hkv_counters[HKV_CNT_PIPE_DEN_RUNS];
+            prevSegRuns = g_hkv_counters[HKV_CNT_PIPE_SEG_RUNS];
+            prevMetRuns = g_hkv_counters[HKV_CNT_PIPE_MET_RUNS];
+            publishWindowStart = xTaskGetTickCount();
             vTaskDelay(pdMS_TO_TICKS(kCpuStatsSamplePeriodMs));
             continue;
         }
@@ -1684,6 +1825,13 @@ CpuProcessTask(void *pvParameters)
                     prevIdle += xTaskDetails[i].ulRunTimeCounter;
                 }
             }
+            /* Same reason the run-time counters are re-baselined here: this
+             * interval is discarded, so any stage runs that happened during
+             * startup must not land in the first published window. */
+            prevDenRuns = g_hkv_counters[HKV_CNT_PIPE_DEN_RUNS];
+            prevSegRuns = g_hkv_counters[HKV_CNT_PIPE_SEG_RUNS];
+            prevMetRuns = g_hkv_counters[HKV_CNT_PIPE_MET_RUNS];
+            publishWindowStart = xTaskGetTickCount();
             vTaskDelay(pdMS_TO_TICKS(100));
             continue;
         }
@@ -1724,22 +1872,108 @@ CpuProcessTask(void *pvParameters)
             cpuUtilSecondAccum = 0.0f;
             cpuUtilSecondCount = 0;
 
+            /* Inference duty for this window: each stage's own measured run
+             * rate x its own measured duration. Counters are free-running and
+             * never reset by the reporter, so a local delta is the window. */
+            /* TIMEBASE -- THE TWO TERMS MUST STAY ON THE SAME CLOCK.
+             * Both sides of the duty ratio are derived from SystemCoreClock,
+             * and that is what makes this correct in HP mode rather than a
+             * coincidence worth preserving deliberately:
+             *   - the numerator, 2/ips, comes from dwt_delta_us() (main.cc
+             *     :152), which divides DWT cycles by SystemCoreClock;
+             *   - the denominator comes from the FreeRTOS tick, and
+             *     configCPU_CLOCK_HZ is also SystemCoreClock.
+             * Nothing updates SystemCoreClock on a performance-mode change, so
+             * it stays at 96 MHz even when the core is running at 250 MHz. In
+             * HP mode the measured durations AND this window are therefore both
+             * over-reported by the same 250/96 = 2.604x, the factors cancel in
+             * the ratio, and the duty that comes out is true wall-time duty.
+             * DO NOT move this window to a real wall clock (RTC / STIMER) while
+             * dwt_delta_us() still scales by SystemCoreClock: that breaks the
+             * cancellation and HP duty over-reports by 2.6x, which clamps
+             * inferenceFrac to busy and bills everything at inference power.
+             * The two have to change together -- see the SystemCoreClock /
+             * SysTick timebase issue, which owns that fix. */
+            const TickType_t windowEndTicks = xTaskGetTickCount();
+            const float32_t publishWindowSec =
+                (float32_t)(uint32_t)(windowEndTicks - publishWindowStart) / (float32_t)configTICK_RATE_HZ;
+            publishWindowStart = windowEndTicks;
+            const uint32_t denRuns = g_hkv_counters[HKV_CNT_PIPE_DEN_RUNS];
+            const uint32_t segRuns = g_hkv_counters[HKV_CNT_PIPE_SEG_RUNS];
+            const uint32_t metRuns = g_hkv_counters[HKV_CNT_PIPE_MET_RUNS];
+            const float32_t infFracInstant =
+                stage_duty_frac(denRuns - prevDenRuns, ecgMetResults.denoiseIps, publishWindowSec) +
+                stage_duty_frac(segRuns - prevSegRuns, ecgMetResults.segmentIps, publishWindowSec) +
+                stage_duty_frac(metRuns - prevMetRuns, ecgMetResults.arrhythmiaIps, publishWindowSec);
+            prevDenRuns = denRuns;
+            prevSegRuns = segRuns;
+            prevMetRuns = metRuns;
+
             if (cpuUtilRollingCount < kCpuStatsRollingSeconds) {
                 cpuUtilRolling[cpuUtilRollingIndex] = cpuUtilSecondAvg;
                 cpuUtilRollingSum += cpuUtilSecondAvg;
+                infFracRolling[cpuUtilRollingIndex] = infFracInstant;
+                infFracRollingSum += infFracInstant;
                 cpuUtilRollingCount++;
             } else {
                 cpuUtilRollingSum -= cpuUtilRolling[cpuUtilRollingIndex];
                 cpuUtilRolling[cpuUtilRollingIndex] = cpuUtilSecondAvg;
                 cpuUtilRollingSum += cpuUtilSecondAvg;
+                infFracRollingSum -= infFracRolling[cpuUtilRollingIndex];
+                infFracRolling[cpuUtilRollingIndex] = infFracInstant;
+                infFracRollingSum += infFracInstant;
             }
             cpuUtilRollingIndex = (cpuUtilRollingIndex + 1) % kCpuStatsRollingSeconds;
 
             appMetResults.cpuPercUtil = cpuUtilRollingSum / (float32_t)cpuUtilRollingCount;
-            float32_t avgPower =
-                (appMetResults.cpuPercUtil * AVG_INFERENCE_POWER + (100.0f - appMetResults.cpuPercUtil) * AVG_SLEEP_POWER) /
-                100.0f;
-            appMetResults.batteryDays = BATT_POWER_CAP / avgPower / 24.0f;
+
+            /* Three-state split. See the header above CpuProcessTask and the
+             * sourced constants in constants.h. */
+            float32_t busyFrac = appMetResults.cpuPercUtil / 100.0f;
+            if (busyFrac < 0.0f) {
+                busyFrac = 0.0f;
+            } else if (busyFrac > 1.0f) {
+                busyFrac = 1.0f;
+            }
+            float32_t inferenceFrac = infFracRollingSum / (float32_t)cpuUtilRollingCount;
+            /* Clamped to busy, not asserted equal to it: the two come from
+             * independent measurements (FreeRTOS run-time stats vs DWT +
+             * counters) and nothing guarantees they agree. Over-clamping bills
+             * the excess at inference power, which is the conservative
+             * direction. */
+            if (inferenceFrac < 0.0f) {
+                inferenceFrac = 0.0f;
+            } else if (inferenceFrac > busyFrac) {
+                inferenceFrac = busyFrac;
+            }
+            float32_t computeFrac = busyFrac - inferenceFrac;
+            if (computeFrac < 0.0f) {
+                computeFrac = 0.0f;
+            }
+            const float32_t idleFrac = 1.0f - busyFrac;
+
+            /* Operating point, read once per window. appState.speedMode is a
+             * live dashboard control (TIO_UIO_SPEED_MODE_IDX -> set_speed_mode
+             * -> nsx_power_set_performance_mode), so the busy-state figures
+             * have to follow it or HP mode reports MORE battery life than LP
+             * while drawing ~3x the power. Sleep power is shared. See the
+             * constant pairs and their sources in constants.h. */
+            const bool hpMode = (appState.speedMode != 0);
+            const float32_t inferencePowerMw =
+                hpMode ? (float32_t)MCU_INFERENCE_POWER_MW_HP : (float32_t)MCU_INFERENCE_POWER_MW_LP;
+            const float32_t computePowerMw =
+                hpMode ? (float32_t)MCU_COMPUTE_POWER_MW_HP : (float32_t)MCU_COMPUTE_POWER_MW_LP;
+
+            const float32_t avgPower = (inferenceFrac * inferencePowerMw + computeFrac * computePowerMw +
+                                        idleFrac * (float32_t)MCU_SLEEP_POWER_MW) /
+                                       (float32_t)SYSTEM_POWER_MARGIN;
+
+            appMetResults.battInferenceFrac = inferenceFrac;
+            appMetResults.battAvgPowerMw = avgPower;
+            /* avgPower is bounded below by idle power for any real fraction set,
+             * so the guard is defensive against a constant being zeroed rather
+             * than a reachable state. */
+            appMetResults.batteryDays = (avgPower > 0.0f) ? ((float32_t)BATT_POWER_CAP / avgPower / 24.0f) : 0.0f;
 
             send_cpu_metrics();
         }
@@ -2119,6 +2353,18 @@ report_extra_cpu(void)
     hkv_log_u32("capacity", HKV_TASK_STATUS_CAPACITY);
     hkv_log_fx2("util", appMetResults.cpuPercUtil);
     hkv_log_fx2("batt_days", appMetResults.batteryDays);
+    /* Battery-model breakdown (issue #17), so the three-state split is legible
+     * on SWO instead of only its result. Only the two INDEPENDENT terms are
+     * emitted: the other two are exact derivations of these and `util`, and
+     * every extra fixed-point field lengthens the hold on the global log mutex.
+     *   batt_cmp  = util - batt_inf     (compute % of wall time)
+     *   batt_idle = 100 - util          (idle % of wall time)
+     * `batt_inf` equal to `util` means the clamp is active, i.e. derived
+     * inference duty exceeded measured busy. batt_inf is a percentage of wall
+     * time; batt_pwr is the modelled average in mW at the LIVE speed mode
+     * (see `speed_mode` on the `app` line -- the two must be read together). */
+    hkv_log_fx2("batt_inf", 100.0f * appMetResults.battInferenceFrac);
+    hkv_log_fx2("batt_pwr", appMetResults.battAvgPowerMw);
     hkv_log_fx2("avg_ips", appMetResults.avgAiIps);
     /* Free stack words on the BLE radio dispatcher task, and the tio_ble_init()
      * status that explains a zero. Both are CACHED VALUES -- the ~1 ms stack

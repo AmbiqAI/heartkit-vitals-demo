@@ -29,16 +29,195 @@ extern "C" {
 #define LP_CPU_MODE (0)
 #define HP_CPU_MODE (2)
 #define SPI_IOM (5)
-#define AVG_SLEEP_POWER (1.15) // 1.50 mW prod is 77% of this so 1.15 mW
-#define AVG_INFERENCE_POWER (7.87) // 10.215 mW prod is 77% of this so 7.87 mW
 #else
 #define LP_CPU_MODE (0)
 #define HP_CPU_MODE (2)
 #define SPI_IOM (1)
-#define AVG_SLEEP_POWER (2.12) // mW
-#define AVG_INFERENCE_POWER (13.65)  // mW
 #endif
-#define BATT_POWER_CAP (1485) // 2*225*3.3
+
+///////////////////////////////////////////////////////////////////////////////
+// Battery / power model (issue #17; figures verified in issue #18)
+///////////////////////////////////////////////////////////////////////////////
+//
+// WHAT THIS MODELS -- MCU ENERGY ONLY. SENSOR POWER IS DELIBERATELY EXCLUDED.
+// Sensor power depends on LED count, drive strength and sampling duty, none of
+// which are properties of the MCU. Excluding it keeps the figure honest about
+// what is being claimed and comparable across use cases. Anywhere this number
+// is displayed it must read "MCU energy only, sensor excluded; estimated from
+// datasheet and bench figures" or it will be quoted as a product spec.
+//
+// THREE STATES. Time is split into inference / general compute / sleep, and
+// each is billed at its own figure (see main.cc CpuProcessTask). The previous
+// two-state model billed all busy time -- transport, DSP, ring copies -- at
+// inference power.
+//
+// THE OPERATING POINT IS A RUNTIME CONTROL, SO THE FIGURES COME IN PAIRS.
+// `appState.speedMode` is exposed on the dashboard UIO surface next to the
+// battery tile (TIO_UIO_SPEED_MODE_IDX) and switches the SoC between
+// NSX_POWER_PERF_LOW (96 MHz) and NSX_POWER_PERF_HIGH (250 MHz) at runtime
+// (main.cc set_speed_mode). Every busy-state figure below therefore exists in
+// an LP and an HP variant and CpuProcessTask selects the pair that matches the
+// live speed mode. A single LP-only set would move the tile the WRONG way in HP
+// mode: HP finishes the same work ~2.6x faster, so measured busy time and the
+// derived inference duty both fall, and billing that smaller busy fraction at
+// LP power reports MORE battery life at ~3x the actual draw. The sleep figure
+// is shared: System Sleep 1 does not depend on the run clock.
+//
+// THE SLEEP TERM IS A DEPLOYMENT PROJECTION, NOT A MEASUREMENT OF THIS BUILD.
+// The demo does not sleep: FreeRTOSConfig.h sets `configUSE_TICKLESS_IDLE 0`,
+// so idle time is spent spinning in the idle task at run power, not in Sleep 1.
+// The idle term states what the same workload would draw if the port slept.
+// The busy fraction, by contrast, IS measured (`cpuPercUtil`, 30 s rolling)
+// and includes demo transport, so it is conservative.
+//
+// SLEEP 1, NOT DEEP SLEEP, DELIBERATELY. The sensor wakes the MCU ~7.7 times
+// per second. Sleep 1 keeps HFRC running so a wake is cheap; deep sleep at that
+// cadence pays an HFRC restart per wake, and the datasheet publishes no wake
+// energy, so its 36 uW steady-state figure is not the whole cost. Sleep 1 is
+// both the conservative and the honest choice at this wake rate.
+//
+// WHERE THE INFERENCE FIGURES ARE OPTIMISTIC -- STATED, NOT BURIED. Each
+// inference figure is the LOWER of the two models that were actually measured:
+// LP 5.5 mW is segmentation (5.496) and not arrhythmia (5.743), ~4.5%
+// optimistic against the higher measurement; HP 16.7 mW is segmentation
+// (16.697) and not arrhythmia (17.698), ~5.7% optimistic on the same basis.
+// The selection rule is deliberate and identical in both sets -- segmentation
+// is the stage that runs most often -- but it is a choice, not an average.
+// Separately, ecg_denoise, which is the MOST FREQUENTLY EXECUTED stage and the
+// largest single contributor to inference duty, has NO power measurement in
+// either column; it is billed at the segmentation figure. If denoise is more
+// expensive than segmentation, this model understates power and overstates
+// battery days, and nothing in the code can detect that.
+//
+// METHODOLOGY NOTE -- MIXED MEASUREMENT DOMAINS, STATED NOT BLENDED. The
+// datasheet figures below are SoC-only at VDD 1.8 V. The inference figures are
+// apollo510_evb BOARD-LEVEL measurements. Mixing the two is acceptable at demo
+// precision, where order-of-magnitude is the bar, but it is a known
+// inconsistency and is recorded here rather than hidden in the arithmetic.
+
+#if defined(AM_PART_APOLLO510B)
+
+/* apollo510b_evb. Datasheet figures below are native to this part; the bench
+ * figures were taken on apollo510_evb (see the runlog citation), which is the
+ * cross-part borrow in this direction and is the smaller of the two risks. */
+#define MCU_POWER_APOLLO5_FIGURES (1)
+
+#elif defined(AM_PART_APOLLO510)
+
+/* apollo510_evb (Apollo510 non-B). This part defines AM_PART_APOLLO5B and
+ * AM_PART_APOLLO510 but NOT AM_PART_APOLLO510B, so the old `#ifdef
+ * AM_PART_APOLLO5B` silently gave it Apollo510B provenance. It now has its own
+ * branch and uses the same numbers with an explicit caveat:
+ *   - The two INFERENCE figures are NATIVE to this board: the runlog cited
+ *     below is apollo510_evb.
+ *   - The SLEEP and COMPUTE-per-MHz figures are APOLLO510B DATASHEET VALUES
+ *     used here as a cross-part placeholder. They are not verified for the
+ *     non-B part.
+ * TODO(verify): the Apollo510 (non-B) SoC datasheet exists at
+ * OneDrive .../Ambiq/sws/datasheets/soc/ap5/Apollo510-SoC-Datasheet.pdf. Read
+ * Table 39 "Current Consumption in Active Mode and Sleep Modes" for ISS1
+ * (System Sleep 1), IRUNLPFB and IRUNHPFB, and split this branch out with its
+ * own numbers if they differ. Deliberately NOT transcribed here: nobody has
+ * opened that document for this change. */
+#define MCU_POWER_APOLLO5_FIGURES (1)
+
+#endif
+
+#ifdef MCU_POWER_APOLLO5_FIGURES
+
+/* Idle/sleep power. Shared by both speed modes -- Sleep 1 gates the core
+ * clocks, so the figure does not depend on the run clock.
+ * Source: Apollo510B SoC Datasheet DS-A510B-1p1p0, Table 39 "Current
+ *         Consumption in Active Mode and Sleep Modes", symbol ISS1
+ *         (System Sleep 1, 160 kB TCM retained), p.216, 2026.
+ * Conditions: WFI SLEEP=1, clocks gated, HFRC on, XTAL off, buck enabled,
+ *         NVM standby, cache retained, VDD 1.8 V. Typical, 750 uW. */
+#define MCU_SLEEP_POWER_MW (0.75)
+
+/* General compute (non-inference busy time: DSP, transport, ring copies).
+ * Kept as the per-MHz figure and the clock so the derivation stays visible
+ * instead of collapsing to a magic number.
+ * Source: Apollo510B SoC Datasheet DS-A510B-1p1p0, Table 39, symbols IRUNLPFB
+ *         and IRUNHPFB (CoreMark run power, low-power / high-performance
+ *         mode), p.216, 2026.
+ * Conditions: MRAM, cache enabled, buck enabled, VDD 1.8 V. Typical.
+ * Clocks: 96 MHz for NSX_POWER_PERF_LOW, 250 MHz for NSX_POWER_PERF_HIGH --
+ *         the two operating points appState.speedMode selects between. */
+#define MCU_COMPUTE_UW_PER_MHZ_LP (35.3)
+#define MCU_COMPUTE_CLOCK_MHZ_LP  (96.0)
+#define MCU_COMPUTE_POWER_MW_LP   (MCU_COMPUTE_UW_PER_MHZ_LP * MCU_COMPUTE_CLOCK_MHZ_LP / 1000.0) // 3.389 mW
+
+#define MCU_COMPUTE_UW_PER_MHZ_HP (46.8)
+#define MCU_COMPUTE_CLOCK_MHZ_HP  (250.0)
+#define MCU_COMPUTE_POWER_MW_HP   (MCU_COMPUTE_UW_PER_MHZ_HP * MCU_COMPUTE_CLOCK_MHZ_HP / 1000.0) // 11.700 mW
+
+/* Inference power for this demo's model set, one figure per operating point.
+ * Source: OneDrive .../benchmarks/apollo510_evb/{ecg_segmentation,
+ *         ecg_arrhythmia}/runlog.csv, LP(mW) and HP(mW) columns, row 2, dated
+ *         2026-02-26.
+ * Measured LP: 5.496 mW (ecg_segmentation), 5.743 mW (ecg_arrhythmia).
+ * Measured HP: 16.697 mW (ecg_segmentation), 17.698 mW (ecg_arrhythmia).
+ * Selection rule, identical in both sets: take the segmentation value rounded,
+ *         i.e. the LOWER of the two, because segmentation is the stage that
+ *         runs most often. ecg_denoise power was not captured in that run
+ *         (all-zero row) in either column, so denoise -- the most frequently
+ *         executed stage -- is billed at the segmentation figure. See the
+ *         optimism note in the header above; both of these are choices that
+ *         push the reported battery life up, not down.
+ * Conditions: apollo510_evb, TFLM, AS R5.3.0, gcc 14.3, EVB BOARD-LEVEL. */
+#define MCU_INFERENCE_POWER_MW_LP (5.5)
+#define MCU_INFERENCE_POWER_MW_HP (16.7)
+
+/* 20% system margin (divide by 0.80). STATED, NOT DERIVED. It covers what the
+ * core figures above do not include: IOM / timer / GPIO activity driving the
+ * sensor, and the 3.3 V to 1.8 V regulator loss (the datasheet figures are
+ * quoted at VDD 1.8 V). It is an engineering allowance chosen by the owner, not
+ * a measurement. It is scoped to THIS branch on purpose: it stands in for the
+ * previous unexplained 0.77 factor, which only ever applied to the Apollo5
+ * constants (issue #18). Applying it to the unsourced fallback branch below
+ * would be inflating numbers that never carried it. */
+#define SYSTEM_POWER_MARGIN (0.80)
+
+#else
+
+/* TODO(verify): 2.12 mW sleep power for apollo330mP_evb (AM_PART_APOLLO330P)
+ * has no source of record (issue #18 searched OneDrive benchmarks, Confluence,
+ * Jira, GitHub and git history and found none). Check the Apollo330P SoC
+ * datasheet, "Current Consumption in Active Mode and Sleep Modes", for the
+ * System Sleep 1 symbol, in OneDrive .../Ambiq/sws/datasheets/soc/. Value left
+ * unchanged: replacing it with an Apollo510B number would be inventing
+ * provenance, not fixing it. */
+#define MCU_SLEEP_POWER_MW (2.12)
+
+/* TODO(verify): 13.65 mW inference power for apollo330mP_evb has no source of
+ * record (issue #18). Check the Apollo330P SoC datasheet for the CoreMark
+ * run-power symbol, and bench the model set on this board the way
+ * apollo510_evb was benched on 2026-02-26. Value left unchanged, and it is
+ * used for both speed modes because no per-operating-point figure exists. */
+#define MCU_INFERENCE_POWER_MW_LP (13.65)
+#define MCU_INFERENCE_POWER_MW_HP (13.65)
+
+/* TODO(verify): no general-compute figure exists for this part. Rather than
+ * invent one, non-inference busy time is billed at the inference rate above --
+ * i.e. this branch keeps the old, conservative two-state behaviour, and the
+ * three-state split only bites where the figures are sourced. Replace with the
+ * Apollo330P run-power symbol x the operating clock once verified. */
+#define MCU_COMPUTE_POWER_MW_LP (MCU_INFERENCE_POWER_MW_LP)
+#define MCU_COMPUTE_POWER_MW_HP (MCU_INFERENCE_POWER_MW_HP)
+
+/* No margin on this branch. These values are unsourced and never carried the
+ * previous 0.77 factor; applying the 20% system margin here would silently cut
+ * the reported battery life on a board whose model has not otherwise changed.
+ * When the figures above get a source, decide the margin with them. */
+#define SYSTEM_POWER_MARGIN (1.0)
+
+#endif
+
+/* Battery capacity assumption -- 2 cells x 225 mAh x 3.3 V = 1485 mWh. This is
+ * a BATTERY ASSUMPTION for the demo form factor, not a silicon claim and not a
+ * measurement. Change it with the pack, and note that battery days scales
+ * linearly with it. */
+#define BATT_POWER_CAP (1485)
 
 #define I2C_IOM (1)
 #define I2C_SPEED_HZ (100000)

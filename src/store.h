@@ -41,6 +41,15 @@ typedef struct {
     float32_t cpuPercUtil;
     float32_t batteryDays;
     float32_t avgAiIps;
+    /* Battery-model breakdown (issue #17). Diagnostics only -- these are
+     * emitted on the `cpu` HKV report line so the three-state split is
+     * observable on SWO, and are NOT part of the TileIO CPU metrics packet
+     * (send_cpu_metrics still sends exactly the first three fields). Only the
+     * two independent terms are kept: compute and idle are exact derivations
+     * of these and cpuPercUtil (see report_extra_cpu). battInferenceFrac is a
+     * 0..1 fraction of wall time. */
+    float32_t battInferenceFrac;
+    float32_t battAvgPowerMw;
 } metrics_app_results_t;
 
 typedef struct {

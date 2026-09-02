@@ -239,7 +239,15 @@ typedef enum {
     /* how healthy the rates look.                                            */                   \
     X(HKV_CNT_PIPE_PPG_ITERS,    "pipe",   "ppg_iters",    HKV_EMIT_TOTAL)                         \
     X(HKV_CNT_PIPE_PPG_PUSHED,   "pipe",   "ppg_pushed",   HKV_EMIT_BOTH)                          \
+    /* Per-stage run counts. These are not just progress indicators: the battery */                \
+    /* model (constants.h, CpuProcessTask) derives each stage's inference DUTY   */                \
+    /* from its own run RATE over the rolling window x its measured DWT          */                \
+    /* duration, rather than assuming the nominal 2 s cadence. A stage that      */                \
+    /* stalls or is switched to DSP/off therefore stops being billed at          */                \
+    /* inference power on its own, with no separate plumbing.                    */                \
+    X(HKV_CNT_PIPE_DEN_RUNS,     "pipe",   "den_runs",     HKV_EMIT_TOTAL)                         \
     X(HKV_CNT_PIPE_SEG_RUNS,     "pipe",   "seg_runs",     HKV_EMIT_TOTAL)                         \
+    X(HKV_CNT_PIPE_MET_RUNS,     "pipe",   "met_runs",     HKV_EMIT_TOTAL)                         \
     X(HKV_CNT_PIPE_ERR_ECG_DEN,  "pipe",   "err_den",      HKV_EMIT_TOTAL)                         \
     X(HKV_CNT_PIPE_ERR_ECG_SEG,  "pipe",   "err_seg",      HKV_EMIT_TOTAL)                         \
     X(HKV_CNT_PIPE_ERR_ECG_MET,  "pipe",   "err_met",      HKV_EMIT_TOTAL)                         \
