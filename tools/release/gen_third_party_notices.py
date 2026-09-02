@@ -83,8 +83,12 @@ LICENSE_BUNDLE_SUFFIXES = {".txt", ".md"}
 # contains. If LVGL is ever enabled, delete this exclusion first.
 BUNDLE_EXCLUDE = {"filelist.txt", "gpl-3.0.txt"}
 
-# Binary formats that cannot be reproduced inline; referenced by path instead.
+# Binary formats whose text cannot be reproduced inline. Only the one PDF named
+# below may be referenced by path, and only while its RTF counterpart is beside
+# it to supply the text; see read_text(). Every other PDF is a hard error.
 REFERENCE_ONLY_SUFFIXES = {".pdf"}
+REFERENCEABLE_PDF = "Ambiq-Software-License-Terms.pdf"
+RTF_COUNTERPART = "LICENSE.rtf"
 
 # Directories never worth walking.
 SKIP_DIRS = {".git", ".github", "__pycache__", "build", "node_modules"}
@@ -355,12 +359,24 @@ def read_text(path: Path) -> str:
             )
         raw = proc.stdout.decode("utf-8", errors="replace")
     elif path.suffix.lower() in REFERENCE_ONLY_SUFFIXES:
-        # Safe to leave as a pointer only because the same AmbiqSuite agreement
-        # is reproduced in full from LICENSE.rtf in this same section.
+        # Exactly one PDF may be reduced to a pointer: the AmbiqSuite agreement,
+        # and only when the RTF whose text this section reproduces sits beside
+        # it. Any other PDF would be a license nobody has read reaching the
+        # notices as a bare filename, so it stops the run instead.
+        if path.name != REFERENCEABLE_PDF or not (path.parent / RTF_COUNTERPART).is_file():
+            sys.exit(
+                f"error: {rel(path)} is a PDF and its text cannot be reproduced.\n"
+                "       Only `sdk/docs/licenses/Ambiq-Software-License-Terms.pdf`\n"
+                f"       may be referenced by path, and only while `{RTF_COUNTERPART}`\n"
+                "       beside it supplies the text. Add a readable copy of this\n"
+                "       license, or handle it explicitly in read_text(), before\n"
+                "       shipping a package."
+            )
         return (
-            f"[Not reproduced inline: `{rel(path)}` is a binary PDF carrying the "
-            "same AmbiqSuite software agreement whose text is reproduced from "
-            "`LICENSE.rtf` in this section.]"
+            f"[Not reproduced inline: `{rel(path)}` is a binary PDF. The AmbiqSuite "
+            f"software agreement is reproduced from `{RTF_COUNTERPART}` in this "
+            f"section; `{REFERENCEABLE_PDF}` is the same agreement as distributed "
+            "by Ambiq and is referenced here by path.]"
         )
     else:
         raw = path.read_bytes().decode("utf-8", errors="replace")

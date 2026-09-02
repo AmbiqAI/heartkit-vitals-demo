@@ -3,7 +3,10 @@
 # Copyright (c) 2026, Ambiq
 #
 # Build and assemble a prebuilt firmware package an FAE can flash without the
-# toolchain. macOS and Linux.
+# toolchain. macOS and Linux, with one macOS-only step: THIRD-PARTY-NOTICES.md
+# is generated from an RTF that only `textutil` can convert, so a Linux
+# operator hits a hard stop after the build until a portable converter or a
+# committed text copy exists (tracked on #6). Package on macOS until then.
 #
 #   tools/release/package.sh --version v5.0.0 \
 #                            [--board apollo510b_evb]... \
