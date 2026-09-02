@@ -55,9 +55,9 @@ themselves and think it is broken.
 > are running always-on AI on a very small energy budget."
 
 **4:00 MCU Battery Life (est., excl. sensor).**
-> "27.8 days estimated at 96 MHz on this build, from a measured 30.4 percent
-> busy fraction. It assumes a 1485 mWh budget, two CR2032 cells, and it covers
-> MCU energy only. Sensor power is not in it."
+> "About 28 days at 96 MHz. 27.7 days estimated on this build, from a measured
+> 30.5 percent busy fraction. It assumes a 1485 mWh budget, two CR2032 cells,
+> and it covers MCU energy only. Sensor power is not in it."
 
 Say the caveat in the same breath as the number, every time. Two cells, never
 one. Estimated, never measured.
@@ -65,10 +65,10 @@ one. Estimated, never measured.
 **4:30 Speed toggle.** Flip to 250 MHz, show that streaming continues, flip
 back.
 > "The operating point is a runtime control. Both modes are supported. At
-> 250 MHz you get about 2.6x the AI throughput, the efficiency tiles drop about
-> 15 percent because each inference costs more energy, and the modelled battery
-> life falls to a little over 20 days. You trade energy for headroom, without
-> stopping the stream."
+> 250 MHz you get about twice the AI throughput on this build, the efficiency
+> tiles drop about a third because each inference costs roughly three times the
+> power, and the modelled battery life falls to about 15 days. You trade energy
+> for headroom, without stopping the stream."
 
 If a customer mentions that high-performance figures looked wrong on an older
 build, that was a timebase defect, fixed in v5.0.0 (#25).

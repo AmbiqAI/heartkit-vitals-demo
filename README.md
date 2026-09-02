@@ -126,8 +126,9 @@ excluded**, because sensor draw depends on LED count, drive strength, and
 sampling duty, none of which are properties of the MCU. The model splits time
 into inference, general compute, and sleep, and bills each at its own figure:
 sleep and per-MHz compute from the Apollo510B SoC Datasheet DS-A510B-1p1p0
-Table 39, inference from bench runlogs dated 2026-02-26. Modelled at 27.8 days
-at 96 MHz against a measured 30.4 percent busy fraction (issue #17).
+Table 39, inference from bench runlogs dated 2026-02-26. It models about
+28 days at 96 MHz: 27.7 days against a measured 30.5 percent busy fraction
+(issues #17, #25).
 
 It assumes a 1485 mWh budget (2 x 225 mAh at 3.3 V); the cell capacity is a
 chosen assumption, not a sourced figure (issue #18). The known errors run
@@ -156,14 +157,19 @@ figure, from the same bench runlogs dated 2026-02-26.
 250 MHz high-performance operation. **Both modes are supported.** The default is
 96 MHz low power.
 
-In 250 MHz high-performance mode, expect:
+Measured on an Apollo510B EVB, 2026-09-01 (issue #25), in 250 MHz
+high-performance mode expect:
 
-- AI throughput about 2.6x higher.
-- The three efficiency tiles about 15 percent **lower**. High-performance mode
-  finishes each inference faster but spends more energy doing it (bench runlogs,
-  2026-02-26).
-- A lower battery figure, a little over 20 days modelled. TODO(verify): confirm
-  on the release build.
+- AI throughput about **2x** on this build: average 67.8 inferences per second
+  at 96 MHz against 135.5 at 250 MHz. The bench harness, with the models and
+  arena held in TCM, measured 2.59x; the running demo differs because of memory
+  placement and concurrent load, so 2x is the figure to quote for the demo.
+- The three efficiency tiles about **a third lower** on this build. High-
+  performance mode roughly doubles throughput but costs about three times the
+  inference power (5.5 mW against 16.7 mW, bench runlogs 2026-02-26), so
+  inferences per watt fall to about 0.66 of the low-power value.
+- A lower battery figure: about 15 days modelled at 250 MHz, 14.6 days against a
+  measured 22.3 percent busy fraction, compared with 27.7 days at 96 MHz.
 
 If you are looking at an older build, note that a timebase defect made
 high-performance figures read wrong; it was fixed in v5.0.0 (issue #25).
