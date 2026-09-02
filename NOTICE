@@ -10,3 +10,10 @@ proprietary ams-OSRAM software; it is provided in binary form only, as part of
 the prebuilt firmware, under Ambiq's agreement with ams-OSRAM, and its source
 is not part of this repository. Building the firmware from source therefore
 requires access to the private `nsx-as7058` module referenced by `nsx.lock`.
+
+Ambiq-authored source files in this repository carry SPDX headers. The board
+definitions under `boards/` do not: they are `kind: packaged` modules vendored
+by `nsx sync` from the packaged neuralspotx board modules, and their on-disk
+content is hashed against `nsx.lock`, so a header added here would be
+overwritten on the next sync and would fail `nsx sync --frozen`. Those headers
+belong upstream in the neuralspotx packages.
