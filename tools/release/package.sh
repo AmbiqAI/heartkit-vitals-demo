@@ -76,8 +76,12 @@ REF_PATHS=(src config boards CMakeLists.txt nsx.yml nsx.lock)
 DEFAULT_VALIDATION_NOTE="not flashed on hardware in this release cycle"
 
 # Field-proven v4.1.0 drop used for the byte comparison of the rendered
-# helpers. Override with HKV_V410_REF_DIR when the share is mounted elsewhere.
-V410_REF_DIR="${HKV_V410_REF_DIR:-/Users/adam.page/Library/CloudStorage/OneDrive-AmbiqMicroInc/AITG - Documents/Demos/vital-sign-monitoring/firmware/v410}"
+# helpers. Set HKV_V410_REF_DIR to the mounted reference folder to enable the
+# comparison; see docs/developer.md (release gate section) for where that
+# share lives. No default path ships here. Unset, or pointing at a folder
+# that is not there, the comparison is skipped and reported as "not
+# compared" rather than treated as a failure.
+V410_REF_DIR="${HKV_V410_REF_DIR:-}"
 
 # `head -1` under `set -o pipefail` makes the upstream command die of SIGPIPE
 # (status 141) and takes the whole script with it. Read the stream fully instead.
@@ -620,16 +624,19 @@ ENV
 # that goes into BUILD-INFO on stdout, everything else on stderr.
 compare_against_v410() {
   local board_dir="$1" pkg_dir="$2"
-  local ref="${V410_REF_DIR}/${board_dir}"
   local f matched=0 differed=0 missing=0 diff_list=""
 
-  # The reference lives on the packager's machine. Its path goes to the console
-  # only; BUILD-INFO ships to customers and must not carry it.
-  if [ ! -d "$ref" ]; then
-    printf 'not compared (v4.1.0 reference not available)'
-    warn "v4.1.0 reference folder not found, skipping the byte comparison for ${board_dir}: ${ref}"
+  # No default path ships here (issue #41). Without HKV_V410_REF_DIR set to
+  # the mounted reference folder, or with that folder not there, the
+  # comparison is skipped, never treated as a failure. BUILD-INFO ships to
+  # customers, so neither this message nor the log carries a path.
+  if [ -z "$V410_REF_DIR" ] || [ ! -d "${V410_REF_DIR}/${board_dir}" ]; then
+    printf 'not compared (HKV_V410_REF_DIR not set)'
+    warn "not compared (HKV_V410_REF_DIR not set): skipping the v4.1.0 byte comparison for ${board_dir}"
     return 0
   fi
+
+  local ref="${V410_REF_DIR}/${board_dir}"
 
   printf '==> v4.1.0 byte comparison for %s against %s\n' "$board_dir" "$ref" >&2
   for f in downloadfw.jlink flash_mac.command flash_win.bat flash_linux.sh; do

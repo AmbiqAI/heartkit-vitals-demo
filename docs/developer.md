@@ -74,6 +74,27 @@ lockfile.
 because it inherits the terms of its ams-OSRAM source. See `assets/README.md`
 for asset provenance and `docs/as7058_profiles.md` for regeneration.
 
+## Release Packaging
+
+`tools/release/package.sh` assembles a prebuilt firmware drop and, as part of
+its release gate, byte-compares the rendered flash helpers
+(`downloadfw.jlink`, `flash_mac.command`, `flash_win.bat`, `flash_linux.sh`)
+against the field-proven v4.1.0 drop. A difference is a loud warning, not a
+build failure.
+
+The script carries no default path for that v4.1.0 reference. To enable the
+comparison, set `HKV_V410_REF_DIR` to a local mount of the v4.1.0 firmware
+folder from the team OneDrive (`AITG - Documents` library, under
+`Demos/vital-sign-monitoring/firmware/v410`), for example:
+
+```bash
+export HKV_V410_REF_DIR="$HOME/Library/CloudStorage/OneDrive-AmbiqMicroInc/AITG - Documents/Demos/vital-sign-monitoring/firmware/v410"
+```
+
+Without `HKV_V410_REF_DIR` set, or if it points at a folder that is not
+there, packaging still succeeds; the log and `BUILD-INFO.txt` record the
+comparison as `not compared (HKV_V410_REF_DIR not set)`.
+
 ## Clean Working State
 
 Remove only a target build directory:
