@@ -70,7 +70,7 @@ EVB connected on its programming/debug USB port, powered on.
    [v5.0.0 release](https://github.com/AmbiqAI/heartkit-vitals-demo/releases/tag/v5.0.0),
    or from the team OneDrive under
    `Demos/vital-sign-monitoring/firmware/v500/`.
-2. Unzip it and pick your board folder:
+2. Unzip it, pick your board folder from the table below, and open it:
 
    | Your EVB | Folder | Transports |
    | --- | --- | --- |
@@ -162,8 +162,7 @@ points below differ.
   compile-time and documented, not exercised.
 
 Provenance: owner decisions recorded on issue #33 (2026-09-02), with the figure
-sourcing on issues #25 and #18. Those issues sit in a private repository, so
-quote the datasheet references above to customers rather than the issue numbers.
+sourcing on issues #25 and #18.
 
 ### Tiles glossary
 
