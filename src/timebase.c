@@ -34,30 +34,50 @@
 // ui32SysclkFreq tracks the performance mode, prefer it: it removes the table
 // and would cover the parts left as TODO(verify) below.
 
-#if defined(AM_PART_APOLLO510B)
+#if defined(AM_PART_APOLLO510B) || defined(AM_PART_APOLLO510)
 
-/* Apollo510B core frequency at each MCU performance mode.
- * Source: Apollo510B SoC Datasheet DS-A510B-1p1p0, Table 39 "Current
- *         Consumption in Active Mode and Sleep Modes", p.216, 2026 -- the
- *         test conditions for IRUNLPFB (low-power mode, 96 MHz) and IRUNHPFB
- *         (high-performance mode, 250 MHz). These are the same two operating
- *         points the battery model's constant pairs are quoted at (see
- *         constants.h) and the pair verified on issue #18's bench runlogs. */
-#define TIMEBASE_CORE_CLOCK_LP_HZ (96000000u)
-#define TIMEBASE_CORE_CLOCK_HP_HZ (250000000u)
+/* Core frequency at each MCU performance mode, for BOTH Apollo510 parts
+ * (apollo510b_evb and apollo510_evb compile against the same apollo510 HAL).
+ * Taken from the HAL's own macros rather than literals so the values follow
+ * the build configuration -- note AM_HAL_CLKGEN_FREQ_MAX_HZ is redefined for
+ * APOLLO5_FPGA builds (am_hal_clkgen.h:38-40), which a literal would get
+ * wrong.
+ * Source, low power: am_hal_clkgen.h:43, AM_HAL_CLKGEN_FREQ_MAX_HZ 96000000.
+ * Source, high performance: am_hal_clkgen.h:47, AM_HAL_CLKGEN_FREQ_HP250_HZ
+ *         250000000, with the note at :45 "CAYNSWS-1744 Apollo510 remove
+ *         CPUHPFREQSEL, the only valid HP frequency is 250MHz" -- i.e. the
+ *         "192 MHz or 250 MHz" annotation on
+ *         AM_HAL_PWRCTRL_MCU_MODE_HIGH_PERFORMANCE (am_hal_pwrctrl.h:213) is
+ *         stale for this part; there is only one HP frequency.
+ * Corroborated for Apollo510B by the Apollo510B SoC Datasheet DS-A510B-1p1p0,
+ *         Table 39 "Current Consumption in Active Mode and Sleep Modes",
+ *         p.216, 2026 -- the test conditions for IRUNLPFB (low-power mode,
+ *         96 MHz) and IRUNHPFB (high-performance mode, 250 MHz). Those are the
+ *         same two operating points the battery model's constant pairs are
+ *         quoted at (see constants.h) and the pair verified on issue #18's
+ *         bench runlogs.
+ *
+ * This guard must stay AT LEAST as wide as the set of boards where anything
+ * else follows appState.speedMode. inference_power_mw() in main.cc divides by
+ * the HP power figure in HP mode on every board; if the timebase were not
+ * fixed here too, that board would divide an under-reported IPS by the HP
+ * power and read worse than before the fix. */
+#define TIMEBASE_CORE_CLOCK_LP_HZ ((uint32_t)AM_HAL_CLKGEN_FREQ_MAX_HZ)
+#define TIMEBASE_CORE_CLOCK_HP_HZ ((uint32_t)AM_HAL_CLKGEN_FREQ_HP250_HZ)
 #define TIMEBASE_HAVE_MODE_TABLE  (1)
 
 #else
 
 /* TODO(verify): the core frequency at each MCU performance mode for
- * apollo510_evb (AM_PART_APOLLO510, non-B) and apollo330mP_evb
- * (AM_PART_APOLLO330P) against their own datasheets. The apollo510 HAL header
- * annotates AM_HAL_PWRCTRL_MCU_MODE_HIGH_PERFORMANCE as "192 MHz or 250 MHz"
- * and the apollo330P header splits high performance into HP1 (192 MHz) and
- * HP2 (250 MHz), so neither has a single sourced value here. Until one exists
- * this is a no-op on those boards: SystemCoreClock and the tick keep their
- * current (boot-time) behaviour, i.e. issue #25 is unfixed there, rather than
- * being "fixed" with a number nobody checked. The demo hardware is
+ * apollo330mP_evb (AM_PART_APOLLO330P) against its own datasheet. That part's
+ * HAL splits high performance into HP1 (192 MHz) and HP2 (250 MHz)
+ * (am_hal_pwrctrl.h:218-220) and this repo has no sourced value for which one
+ * NSX_POWER_PERF_HIGH lands on, so this is a no-op there: SystemCoreClock and
+ * the tick keep their current (boot-time) behaviour, i.e. issue #25 is unfixed
+ * on that board, rather than being "fixed" with a number nobody checked.
+ * Nothing else on that board follows the operating point either -- its
+ * MCU_INFERENCE_POWER_MW_LP and _HP are the same figure (constants.h:197-198),
+ * so inference_power_mw() is mode-independent there. The demo hardware is
  * apollo510b_evb. */
 
 #endif
@@ -124,9 +144,18 @@ timebase_sync_to_core_clock(void)
 
     /* Scheduler running: SystemCoreClock and the SysTick reload have to move
      * together, or a tick taken between the two is timed on one clock and
-     * attributed on the other. Writing VAL clears the current count so the
-     * new period starts immediately; the tick straddling the switch is short
-     * or long by up to one period, which is the accepted cost of the switch.
+     * attributed on the other.
+     *
+     * LOAD ONLY -- DO NOT ALSO WRITE SysTick->VAL. Writing LOAD alone lets the
+     * period already in flight finish at its old length; the new reload is
+     * latched at the next wrap. That bounds the disturbance to exactly one
+     * tick, however often this is called. Writing VAL would restart the count
+     * from zero, so a host toggling speed_mode on successive UIO frames
+     * (TioProcessTask services one per tick) could keep resetting the counter
+     * before it ever wraps and starve the tick entirely, drifting uptime_ms.
+     * The one-tick error is the accepted cost of a mode switch; an unbounded
+     * one is not.
+     *
      * xTickCount is deliberately untouched -- ticks already counted stay
      * counted, so uptime_ms is continuous across the toggle. */
     const uint32_t reload = (coreClockHz / configTICK_RATE_HZ) - 1u;
@@ -134,7 +163,6 @@ timebase_sync_to_core_clock(void)
     taskENTER_CRITICAL();
     SystemCoreClock = coreClockHz;
     SysTick->LOAD = reload;
-    SysTick->VAL = 0u;
     taskEXIT_CRITICAL();
 #endif // TIMEBASE_HAVE_MODE_TABLE
 }

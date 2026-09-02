@@ -166,20 +166,25 @@ ips_from_delta_us(uint32_t deltaUs)
     return 2.0e6f / (float32_t)MAX(deltaUs, 1u);
 }
 
-/* Inference power at the CURRENT operating point, in mW. THE ONLY PLACE the
- * LP/HP inference constants are selected between: the three IPS/W tiles and
- * the battery model both call this, so the pair in constants.h is never
- * duplicated at a use site. appState.speedMode is a live dashboard control
- * (TIO_UIO_SPEED_MODE_IDX -> set_speed_mode -> nsx_power_set_performance_mode)
- * and HP is measurably LESS efficient per inference than LP (16.7 vs 5.5 mW,
- * #18 runlogs), so a tile pinned to the LP figure over-states HP efficiency.
- * The uint8_t read needs no lock: it is a single aligned byte, and the worst
- * case is that a tile computed either side of a toggle is one sample stale. */
+/* Inference power at a given operating point, in mW. THE ONLY PLACE the LP/HP
+ * inference constants are selected between: the three IPS/W tiles and the
+ * battery model both call this, so the pair in constants.h is never duplicated
+ * at a use site. HP is measurably LESS efficient per inference than LP
+ * (16.7 vs 5.5 mW, #18 runlogs), so a tile pinned to the LP figure over-states
+ * HP efficiency -- see issue #25 AC5.
+ *
+ * TAKES THE MODE, does not read it. appState.speedMode is a live dashboard
+ * control (TIO_UIO_SPEED_MODE_IDX -> set_speed_mode ->
+ * nsx_power_set_performance_mode) and can change between any two reads, so a
+ * caller that also needs the mode for something else (CpuProcessTask needs it
+ * for compute power too) must read it ONCE and pass the same value here.
+ * Otherwise one published window can mix an LP compute figure with an HP
+ * inference figure. The uint8_t read itself needs no lock -- single aligned
+ * byte -- and the worst case is a tile that is one sample stale. */
 static inline float32_t
-inference_power_mw(void)
+inference_power_mw(bool hpMode)
 {
-    return (appState.speedMode != 0) ? (float32_t)MCU_INFERENCE_POWER_MW_HP
-                                     : (float32_t)MCU_INFERENCE_POWER_MW_LP;
+    return hpMode ? (float32_t)MCU_INFERENCE_POWER_MW_HP : (float32_t)MCU_INFERENCE_POWER_MW_LP;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1508,7 +1513,8 @@ EcgProcessTask(void *pvParameters)
              * figure divided into it did. These now follow appState.speedMode
              * the same way the battery model below does -- see
              * inference_power_mw() and issue #25 AC5. */
-            ecgMetResults.denoiseuIpspw = 1.0e3f * ecgMetResults.denoiseIps / inference_power_mw();
+            ecgMetResults.denoiseuIpspw =
+                1.0e3f * ecgMetResults.denoiseIps / inference_power_mw(appState.speedMode != 0);
             if (err != 0) {
                 hkv_count(HKV_CNT_PIPE_ERR_ECG_DEN);
             }
@@ -1553,7 +1559,8 @@ EcgProcessTask(void *pvParameters)
             __asm volatile("" ::: "memory");
             hkv_count(HKV_CNT_PIPE_SEG_RUNS);
             /* Follows the operating point -- see the denoise branch. */
-            ecgMetResults.segmentuIpspw = 1.0e3f * ecgMetResults.segmentIps / inference_power_mw();
+            ecgMetResults.segmentuIpspw =
+                1.0e3f * ecgMetResults.segmentIps / inference_power_mw(appState.speedMode != 0);
             if (err != 0) {
                 hkv_count(HKV_CNT_PIPE_ERR_ECG_SEG);
             }
@@ -1589,7 +1596,8 @@ EcgProcessTask(void *pvParameters)
             __asm volatile("" ::: "memory");
             hkv_count(HKV_CNT_PIPE_MET_RUNS);
             /* Follows the operating point -- see the denoise branch. */
-            ecgMetResults.arrhythmiaIpspw = 1.0e3f * ecgMetResults.arrhythmiaIps / inference_power_mw();
+            ecgMetResults.arrhythmiaIpspw =
+                1.0e3f * ecgMetResults.arrhythmiaIps / inference_power_mw(appState.speedMode != 0);
 
             send_ecg_metrics();
             if (err != 0) {
@@ -1990,7 +1998,7 @@ CpuProcessTask(void *pvParameters)
              * while drawing ~3x the power. Sleep power is shared. See the
              * constant pairs and their sources in constants.h. */
             const bool hpMode = (appState.speedMode != 0);
-            const float32_t inferencePowerMw = inference_power_mw();
+            const float32_t inferencePowerMw = inference_power_mw(hpMode);
             const float32_t computePowerMw =
                 hpMode ? (float32_t)MCU_COMPUTE_POWER_MW_HP : (float32_t)MCU_COMPUTE_POWER_MW_LP;
 
