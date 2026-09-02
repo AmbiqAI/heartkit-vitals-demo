@@ -1402,6 +1402,7 @@ EcgProcessTask(void *pvParameters)
         ///////////////////////////////////////////////////////////////////
         if (ringbuffer_len(&rbEcgDen) >= ECG_DEN_WINDOW_LEN) {
             tickStart = dwt_cycles();
+            hkv_count(HKV_CNT_PIPE_DEN_RUNS);
             ringbuffer_peek(&rbEcgDen, ecgDenInout, ECG_DEN_WINDOW_LEN);
 
             pk_standardize_f32(ecgDenInout, ecgDenInout, ECG_DEN_WINDOW_LEN, NORM_STD_EPS);
@@ -1443,7 +1444,7 @@ EcgProcessTask(void *pvParameters)
             ringbuffer_seek(&rbEcgDen, ECG_DEN_VALID_LEN);
 
             ecgMetResults.denoiseIps = ips_from_delta_us(dwt_delta_us(tickStart));
-            ecgMetResults.denoiseuIpspw = 1.0e3f * ecgMetResults.denoiseIps / AVG_INFERENCE_POWER;
+            ecgMetResults.denoiseuIpspw = 1.0e3f * ecgMetResults.denoiseIps / MCU_INFERENCE_POWER_MW;
             if (err != 0) {
                 hkv_count(HKV_CNT_PIPE_ERR_ECG_DEN);
             }
@@ -1484,7 +1485,7 @@ EcgProcessTask(void *pvParameters)
             ringbuffer_seek(&rbEcgSeg, ECG_SEG_VALID_LEN);
 
             ecgMetResults.segmentIps = ips_from_delta_us(dwt_delta_us(tickStart));
-            ecgMetResults.segmentuIpspw = 1.0e3f * ecgMetResults.segmentIps / AVG_INFERENCE_POWER;
+            ecgMetResults.segmentuIpspw = 1.0e3f * ecgMetResults.segmentIps / MCU_INFERENCE_POWER_MW;
             if (err != 0) {
                 hkv_count(HKV_CNT_PIPE_ERR_ECG_SEG);
             }
@@ -1496,6 +1497,7 @@ EcgProcessTask(void *pvParameters)
         ///////////////////////////////////////////////////////////////////
         else if (MIN(ringbuffer_len(&rbEcgMet), ringbuffer_len(&rbEcgMaskMet)) >= ECG_MET_WINDOW_LEN) {
             tickStart = dwt_cycles();
+            hkv_count(HKV_CNT_PIPE_MET_RUNS);
             ringbuffer_peek(&rbEcgMet, ecgMetData, ECG_MET_WINDOW_LEN);
             ringbuffer_peek(&rbEcgMaskMet, ecgMaskMetData, ECG_MET_WINDOW_LEN);
 
@@ -1514,7 +1516,7 @@ EcgProcessTask(void *pvParameters)
             ringbuffer_seek(&rbEcgMaskMet, ECG_MET_VALID_LEN);
 
             ecgMetResults.arrhythmiaIps = ips_from_delta_us(dwt_delta_us(tickStart));
-            ecgMetResults.arrhythmiaIpspw = 1.0e3f * ecgMetResults.arrhythmiaIps / AVG_INFERENCE_POWER;
+            ecgMetResults.arrhythmiaIpspw = 1.0e3f * ecgMetResults.arrhythmiaIps / MCU_INFERENCE_POWER_MW;
 
             send_ecg_metrics();
             if (err != 0) {
@@ -1635,17 +1637,74 @@ PpgProcessTask(void *pvParameters)
 // overall utilization average, and a battery-life estimate -- ported from
 // legacy's CpuProcessTask.
 
+///////////////////////////////////////////////////////////////////////////////
+// Battery model -- three MCU states (issue #17)
+///////////////////////////////////////////////////////////////////////////////
+//
+// MCU energy only, sensor excluded. Scope, sources, the margin and the
+// deployment-projection caveat on the sleep term are all documented beside the
+// constants in constants.h; read that header before changing anything here.
+//
+//   idleFrac      = 1 - busy
+//   inferenceFrac = sum over stages of (duration_i x runRate_i), clamped <= busy
+//   computeFrac   = busy - inferenceFrac, clamped >= 0
+//   avgPower_mW   = (inf x INFERENCE + cmp x COMPUTE + idle x SLEEP) / MARGIN
+//   batteryDays   = BATT_POWER_CAP / avgPower_mW / 24
+//
+// `busy` is cpuPercUtil, the MEASURED 30 s rolling utilisation, unchanged by
+// this model. It includes demo transport, so it is conservative and needs no
+// duty-cycle argument.
+
+/**
+ * @brief Wall-time fraction one pipeline stage spent running, over a window.
+ *
+ * Both inputs are already measured, so nothing here is assumed: `ips` is the
+ * stage's last DWT-timed duration in the legacy 2e6/deltaUs scale (see
+ * ips_from_delta_us), which inverts to duration_s = 2/ips; `runsDelta` is that
+ * stage's own run counter over `windowSec`, so the cadence is derived rather
+ * than hardcoded at the nominal 2 s. A stage switched to DSP or off, or one
+ * that stalls, drops out of the sum by itself.
+ *
+ * Returns 0 on cold start -- a stage that has never run has ips == 0, and
+ * duration_s = 2/ips would be a divide by zero -- and whenever the stage did
+ * not run in this window, which is the same answer for a different reason.
+ *
+ * Caveat worth knowing: `ips` is the LAST duration, not the window mean, so a
+ * stage whose cost varies is billed at its most recent cost. The 30 s rolling
+ * average downstream absorbs most of that.
+ */
+static inline float32_t
+stage_duty_frac(uint32_t runsDelta, float32_t ips, float32_t windowSec)
+{
+    if (runsDelta == 0u || ips <= 0.0f || windowSec <= 0.0f) {
+        return 0.0f;
+    }
+    return (2.0f / ips) * ((float32_t)runsDelta / windowSec);
+}
+
 void
 CpuProcessTask(void *pvParameters)
 {
     (void)pvParameters;
     const uint32_t samplesPerPublish = kCpuStatsPublishPeriodMs / kCpuStatsSamplePeriodMs;
+    /* Nominal, not elapsed: the sample loop is paced by vTaskDelay, so the
+     * publish window is samplesPerPublish x kCpuStatsSamplePeriodMs plus the
+     * work itself. Overstating the window slightly understates the derived
+     * inference duty, which errs toward billing time at compute power. */
+    const float32_t kPublishWindowSec = (float32_t)(samplesPerPublish * kCpuStatsSamplePeriodMs) / 1000.0f;
     float32_t cpuUtilSecondAccum = 0.0f;
     uint32_t cpuUtilSecondCount = 0;
     float32_t cpuUtilRolling[kCpuStatsRollingSeconds] = {0};
     float32_t cpuUtilRollingSum = 0.0f;
     uint32_t cpuUtilRollingCount = 0;
     uint32_t cpuUtilRollingIndex = 0;
+    /* Inference-duty ring, advanced in lockstep with cpuUtilRolling above so
+     * both terms of the model describe the same 30 s window. */
+    float32_t infFracRolling[kCpuStatsRollingSeconds] = {0};
+    float32_t infFracRollingSum = 0.0f;
+    uint32_t prevDenRuns = g_hkv_counters[HKV_CNT_PIPE_DEN_RUNS];
+    uint32_t prevSegRuns = g_hkv_counters[HKV_CNT_PIPE_SEG_RUNS];
+    uint32_t prevMetRuns = g_hkv_counters[HKV_CNT_PIPE_MET_RUNS];
     uint32_t runTimeTicks = 0;
     float32_t ecgTaskPerc = 0, ppgTaskPerc = 0, totalTaskPerc = 0;
     uint32_t prevRun = 0, prevEcg = 0, prevPpg = 0, prevIdle = 0;
@@ -1684,6 +1743,12 @@ CpuProcessTask(void *pvParameters)
                     prevIdle += xTaskDetails[i].ulRunTimeCounter;
                 }
             }
+            /* Same reason the run-time counters are re-baselined here: this
+             * interval is discarded, so any stage runs that happened during
+             * startup must not land in the first published window. */
+            prevDenRuns = g_hkv_counters[HKV_CNT_PIPE_DEN_RUNS];
+            prevSegRuns = g_hkv_counters[HKV_CNT_PIPE_SEG_RUNS];
+            prevMetRuns = g_hkv_counters[HKV_CNT_PIPE_MET_RUNS];
             vTaskDelay(pdMS_TO_TICKS(100));
             continue;
         }
@@ -1724,22 +1789,76 @@ CpuProcessTask(void *pvParameters)
             cpuUtilSecondAccum = 0.0f;
             cpuUtilSecondCount = 0;
 
+            /* Inference duty for this window: each stage's own measured run
+             * rate x its own measured duration. Counters are free-running and
+             * never reset by the reporter, so a local delta is the window. */
+            const uint32_t denRuns = g_hkv_counters[HKV_CNT_PIPE_DEN_RUNS];
+            const uint32_t segRuns = g_hkv_counters[HKV_CNT_PIPE_SEG_RUNS];
+            const uint32_t metRuns = g_hkv_counters[HKV_CNT_PIPE_MET_RUNS];
+            const float32_t infFracInstant =
+                stage_duty_frac(denRuns - prevDenRuns, ecgMetResults.denoiseIps, kPublishWindowSec) +
+                stage_duty_frac(segRuns - prevSegRuns, ecgMetResults.segmentIps, kPublishWindowSec) +
+                stage_duty_frac(metRuns - prevMetRuns, ecgMetResults.arrhythmiaIps, kPublishWindowSec);
+            prevDenRuns = denRuns;
+            prevSegRuns = segRuns;
+            prevMetRuns = metRuns;
+
             if (cpuUtilRollingCount < kCpuStatsRollingSeconds) {
                 cpuUtilRolling[cpuUtilRollingIndex] = cpuUtilSecondAvg;
                 cpuUtilRollingSum += cpuUtilSecondAvg;
+                infFracRolling[cpuUtilRollingIndex] = infFracInstant;
+                infFracRollingSum += infFracInstant;
                 cpuUtilRollingCount++;
             } else {
                 cpuUtilRollingSum -= cpuUtilRolling[cpuUtilRollingIndex];
                 cpuUtilRolling[cpuUtilRollingIndex] = cpuUtilSecondAvg;
                 cpuUtilRollingSum += cpuUtilSecondAvg;
+                infFracRollingSum -= infFracRolling[cpuUtilRollingIndex];
+                infFracRolling[cpuUtilRollingIndex] = infFracInstant;
+                infFracRollingSum += infFracInstant;
             }
             cpuUtilRollingIndex = (cpuUtilRollingIndex + 1) % kCpuStatsRollingSeconds;
 
             appMetResults.cpuPercUtil = cpuUtilRollingSum / (float32_t)cpuUtilRollingCount;
-            float32_t avgPower =
-                (appMetResults.cpuPercUtil * AVG_INFERENCE_POWER + (100.0f - appMetResults.cpuPercUtil) * AVG_SLEEP_POWER) /
-                100.0f;
-            appMetResults.batteryDays = BATT_POWER_CAP / avgPower / 24.0f;
+
+            /* Three-state split. See the header above CpuProcessTask and the
+             * sourced constants in constants.h. */
+            float32_t busyFrac = appMetResults.cpuPercUtil / 100.0f;
+            if (busyFrac < 0.0f) {
+                busyFrac = 0.0f;
+            } else if (busyFrac > 1.0f) {
+                busyFrac = 1.0f;
+            }
+            float32_t inferenceFrac = infFracRollingSum / (float32_t)cpuUtilRollingCount;
+            /* Clamped to busy, not asserted equal to it: the two come from
+             * independent measurements (FreeRTOS run-time stats vs DWT +
+             * counters) and nothing guarantees they agree. Over-clamping bills
+             * the excess at inference power, which is the conservative
+             * direction. */
+            if (inferenceFrac < 0.0f) {
+                inferenceFrac = 0.0f;
+            } else if (inferenceFrac > busyFrac) {
+                inferenceFrac = busyFrac;
+            }
+            float32_t computeFrac = busyFrac - inferenceFrac;
+            if (computeFrac < 0.0f) {
+                computeFrac = 0.0f;
+            }
+            const float32_t idleFrac = 1.0f - busyFrac;
+
+            const float32_t avgPower = (inferenceFrac * (float32_t)MCU_INFERENCE_POWER_MW +
+                                        computeFrac * (float32_t)MCU_COMPUTE_POWER_MW +
+                                        idleFrac * (float32_t)MCU_SLEEP_POWER_MW) /
+                                       (float32_t)SYSTEM_POWER_MARGIN;
+
+            appMetResults.battInferenceFrac = inferenceFrac;
+            appMetResults.battComputeFrac = computeFrac;
+            appMetResults.battIdleFrac = idleFrac;
+            appMetResults.battAvgPowerMw = avgPower;
+            /* avgPower is bounded below by idle power for any real fraction set,
+             * so the guard is defensive against a constant being zeroed rather
+             * than a reachable state. */
+            appMetResults.batteryDays = (avgPower > 0.0f) ? ((float32_t)BATT_POWER_CAP / avgPower / 24.0f) : 0.0f;
 
             send_cpu_metrics();
         }
@@ -2119,6 +2238,15 @@ report_extra_cpu(void)
     hkv_log_u32("capacity", HKV_TASK_STATUS_CAPACITY);
     hkv_log_fx2("util", appMetResults.cpuPercUtil);
     hkv_log_fx2("batt_days", appMetResults.batteryDays);
+    /* Battery-model breakdown (issue #17), so the three-state split is legible
+     * on SWO instead of only its result. `batt_inf` + `batt_cmp` is the modelled
+     * busy fraction and should track `util`; `batt_inf` pinned equal to it means
+     * the clamp is active, i.e. derived inference duty exceeded measured busy.
+     * Percentages of wall time; batt_pwr is the modelled average in mW. */
+    hkv_log_fx2("batt_inf", 100.0f * appMetResults.battInferenceFrac);
+    hkv_log_fx2("batt_cmp", 100.0f * appMetResults.battComputeFrac);
+    hkv_log_fx2("batt_idle", 100.0f * appMetResults.battIdleFrac);
+    hkv_log_fx2("batt_pwr", appMetResults.battAvgPowerMw);
     hkv_log_fx2("avg_ips", appMetResults.avgAiIps);
     /* Free stack words on the BLE radio dispatcher task, and the tio_ble_init()
      * status that explains a zero. Both are CACHED VALUES -- the ~1 ms stack

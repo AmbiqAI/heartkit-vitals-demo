@@ -29,16 +29,120 @@ extern "C" {
 #define LP_CPU_MODE (0)
 #define HP_CPU_MODE (2)
 #define SPI_IOM (5)
-#define AVG_SLEEP_POWER (1.15) // 1.50 mW prod is 77% of this so 1.15 mW
-#define AVG_INFERENCE_POWER (7.87) // 10.215 mW prod is 77% of this so 7.87 mW
 #else
 #define LP_CPU_MODE (0)
 #define HP_CPU_MODE (2)
 #define SPI_IOM (1)
-#define AVG_SLEEP_POWER (2.12) // mW
-#define AVG_INFERENCE_POWER (13.65)  // mW
 #endif
-#define BATT_POWER_CAP (1485) // 2*225*3.3
+
+///////////////////////////////////////////////////////////////////////////////
+// Battery / power model (issue #17; figures verified in issue #18)
+///////////////////////////////////////////////////////////////////////////////
+//
+// WHAT THIS MODELS -- MCU ENERGY ONLY. SENSOR POWER IS DELIBERATELY EXCLUDED.
+// Sensor power depends on LED count, drive strength and sampling duty, none of
+// which are properties of the MCU. Excluding it keeps the figure honest about
+// what is being claimed and comparable across use cases. Anywhere this number
+// is displayed it must read "MCU energy only, sensor excluded; estimated from
+// datasheet and bench figures" or it will be quoted as a product spec.
+//
+// THREE STATES. Time is split into inference / general compute / sleep, and
+// each is billed at its own figure (see main.cc CpuProcessTask). The previous
+// two-state model billed all busy time -- transport, DSP, ring copies -- at
+// inference power.
+//
+// THE SLEEP TERM IS A DEPLOYMENT PROJECTION, NOT A MEASUREMENT OF THIS BUILD.
+// The demo does not sleep: FreeRTOSConfig.h sets `configUSE_TICKLESS_IDLE 0`,
+// so idle time is spent spinning in the idle task at run power, not in Sleep 1.
+// The idle term states what the same workload would draw if the port slept.
+// The busy fraction, by contrast, IS measured (`cpuPercUtil`, 30 s rolling)
+// and includes demo transport, so it is conservative.
+//
+// SLEEP 1, NOT DEEP SLEEP, DELIBERATELY. The sensor wakes the MCU ~7.7 times
+// per second. Sleep 1 keeps HFRC running so a wake is cheap; deep sleep at that
+// cadence pays an HFRC restart per wake, and the datasheet publishes no wake
+// energy, so its 36 uW steady-state figure is not the whole cost. Sleep 1 is
+// both the conservative and the honest choice at this wake rate.
+//
+// METHODOLOGY NOTE -- MIXED MEASUREMENT DOMAINS, STATED NOT BLENDED. The
+// datasheet figures below are SoC-only at VDD 1.8 V. The inference figure is an
+// apollo510_evb BOARD-LEVEL measurement. Mixing the two is acceptable at demo
+// precision, where order-of-magnitude is the bar, but it is a known
+// inconsistency and is recorded here rather than hidden in the arithmetic.
+
+#ifdef AM_PART_APOLLO5B
+
+/* Idle/sleep power.
+ * Source: Apollo510B SoC Datasheet DS-A510B-1p1p0, Table 39 "Current
+ *         Consumption in Active Mode and Sleep Modes", symbol ISS1
+ *         (System Sleep 1, 160 kB TCM retained), p.216, 2026.
+ * Conditions: WFI SLEEP=1, clocks gated, HFRC on, XTAL off, buck enabled,
+ *         NVM standby, cache retained, VDD 1.8 V. Typical, 750 uW. */
+#define MCU_SLEEP_POWER_MW (0.75)
+
+/* General compute (non-inference busy time: DSP, transport, ring copies).
+ * Kept as the per-MHz figure and the clock so the derivation stays visible
+ * instead of collapsing to a magic 3.39.
+ * Source: Apollo510B SoC Datasheet DS-A510B-1p1p0, Table 39, symbol IRUNLPFB
+ *         (CoreMark run power, low-power mode), p.216, 2026.
+ * Conditions: MRAM, cache enabled, buck enabled, VDD 1.8 V. Typical.
+ * Clock: 96 MHz, the demo's LP_CPU_MODE operating frequency. */
+#define MCU_COMPUTE_UW_PER_MHZ (35.3)
+#define MCU_COMPUTE_CLOCK_MHZ  (96.0)
+#define MCU_COMPUTE_POWER_MW   (MCU_COMPUTE_UW_PER_MHZ * MCU_COMPUTE_CLOCK_MHZ / 1000.0) // 3.389 mW
+
+/* Inference power at 96 MHz for this demo's model set.
+ * Source: OneDrive .../benchmarks/apollo510_evb/{ecg_segmentation,
+ *         ecg_arrhythmia}/runlog.csv, LP(mW) column, row 2, dated 2026-02-26.
+ * Measured: 5.496 mW (ecg_segmentation), 5.743 mW (ecg_arrhythmia). ecg_denoise
+ *         power was not captured in that run (all-zero row), so the two
+ *         measured models set the figure and denoise is billed at the same
+ *         rate. 5.5 mW is the segmentation value rounded, i.e. the lower of the
+ *         two, chosen because it is the stage that runs most often.
+ * Conditions: apollo510_evb, TFLM, AS R5.3.0, gcc 14.3, EVB BOARD-LEVEL. */
+#define MCU_INFERENCE_POWER_MW (5.5)
+
+#else
+
+/* TODO(verify): 2.12 mW sleep power for this non-Apollo5B part has no source of
+ * record (issue #18 searched OneDrive benchmarks, Confluence, Jira, GitHub and
+ * git history and found none). Check the Apollo510 (non-B) SoC datasheet,
+ * Table 39 "Current Consumption in Active Mode and Sleep Modes", for the
+ * System Sleep 1 symbol, alongside the Apollo510B copy in
+ * OneDrive .../Ambiq/sws/datasheets/soc/ap5/. Value left unchanged: replacing
+ * it with an Apollo510B number would be inventing provenance, not fixing it. */
+#define MCU_SLEEP_POWER_MW (2.12)
+
+/* TODO(verify): 13.65 mW inference power for this non-Apollo5B part has no
+ * source of record (issue #18). Check the Apollo510 (non-B) SoC datasheet,
+ * Table 39, for the CoreMark run-power symbol, and bench the model set the way
+ * apollo510_evb was benched on 2026-02-26. Value left unchanged. */
+#define MCU_INFERENCE_POWER_MW (13.65)
+
+/* TODO(verify): no general-compute figure exists for this part. Rather than
+ * invent one, non-inference busy time is billed at the inference rate above --
+ * i.e. this branch keeps the old, conservative two-state behaviour, and the
+ * three-state split only bites where the figures are sourced. Replace with the
+ * Apollo510 (non-B) Table 39 run-power symbol x the operating clock once
+ * verified. */
+#define MCU_COMPUTE_POWER_MW (MCU_INFERENCE_POWER_MW)
+
+#endif
+
+/* System margin. STATED, NOT DERIVED. Divides the modelled power, i.e. it
+ * inflates it by 25%. It covers what the core figures above do not include:
+ * IOM / timer / GPIO activity driving the sensor, and the 3.3 V to 1.8 V
+ * regulator loss (the datasheet figures are quoted at VDD 1.8 V). It is an
+ * engineering allowance chosen by the owner, not a measurement, and it replaces
+ * the previous unexplained 0.77 factor that was applied to both constants with
+ * no recorded justification (issue #18). */
+#define SYSTEM_POWER_MARGIN (0.80)
+
+/* Battery capacity assumption -- 2 cells x 225 mAh x 3.3 V = 1485 mWh. This is
+ * a BATTERY ASSUMPTION for the demo form factor, not a silicon claim and not a
+ * measurement. Change it with the pack, and note that battery days scales
+ * linearly with it. */
+#define BATT_POWER_CAP (1485)
 
 #define I2C_IOM (1)
 #define I2C_SPEED_HZ (100000)
