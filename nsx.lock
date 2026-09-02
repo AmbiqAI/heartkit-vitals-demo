@@ -3,12 +3,12 @@
 schema_version: 4
 targets:
   apollo510b_evb:
-    generated_at: '2026-09-01T19:32:45+00:00'
+    generated_at: '2026-09-02T04:26:37+00:00'
     nsx_tool:
       version: 0.1.0
     manifest:
       path: nsx.yml
-      hash: sha256:54498fbb3cc6d787d9d968bf33357273ca6b88ef137ec7bf1845941093be7f4b
+      hash: sha256:f8e4db745ab86ae46c0cfb16e3c79f547ab15d99e3467a76e2de036abebaa6f0
     target:
       board: apollo510b_evb
       soc: apollo510b
@@ -324,12 +324,12 @@ targets:
           content_hash: sha256:30536cc605875086789f0da628b5c4e9dab0ac9d0aa852a744e9ad5884c91d13
           acquired_at: '2026-07-20T22:17:00+00:00'
   apollo510_evb:
-    generated_at: '2026-09-01T19:32:45+00:00'
+    generated_at: '2026-09-02T04:26:37+00:00'
     nsx_tool:
       version: 0.1.0
     manifest:
       path: nsx.yml
-      hash: sha256:54498fbb3cc6d787d9d968bf33357273ca6b88ef137ec7bf1845941093be7f4b
+      hash: sha256:f8e4db745ab86ae46c0cfb16e3c79f547ab15d99e3467a76e2de036abebaa6f0
     target:
       board: apollo510_evb
       soc: apollo510
@@ -613,12 +613,12 @@ targets:
           content_hash: sha256:30536cc605875086789f0da628b5c4e9dab0ac9d0aa852a744e9ad5884c91d13
           acquired_at: '2026-07-20T22:17:00+00:00'
   apollo330mP_evb:
-    generated_at: '2026-09-01T19:32:45+00:00'
+    generated_at: '2026-09-02T04:26:38+00:00'
     nsx_tool:
       version: 0.1.0
     manifest:
       path: nsx.yml
-      hash: sha256:54498fbb3cc6d787d9d968bf33357273ca6b88ef137ec7bf1845941093be7f4b
+      hash: sha256:f8e4db745ab86ae46c0cfb16e3c79f547ab15d99e3467a76e2de036abebaa6f0
     target:
       board: apollo330mP_evb
       soc: apollo330P

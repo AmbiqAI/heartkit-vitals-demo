@@ -97,5 +97,5 @@ module_registry:
       metadata: modules/nsx-tileio/modules/nsx-tileio-ble/nsx-module.yaml
 tooling:
   nsx:
-    version: 0.7.3
+    version: 0.7.17
     major: 0
