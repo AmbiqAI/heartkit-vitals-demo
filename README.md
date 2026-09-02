@@ -126,13 +126,14 @@ at 37.7 percent against roughly 27 to 28 percent for USB.
 depends on LED count, drive strength, and sampling duty, none of which are
 properties of the MCU. The model splits time into inference, general compute,
 and sleep, and bills each at its own figure: datasheet values for sleep and
-per-MHz compute, bench measurements for inference (issue #18). It reports about
-28 days at 96 MHz (measured 27.6 days, issue #17).
+per-MHz compute, bench measurements for inference (issue #18). The estimate
+assumes 1485 mWh, two CR2032 cells, MCU energy only, sensor excluded. Measured
+27.8 days at 96 MHz on the current build (issue #17).
 
 What it is not: it is not a product battery specification, it is not a system
-power measurement, and the sleep term is a projection rather than a measurement
-of this build, because the demo does not actually sleep. The battery assumption
-behind the figure is two 225 mAh cells at 3.3 V, not one.
+power measurement, and it is not a single-coin-cell figure. The sleep term is a
+projection rather than a measurement of this build, because the demo does not
+actually sleep.
 
 **AI Throughput IPS.** Inferences per second expressed as `2e6 / duration`, the
 scale the host dashboard expects (`ips_from_delta_us` in `src/main.cc`). This is
@@ -157,7 +158,8 @@ figures for each operating point, so the battery tile responds to the toggle.
 > Throughput IPS tiles under-report by 2.604x in HP mode, the battery-life tile
 > is affected, and `uptime_ms` on the HKV observability lines runs fast. **Do not
 > quote any high-performance-mode number from the dashboard until #25 is fixed.**
-> The 96 MHz figures are unaffected.
+> The 96 MHz figures are unaffected. The high-performance toggle is being
+> corrected under #25; until it lands, use low-power mode for the demo.
 
 ### Expected behaviour
 
@@ -224,11 +226,10 @@ derivation.
 
 ## Known limitations
 
-- **Unclean host teardown (issue #13, open).** The `_vendor_connected` flag
-  latches true on first vendor RX and is never cleared on disconnect, so
-  `usbReady` stays true and the connect edge fires once per boot rather than on
-  each reconnect. In practice: replug and reconnect works, but the firmware does
-  not observe the teardown.
+- **Stale first data after an unclean tab close (issue #13, open).** If the
+  browser tab is closed uncleanly with the USB cable left in, the device sees no
+  bus event, so the first data shown when the dashboard is reopened can be
+  stale. Using a clean Disconnect, or replugging the cable, avoids it.
 - **High-performance-mode timebase (issue #25, open).** See the caveat above.
   Do not quote 250 MHz dashboard figures.
 - **TimedSignal v2 deferred to v5.1 (issue #5, open).** Owner decision,

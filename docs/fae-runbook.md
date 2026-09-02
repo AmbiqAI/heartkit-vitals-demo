@@ -45,20 +45,24 @@ themselves and think it is broken.
 
 **3:30 IPS/W.**
 > "Inferences per watt. This is the number that matters if you are running
-> always-on AI off a coin cell."
+> always-on AI on a very small energy budget."
 
 **4:00 CR2032 Battery Life.**
-> "About 28 days. That is an estimate of MCU energy only, from datasheet and
-> bench figures. Sensor power is not in it."
+> "27.8 days measured at 96 MHz on this build. That is an estimate assuming
+> 1485 mWh, two CR2032 cells, and it covers MCU energy only. Sensor power is not
+> in it."
 
-Say the caveat in the same breath as the number, every time.
+Say the caveat in the same breath as the number, every time. Two cells, never
+one.
 
 **4:30 Speed toggle.** Flip to 250 MHz, show that streaming continues, flip
 back.
 > "The operating point is a runtime control. You trade power for headroom
 > without stopping."
 
-Flip it back to 96 MHz and leave it there. Do not read the tiles in HP mode.
+The high-performance toggle is being corrected under #25; until it lands, use
+low-power mode for the demo. Flip it back to 96 MHz, leave it there, and do not
+read the tiles in HP mode.
 
 ## What NOT to claim
 
@@ -66,11 +70,14 @@ Flip it back to 96 MHz and leave it there. Do not read the tiles in HP mode.
   specification.** It is a model of MCU energy only. It excludes the sensor
   entirely. If asked what the whole system draws, say the sensor is not modelled
   and offer to follow up (issues #17, #18).
+- **Do not claim battery life on a single coin cell.** The estimate assumes
+  1485 mWh, two CR2032 cells. Never say "a CR2032" or "a coin cell" singular.
 - **Do not quote any high-performance-mode figure.** In 250 MHz mode the tick
   and DWT timebase do not follow the performance mode, so the AI Throughput IPS
   tiles under-report by 2.604x and the battery tile is affected. Fix is tracked
-  in issue #25. Use the toggle to show the behaviour, read the numbers at
-  96 MHz.
+  in issue #25. The high-performance toggle is being corrected under #25; until
+  it lands, use low-power mode for the demo. Use the toggle to show the
+  behaviour, read the numbers at 96 MHz.
 - **Do not present AI Throughput IPS as a run rate.** It is throughput. The
   models run about once every 2 seconds.
 - **Do not present the CPU number as product CPU load.** It includes the demo
@@ -100,12 +107,12 @@ Flip it back to 96 MHz and leave it there. Do not read the tiles in HP mode.
 - Streaming design record: `design/streaming-pipeline.md`
 - Validation evidence: `USB-TEST-RESULTS/RESULTS.md`, held internally and not
   published in this repository. 11/11 pass, zero gaps over 3 and 10 minutes.
-- Known limitations: issue
-  [#13](https://github.com/AmbiqAI/heartkit-vitals-demo/issues/13) (unclean host
-  teardown), [#25](https://github.com/AmbiqAI/heartkit-vitals-demo/issues/25)
-  (HP-mode timebase),
-  [#5](https://github.com/AmbiqAI/heartkit-vitals-demo/issues/5) (TimedSignal
-  deferred to v5.1)
+- Known limitations:
+  [#13](https://github.com/AmbiqAI/heartkit-vitals-demo/issues/13) stale first
+  data after an unclean tab close,
+  [#25](https://github.com/AmbiqAI/heartkit-vitals-demo/issues/25) HP-mode
+  timebase, [#5](https://github.com/AmbiqAI/heartkit-vitals-demo/issues/5)
+  TimedSignal deferred to v5.1
 - Battery model provenance: issues
   [#17](https://github.com/AmbiqAI/heartkit-vitals-demo/issues/17) and
   [#18](https://github.com/AmbiqAI/heartkit-vitals-demo/issues/18)
