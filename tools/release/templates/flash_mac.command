@@ -1,4 +1,6 @@
 #!/bin/bash
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, Ambiq
 cd -- "$(dirname "$0")"
 
 if command -v JLinkExe >/dev/null 2>&1; then

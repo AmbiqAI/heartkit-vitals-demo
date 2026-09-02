@@ -1,10 +1,9 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) 2026, Ambiq
 /**
  * @file timebase.c
  * @brief Keep SystemCoreClock and the FreeRTOS tick honest across a
  *        performance-mode change (issue #25).
- *
- * SPDX-License-Identifier: BSD-3-Clause
- * Copyright (c) 2026, Ambiq
  */
 
 #include <stdint.h>

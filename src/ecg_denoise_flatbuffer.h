@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) 2026, Ambiq
 #ifndef __ECG_DENOISE_FLATBUFFER_H
 #define __ECG_DENOISE_FLATBUFFER_H
 const unsigned char ecg_denoise_flatbuffer[] = {

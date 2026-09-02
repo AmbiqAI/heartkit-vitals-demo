@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) 2026, Ambiq
 #ifndef __ECG_SEGMENTATION_FLATBUFFER_H
 #define __ECG_SEGMENTATION_FLATBUFFER_H
 const unsigned char ecg_segmentation_flatbuffer[] = {

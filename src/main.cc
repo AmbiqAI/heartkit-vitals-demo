@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) 2026, Ambiq
 /**
  * @file main.cc
  * @brief HeartKit vitals demo (NSX port, phase 6: full app orchestration).

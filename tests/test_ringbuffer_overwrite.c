@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) 2026, Ambiq
 /**
  * @file test_ringbuffer_overwrite.c
  * @brief Host tests for ringbuffer_push_overwrite() (drop-oldest) plus

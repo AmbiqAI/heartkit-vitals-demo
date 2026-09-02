@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, Ambiq
 """Record and check the provenance of the vendored dependency modules.
 
 The app repo's own dirty flag says nothing about `modules/`: that tree is

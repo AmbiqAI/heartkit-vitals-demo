@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, Ambiq
 """
 Standalone (non-browser) test client for heartkit-vitals-demo's TileIO USB
 vendor stream. Runs anywhere pyusb + libusb are available -- useful for
