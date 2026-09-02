@@ -1,0 +1,6 @@
+ExitOnError 1
+Reset
+LoadFile firmware.bin, @LOAD_ADDRESS@
+Reset
+Go
+Exit
