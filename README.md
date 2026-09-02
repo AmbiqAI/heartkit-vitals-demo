@@ -70,7 +70,18 @@ EVB connected on its programming/debug USB port, powered on.
    [v5.0.0 release](https://github.com/AmbiqAI/heartkit-vitals-demo/releases/tag/v5.0.0),
    or from the team OneDrive under
    `Demos/vital-sign-monitoring/firmware/v500/`.
-2. Unzip it and open the `v500/apollo510b` folder.
+2. Unzip it and pick your board folder:
+
+   | Your EVB | Folder | Transports |
+   | --- | --- | --- |
+   | Apollo510B EVB | `v500/apollo510b/` | USB and BLE |
+   | Apollo510 EVB | `v500/apollo510/` | USB only |
+   | Apollo330 Plus EVB | `v500/apollo330/` | USB only |
+
+   The Apollo510 and Apollo330 packages are USB only; BLE is available on the
+   Apollo510B alone. On the Apollo330, keep the speed toggle in low-power mode
+   only and do not quote the battery tile. Both points are covered under Board
+   differences below.
 3. Run the helper for your computer: double-click `flash_mac.command` on macOS,
    run `flash_win.bat` on Windows, or run `./flash_linux.sh` on Linux.
 4. Wait for `Flash completed successfully.`, then move the USB cable to the data
@@ -84,6 +95,8 @@ EVB connected on its programming/debug USB port, powered on.
 
 If the helper does not run, flash from inside that same folder with
 `JLinkExe -nogui 1 -device AP510NFA-CBR -if SWD -speed 4000 -commandfile downloadfw.jlink`.
+The `apollo510b` and `apollo510` folders both use device `AP510NFA-CBR`; in the
+`apollo330` folder use `-device Apollo330P_510L` instead.
 
 To confirm, check that the board enumerates as `heartkit-vitals-demo` on the
 WebUSB port. Full instructions, including the macOS Gatekeeper workaround, are
@@ -120,6 +133,37 @@ validation. It is a stale-session recovery, not something every normal reconnect
 needs.
 
 ## What you will see
+
+### Board differences
+
+The same firmware sources build for all three boards. The streaming pipeline,
+the sensor path, and the dashboard behave the same on every board. Only the
+points below differ.
+
+- **Transports.** `apollo510b_evb` supports USB and BLE. `apollo510_evb` and
+  `apollo330mP_evb` are USB only.
+- **Apollo510 figures are sourced.** The battery and clock figures used on the
+  Apollo510 come from its own datasheet, Apollo510 SoC Datasheet DS-A510-1p1p0
+  Table 39 p.250. The values are identical to the Apollo510B ones. The v5.0.0
+  timebase fix is active on this board and both speed modes work as they do on
+  the 510B.
+- **Apollo330: low-power mode only.** High-performance mode is not supported on
+  this board in v5.0.0. The timebase sync is a no-op there, so the toggle
+  selects 192 MHz and the timing-derived tiles misreport. Keep the speed toggle
+  in low-power mode.
+- **Apollo330: the battery tile is not sourced.** On this board the battery tile
+  uses unsourced fallback figures. Do not quote it. Sourced Apollo330 Plus
+  figures, from the preliminary Apollo330 Plus datasheet DS-A330PS-0p9p0, are
+  recorded for the follow-up release.
+- **Not flashed in this cycle.** The `apollo510` and `apollo330` packages were
+  not flashed on hardware in this release cycle. They are built from the same
+  sources as the Apollo510B package, and the Apollo510B hardware run is the
+  smoke test for that shared code. The board-specific paths listed above are
+  compile-time and documented, not exercised.
+
+Provenance: owner decisions recorded on issue #33 (2026-09-02), with the figure
+sourcing on issues #25 and #18. Those issues sit in a private repository, so
+quote the datasheet references above to customers rather than the issue numbers.
 
 ### Tiles glossary
 

@@ -6,6 +6,11 @@ One page. HeartKit Vitals Demo, booth or customer desk, about 5 minutes.
 
 - [ ] **Board:** `apollo510b_evb` with the AS7058 sensor attached. Use the B
       part; it is the only one with BLE.
+- [ ] **Package:** know which EVB you have and which folder you flash from.
+      Apollo510B EVB -> `v500/apollo510b/`, Apollo510 EVB -> `v500/apollo510/`,
+      Apollo330 Plus EVB -> `v500/apollo330/`. The 510 and 330 are USB only, so
+      skip the BLE step on those boards. Those two packages were
+      not flashed on hardware in the v5.0.0 cycle, so verify yours first.
 - [ ] **Flashed and verified** before the show floor, not on it.
 - [ ] **Cables:** data USB cable on the **data** connector. Keep the J-Link and
       the programming/debug cable in the bag as backup, not plugged in.
@@ -25,6 +30,10 @@ One page. HeartKit Vitals Demo, booth or customer desk, about 5 minutes.
       just the default you open on.
 
 ## 5-minute demo script
+
+**On an Apollo330 Plus EVB: low-power mode only.** Keep the speed toggle in low
+power, skip the 4:30 flip, and do not read out the battery tile; it is not
+sourced on this board.
 
 **0:00 Open.** "This is an Apollo510B running three ECG models on-device while
 streaming to a browser. Everything you see is live from the sensor."
@@ -91,6 +100,9 @@ build, that was a timebase defect, fixed in v5.0.0 (#25).
   measured here.
 - **Do not present the efficiency tiles as measured.** They divide throughput by
   the same modelled inference power the battery tile uses.
+- **On the Apollo330, do not toggle high performance and do not quote the
+  battery tile.** High-performance mode is not supported on that board in
+  v5.0.0, and its battery tile uses unsourced fallback figures.
 - **Do not quote a specific efficiency percentage in high-performance mode.** The
   drop has measured anywhere from roughly a tenth to a third across builds,
   because binary layout moves throughput. Say only that efficiency is lower in
@@ -108,7 +120,7 @@ build, that was a timebase defect, fixed in v5.0.0 (#25).
 | One blank band in the trace | Normal after a real interruption. The app is being honest about lost data. Keep talking; it recovers by itself and will not flood to catch up. |
 | Trace lags you by several seconds | Expected, by design. Say so. |
 | BLE will not reconnect | Forget Device, re-scan on `ble`. `apollo510b_evb` only. |
-| Nothing works and there is a queue | Replug, reload the browser tab, reconnect. If that fails, reflash from the prebuilt package (README Quick start A), or from source (Quick start B): `uv run nsx flash --app-dir . --board apollo510b_evb` |
+| Nothing works and there is a queue | Replug, reload the browser tab, reconnect. If that fails, reflash from the prebuilt package (README Quick start A) using your board's folder, `v500/apollo510b/`, `v500/apollo510/`, or `v500/apollo330/`, or from source (Quick start B): `uv run nsx flash --app-dir . --board apollo510b_evb` |
 
 ## Links
 
