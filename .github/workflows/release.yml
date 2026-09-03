@@ -43,9 +43,6 @@ jobs:
       contents: write
     env:
       UV_VERSION: "0.11.26"
-      # A skipped check on a release runner is a failure. See
-      # scripts/ci-local.sh.
-      CI_STRICT: "1"
       # SHA-256 as published by Arm next to the archive at
       # https://developer.arm.com/-/media/Files/downloads/gnu/15.2.Rel1/binrel/
       # <archive>.sha256asc
@@ -95,7 +92,13 @@ jobs:
             echo "refs/tags/${VERSION}. Create and push the tag first." >&2
             exit 1
           fi
-          echo "Tag ${VERSION} resolves to $(git rev-parse "refs/tags/${VERSION}^{commit}")"
+          TAG_COMMIT="$(git rev-parse "refs/tags/${VERSION}^{commit}")"
+          if [ "$(git rev-parse HEAD)" != "${TAG_COMMIT}" ]; then
+            echo "::error::HEAD $(git rev-parse --short HEAD) is not the ${VERSION} tag commit ${TAG_COMMIT}"
+            echo "Run this workflow from the ${VERSION} tag, not from a branch." >&2
+            exit 1
+          fi
+          echo "Tag ${VERSION} resolves to ${TAG_COMMIT}, matching HEAD"
 
       - name: Require the module token
         env:

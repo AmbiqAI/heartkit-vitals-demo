@@ -74,7 +74,8 @@ the lock closure rather than re-resolving every module source; it catches a
 manifest edit that was never locked, and it does not catch upstream drift. See
 [#50](https://github.com/AmbiqAI/heartkit-vitals-demo/issues/50).
 
-Both workflows set `CI_STRICT=1`. `scripts/ci-local.sh` skips a check it
+`ci.yml` sets `CI_STRICT=1` for its `scripts/ci-local.sh` steps; the release
+job does not run that script. `scripts/ci-local.sh` skips a check it
 cannot run locally, for example when `uv` is missing or the vendored module
 paths are not materialised; under `CI_STRICT=1` each of those paths fails
 instead, so a gate step cannot pass having run nothing.
