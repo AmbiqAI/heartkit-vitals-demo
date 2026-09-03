@@ -15,11 +15,7 @@
 #   scripts/ci-local.sh frozen     # frozen module sync check only
 #   scripts/ci-local.sh build      # firmware build only
 #
-# Set CI_STRICT=1 to turn every SKIPPED path into a failure. A developer on a
-# machine without uv, or in a tree where the modules are not materialised,
-# wants the skip and a zero exit. Hosted CI wants the opposite: a gate step
-# that runs nothing and still returns 0 reads as a pass on the pull request,
-# so both workflows set CI_STRICT=1.
+# CI_STRICT=1 turns every SKIPPED path into a failure (hosted CI sets it). See #6.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
