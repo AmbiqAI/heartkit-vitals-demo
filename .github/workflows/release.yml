@@ -151,6 +151,10 @@ jobs:
           git config --global \
             "url.https://x-access-token:${NSX_MODULE_TOKEN}@github.com/.insteadOf" \
             "https://github.com/"
+          # Populate at the locked commits, then verify. Frozen mode never
+          # vendors a missing tree. See #6.
+          uv run nsx sync --app-dir .
+          git diff --exit-code -- nsx.lock
           uv run nsx sync --app-dir . --frozen
 
       - name: Package the three boards
