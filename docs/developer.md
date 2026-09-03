@@ -68,6 +68,17 @@ green run mean the same thing.
 | `firmware` | `ubuntu-latest`, matrix over `apollo510b_evb`, `apollo510_evb`, `apollo330mP_evb` | frozen module sync, `scripts/ci-local.sh frozen`, per-board `nsx configure --frozen` and `nsx build`, uploads `firmware.bin` per board |
 | `notices` | `macos-latest` | frozen module sync, then `tools/release/gen_third_party_notices.py --check` |
 
+`uv run nsx lock --app-dir . --check` is not a full lockfile gate on the
+runner. The `host` job has no module credentials, so the check falls back to
+the lock closure rather than re-resolving every module source; it catches a
+manifest edit that was never locked, and it does not catch upstream drift. See
+[#50](https://github.com/AmbiqAI/heartkit-vitals-demo/issues/50).
+
+Both workflows set `CI_STRICT=1`. `scripts/ci-local.sh` skips a check it
+cannot run locally, for example when `uv` is missing or the vendored module
+paths are not materialised; under `CI_STRICT=1` each of those paths fails
+instead, so a gate step cannot pass having run nothing.
+
 The `notices` job needs macOS because the generator converts the AmbiqSuite
 agreement from RTF with `textutil`, which only macOS provides. The generator
 fails closed when no converter is present, so this check cannot move to Linux
@@ -89,8 +100,13 @@ purpose: a skipped build gate reads as a pass on the pull request.
 
 ### Release workflow
 
-`.github/workflows/release.yml` runs on a `v*` tag push, and can also be
-started by hand with `workflow_dispatch` and a version input. It runs
+`.github/workflows/release.yml` runs on a `v[0-9]*` tag push, and can also be
+started by hand with `workflow_dispatch` and a version input. The tag must
+already exist either way: the job fails if `refs/tags/<version>` does not
+resolve, and `gh release create --verify-tag` stops the release step from
+creating a tag as a side effect. The job only ever writes to a draft release;
+if a release for that version is already published it fails rather than
+replacing live assets. It runs
 `tools/release/package.sh` for the three release boards on a macOS runner,
 uploads the zips as workflow artifacts, and attaches them to a **draft**
 GitHub release. Publication stays manual, because the hardware validation gate

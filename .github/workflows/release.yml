@@ -15,7 +15,9 @@ name: Release
 on:
   push:
     tags:
-      - "v*"
+      # Digit anchored so branch-like or prerelease-tooling tags such as
+      # "vnext" cannot start a release build.
+      - "v[0-9]*"
   workflow_dispatch:
     inputs:
       version:
@@ -26,14 +28,24 @@ on:
 permissions:
   contents: read
 
+# Keyed on the version, not the ref, so a tag push and a manual dispatch for
+# the same version cannot race each other onto the same release assets.
+concurrency:
+  group: release-${{ inputs.version || github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
   package:
     name: package firmware drop
     runs-on: macos-latest
+    timeout-minutes: 60
     permissions:
       contents: write
     env:
       UV_VERSION: "0.11.26"
+      # A skipped check on a release runner is a failure. See
+      # scripts/ci-local.sh.
+      CI_STRICT: "1"
       # SHA-256 as published by Arm next to the archive at
       # https://developer.arm.com/-/media/Files/downloads/gnu/15.2.Rel1/binrel/
       # <archive>.sha256asc
@@ -44,6 +56,13 @@ jobs:
     steps:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # package.sh resolves refs/tags/<version> to fill the BUILD-INFO.txt
+          # provenance block. The default shallow, no-tags fetch leaves it
+          # writing "Git describe: <sha>" and "tag not found", so the drop
+          # would ship without provenance.
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Resolve the version
         id: version
@@ -62,6 +81,21 @@ jobs:
           fi
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
           echo "Packaging ${version}"
+
+      - name: Require the tag to exist
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          if ! git rev-parse -q --verify "refs/tags/${VERSION}" >/dev/null; then
+            echo "::error::tag ${VERSION} does not exist in this repository"
+            echo "tag ${VERSION} does not exist in this repository" >&2
+            echo "Packaging is only defined for a tagged tree: the drop's" >&2
+            echo "BUILD-INFO.txt provenance compares the sources against" >&2
+            echo "refs/tags/${VERSION}. Create and push the tag first." >&2
+            exit 1
+          fi
+          echo "Tag ${VERSION} resolves to $(git rev-parse "refs/tags/${VERSION}^{commit}")"
 
       - name: Require the module token
         env:
@@ -102,6 +136,15 @@ jobs:
           NSX_MODULE_TOKEN: ${{ secrets.NSX_MODULE_TOKEN }}
         run: |
           set -euo pipefail
+          # The credential is removed on every exit path, including a failed
+          # sync, so no later step and no vendored script can read it back out
+          # of ~/.gitconfig.
+          drop_credential() {
+            git config --global --unset-all \
+              "url.https://x-access-token:${NSX_MODULE_TOKEN}@github.com/.insteadOf" \
+              || true
+          }
+          trap drop_credential EXIT
           git config --global \
             "url.https://x-access-token:${NSX_MODULE_TOKEN}@github.com/.insteadOf" \
             "https://github.com/"
@@ -134,12 +177,25 @@ jobs:
             echo "Hardware validation is not recorded yet. Add the validation"
             echo "statement per board to these notes before publishing."
           } > "${notes}"
-          if gh release view "${VERSION}" >/dev/null 2>&1; then
+          # Only a draft may be updated. A published release is a shipped
+          # artifact set that people already have hashes for, so --clobber
+          # against it would silently replace live downloads.
+          if is_draft="$(gh release view "${VERSION}" --json isDraft --jq .isDraft 2>/dev/null)"; then
+            if [ "${is_draft}" != "true" ]; then
+              echo "::error::release ${VERSION} is published; refusing to modify its assets"
+              echo "release ${VERSION} is published; refusing to modify its assets" >&2
+              echo "Package a new version, or delete the published release by" >&2
+              echo "hand if it was created in error." >&2
+              exit 1
+            fi
+            echo "Release ${VERSION} is a draft; replacing its assets"
             gh release upload "${VERSION}" dist/*.zip --clobber
           else
+            # --verify-tag stops gh from creating the tag as a side effect. The
+            # tag gate earlier in this job already requires it to exist.
             gh release create "${VERSION}" \
               --draft \
-              --target "${GITHUB_SHA}" \
+              --verify-tag \
               --title "${VERSION}" \
               --notes-file "${notes}" \
               dist/*.zip

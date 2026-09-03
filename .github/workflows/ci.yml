@@ -31,6 +31,9 @@ concurrency:
 env:
   # uv is pinned so the resolver behaviour matches the developer environment.
   UV_VERSION: "0.11.26"
+  # scripts/ci-local.sh skips checks it cannot run. On a hosted runner a skip
+  # is a failure: a gate step that ran nothing must not report success.
+  CI_STRICT: "1"
   # Arm GNU Toolchain release used for the v5.0.0 board builds.
   # SHA-256 values are the ones Arm publishes next to each archive at
   # https://developer.arm.com/-/media/Files/downloads/gnu/15.2.Rel1/binrel/
@@ -43,6 +46,7 @@ jobs:
   host:
     name: host checks
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -65,6 +69,7 @@ jobs:
   firmware:
     name: firmware (${{ matrix.board }})
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -115,6 +120,15 @@ jobs:
           NSX_MODULE_TOKEN: ${{ secrets.NSX_MODULE_TOKEN }}
         run: |
           set -euo pipefail
+          # The credential is removed on every exit path, including a failed
+          # sync, so no later step and no vendored script can read it back out
+          # of ~/.gitconfig.
+          drop_credential() {
+            git config --global --unset-all \
+              "url.https://x-access-token:${NSX_MODULE_TOKEN}@github.com/.insteadOf" \
+              || true
+          }
+          trap drop_credential EXIT
           git config --global \
             "url.https://x-access-token:${NSX_MODULE_TOKEN}@github.com/.insteadOf" \
             "https://github.com/"
@@ -154,6 +168,7 @@ jobs:
     # from RTF with `textutil`, which only macOS provides. It fails closed
     # when no converter is present, so this check cannot run on Linux.
     runs-on: macos-latest
+    timeout-minutes: 30
     steps:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -182,6 +197,15 @@ jobs:
           NSX_MODULE_TOKEN: ${{ secrets.NSX_MODULE_TOKEN }}
         run: |
           set -euo pipefail
+          # The credential is removed on every exit path, including a failed
+          # sync, so no later step and no vendored script can read it back out
+          # of ~/.gitconfig.
+          drop_credential() {
+            git config --global --unset-all \
+              "url.https://x-access-token:${NSX_MODULE_TOKEN}@github.com/.insteadOf" \
+              || true
+          }
+          trap drop_credential EXIT
           git config --global \
             "url.https://x-access-token:${NSX_MODULE_TOKEN}@github.com/.insteadOf" \
             "https://github.com/"
