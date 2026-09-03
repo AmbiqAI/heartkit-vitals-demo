@@ -14,6 +14,8 @@
 #   scripts/ci-local.sh tests      # host tests only
 #   scripts/ci-local.sh frozen     # frozen module sync check only
 #   scripts/ci-local.sh build      # firmware build only
+#
+# CI_STRICT=1 turns every SKIPPED path into a failure (hosted CI sets it). See #6.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -21,6 +23,19 @@ cd "$REPO_ROOT"
 
 BOARD="${BOARD:-apollo510b_evb}"
 TARGET="${1:-all}"
+CI_STRICT="${CI_STRICT:-0}"
+
+# Report a check that could not run. Returns 0 so the caller skips, or 1 under
+# CI_STRICT=1 so the caller fails. The SKIPPED line is identical either way, so
+# a strict failure and a local skip name the same cause.
+skipped() {
+    echo "SKIPPED: $1"
+    if [ "$CI_STRICT" = "1" ]; then
+        echo "ERROR: CI_STRICT=1, a skipped check is a failure" >&2
+        return 1
+    fi
+    return 0
+}
 
 run_host_tests() {
     echo "==> host unit tests (ASan + UBSan, -Werror)"
@@ -93,7 +108,7 @@ check_frozen_sync() {
     echo "==> frozen module sync check"
     # Checked first: reading nsx.lock now also runs through `uv run python`.
     if ! command -v uv >/dev/null 2>&1; then
-        echo "SKIPPED: frozen module sync check (uv is not installed)"
+        skipped "frozen module sync check (uv is not installed)" || return 1
         return 0
     fi
     # `modules/` alone proves nothing: `modules/.gitignore` is tracked, so a
@@ -106,7 +121,8 @@ check_frozen_sync() {
     # shellcheck disable=SC2086
     for path in $paths cmake/nsx; do
         if [ ! -d "$path" ] || [ -z "$(ls -A "$path" 2>/dev/null)" ]; then
-            echo "SKIPPED: frozen module sync check (${path} is not materialised)"
+            skipped "frozen module sync check (${path} is not materialised)" \
+                || return 1
             return 0
         fi
     done

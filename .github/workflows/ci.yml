@@ -1,0 +1,223 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, Ambiq
+#
+# Hosted CI for the HeartKit vitals demo (see #6).
+#
+# The jobs run the same entry point as a developer does, scripts/ci-local.sh,
+# so a local green run and a CI green run mean the same thing.
+#
+# Container free by design: there is no shared embedded build image, so the
+# Arm GNU Toolchain is downloaded and checksum verified here.
+#
+# The firmware and notices jobs vendor private NSX module repositories and
+# need an NSX_MODULE_TOKEN repository secret with read access to them. A
+# missing secret fails those jobs with a clear message; it never skips them,
+# because a skipped build gate reads as a pass on the pull request.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # uv is pinned so the resolver behaviour matches the developer environment.
+  UV_VERSION: "0.11.26"
+  # scripts/ci-local.sh skips checks it cannot run. On a hosted runner a skip
+  # is a failure: a gate step that ran nothing must not report success.
+  CI_STRICT: "1"
+  # Arm GNU Toolchain release used for the v5.0.0 board builds.
+  # SHA-256 values are the ones Arm publishes next to each archive at
+  # https://developer.arm.com/-/media/Files/downloads/gnu/15.2.Rel1/binrel/
+  # <archive>.sha256asc
+  ARM_TOOLCHAIN_VERSION: "15.2.Rel1"
+  ARM_TOOLCHAIN_HOST: "x86_64"
+  ARM_TOOLCHAIN_SHA256: "597893282ac8c6ab1a4073977f2362990184599643b4c5ee34870a8215783a16"
+
+jobs:
+  host:
+    name: host checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+
+      - name: Host unit tests
+        run: scripts/ci-local.sh tests
+
+      - name: Shell script lint
+        run: shellcheck scripts/*.sh
+
+      - name: Lockfile matches the manifest
+        run: uv run nsx lock --app-dir . --check
+
+  firmware:
+    name: firmware (${{ matrix.board }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        board:
+          - apollo510b_evb
+          - apollo510_evb
+          - apollo330mP_evb
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Require the module token
+        env:
+          NSX_MODULE_TOKEN: ${{ secrets.NSX_MODULE_TOKEN }}
+        run: |
+          if [ -z "${NSX_MODULE_TOKEN}" ]; then
+            echo "::error::NSX_MODULE_TOKEN secret is not set"
+            echo "NSX_MODULE_TOKEN secret is not set" >&2
+            echo "Add a repository secret with read access to the private" >&2
+            echo "AmbiqAI NSX module repositories listed in nsx.lock." >&2
+            exit 1
+          fi
+          echo "NSX_MODULE_TOKEN is set"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+
+      - name: Install the Arm GNU Toolchain
+        run: |
+          set -euo pipefail
+          archive="arm-gnu-toolchain-${ARM_TOOLCHAIN_VERSION}-${ARM_TOOLCHAIN_HOST}-arm-none-eabi.tar.xz"
+          url="https://developer.arm.com/-/media/Files/downloads/gnu/${ARM_TOOLCHAIN_VERSION}/binrel/${archive}"
+          dest="${RUNNER_TEMP}/${archive}"
+          curl --fail --location --silent --show-error --retry 3 --output "${dest}" "${url}"
+          echo "${ARM_TOOLCHAIN_SHA256}  ${dest}" | sha256sum --check --strict -
+          mkdir -p "${RUNNER_TEMP}/arm-gnu-toolchain"
+          tar -xf "${dest}" -C "${RUNNER_TEMP}/arm-gnu-toolchain" --strip-components=1
+          echo "${RUNNER_TEMP}/arm-gnu-toolchain/bin" >> "${GITHUB_PATH}"
+
+      - name: Record the toolchain version
+        run: arm-none-eabi-gcc --version
+
+      - name: Vendor the locked modules
+        env:
+          NSX_MODULE_TOKEN: ${{ secrets.NSX_MODULE_TOKEN }}
+        run: |
+          set -euo pipefail
+          # The credential is removed on every exit path, including a failed
+          # sync, so no later step and no vendored script can read it back out
+          # of ~/.gitconfig.
+          drop_credential() {
+            git config --global --unset-all \
+              "url.https://x-access-token:${NSX_MODULE_TOKEN}@github.com/.insteadOf" \
+              || true
+          }
+          trap drop_credential EXIT
+          git config --global \
+            "url.https://x-access-token:${NSX_MODULE_TOKEN}@github.com/.insteadOf" \
+            "https://github.com/"
+          # Populate at the locked commits, then verify. Frozen mode never
+          # vendors a missing tree. See #6.
+          uv run nsx sync --app-dir .
+          git diff --exit-code -- nsx.lock
+          uv run nsx sync --app-dir . --frozen
+
+      - name: Frozen module and per-board configure gate
+        run: scripts/ci-local.sh frozen
+
+      - name: Configure ${{ matrix.board }}
+        env:
+          BOARD: ${{ matrix.board }}
+        run: uv run nsx configure --app-dir . --board "${BOARD}" --frozen
+
+      - name: Build ${{ matrix.board }}
+        env:
+          BOARD: ${{ matrix.board }}
+        run: scripts/ci-local.sh build
+
+      - name: Stage firmware.bin
+        env:
+          BOARD: ${{ matrix.board }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/artifact"
+          cp "build/${BOARD}/heartkit-vitals-demo.bin" "${RUNNER_TEMP}/artifact/firmware.bin"
+
+      - name: Upload firmware.bin
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: firmware-${{ matrix.board }}
+          path: ${{ runner.temp }}/artifact/firmware.bin
+          if-no-files-found: error
+
+  notices:
+    name: third party notices
+    # macOS runner: the notices generator converts the AmbiqSuite agreement
+    # from RTF with `textutil`, which only macOS provides. It fails closed
+    # when no converter is present, so this check cannot run on Linux.
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Require the module token
+        env:
+          NSX_MODULE_TOKEN: ${{ secrets.NSX_MODULE_TOKEN }}
+        run: |
+          if [ -z "${NSX_MODULE_TOKEN}" ]; then
+            echo "::error::NSX_MODULE_TOKEN secret is not set"
+            echo "NSX_MODULE_TOKEN secret is not set" >&2
+            echo "Add a repository secret with read access to the private" >&2
+            echo "AmbiqAI NSX module repositories listed in nsx.lock." >&2
+            exit 1
+          fi
+          echo "NSX_MODULE_TOKEN is set"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+
+      - name: Vendor the locked modules
+        env:
+          NSX_MODULE_TOKEN: ${{ secrets.NSX_MODULE_TOKEN }}
+        run: |
+          set -euo pipefail
+          # The credential is removed on every exit path, including a failed
+          # sync, so no later step and no vendored script can read it back out
+          # of ~/.gitconfig.
+          drop_credential() {
+            git config --global --unset-all \
+              "url.https://x-access-token:${NSX_MODULE_TOKEN}@github.com/.insteadOf" \
+              || true
+          }
+          trap drop_credential EXIT
+          git config --global \
+            "url.https://x-access-token:${NSX_MODULE_TOKEN}@github.com/.insteadOf" \
+            "https://github.com/"
+          # Populate at the locked commits, then verify. Frozen mode never
+          # vendors a missing tree. See #6.
+          uv run nsx sync --app-dir .
+          git diff --exit-code -- nsx.lock
+          uv run nsx sync --app-dir . --frozen
+
+      - name: THIRD-PARTY-NOTICES.md is current
+        run: uv run python tools/release/gen_third_party_notices.py --check
