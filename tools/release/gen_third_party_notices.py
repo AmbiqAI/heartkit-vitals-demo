@@ -72,6 +72,13 @@ LICENSE_FILENAMES = {
 LICENSE_BUNDLE_DIRS = ("sdk/docs/licenses",)
 LICENSE_BUNDLE_SUFFIXES = {".txt", ".md"}
 
+# ns-cmsis-nn follows the SPDX REUSE convention and keeps its license texts in
+# a top-level `LICENSES/` directory (the Ambiq Apollo SDK License it ships
+# under, plus the Apache-2.0 text of the Arm CMSIS-NN it derives from, which
+# its NOTICE points at). Every text in such a directory is a notice, subject to
+# the same exclusions as the AmbiqSuite bundle.
+LICENSE_DIR_NAMES = {"LICENSES"}
+
 # filelist.txt is a packaging manifest, not a license.
 #
 # gpl-3.0.txt is deliberately NOT reproduced. AmbiqSuite's own
@@ -106,6 +113,8 @@ REQUIRED_PATHS = [
     "modules/helia-rt/THIRD_PARTY_NOTICES.md",
     "modules/ns-cmsis-nn/LICENSE",
     "modules/ns-cmsis-nn/NOTICE",
+    "modules/ns-cmsis-nn/LICENSES/Apache-2.0.txt",
+    "modules/ns-cmsis-nn/LICENSES/LicenseRef-Ambiq-Apollo-SDK.txt",
     "modules/nsx-as7058/license.txt",
     "modules/nsx-physiokit/LICENSE",
     "modules/nsx-pmu-armv8m/LICENSE",
@@ -219,8 +228,14 @@ def module_pins(lock: dict, boards: list[str]) -> dict[str, dict]:
     for board in sorted(boards):
         for name, mod in sorted(targets[board].get("modules", {}).items()):
             if mod.get("kind") != "git":
-                # `packaged` modules are this repo's own board definitions and
-                # the generated cmake/nsx tooling; both are covered by LICENSE.
+                # `packaged` modules are not this repo's own files: nsx.lock
+                # records them as `project: neuralspotx, kind: packaged`, and
+                # `nsx sync` vendors them in from the neuralspotx packages, the
+                # board definitions into `boards/` and the cmake tooling into
+                # `cmake/nsx`. They are Ambiq's own neuralspotx content rather
+                # than third-party code, and they ship no upstream license text
+                # of their own, so they get no third-party section here. See
+                # NOTICE for how `boards/` is vendored.
                 continue
             resolved = mod.get("resolved", {})
             vendored = resolved.get("vendored_at")
@@ -309,16 +324,68 @@ def is_bundle_file(path: Path) -> bool:
     )
 
 
+def in_license_dir(path: Path) -> bool:
+    """True for anything inside a REUSE-style `LICENSES/` directory.
+
+    Matched case-insensitively on every ancestor directory name, not just the
+    direct parent: a module is free to group its notices in subdirectories, and
+    matching the parent alone dropped `LICENSES/sub/Zlib.txt` silently. The
+    AmbiqSuite bundle directory (`sdk/docs/licenses`) also matches
+    case-insensitively, but it has its own rule and its own documented
+    exclusions, so it stays with is_bundle_file() and is not treated as a REUSE
+    directory.
+    """
+    if any(f"/{d}/" in path.as_posix() for d in LICENSE_BUNDLE_DIRS):
+        return False
+    names = {n.casefold() for n in LICENSE_DIR_NAMES}
+    return any(parent.name.casefold() in names for parent in path.parents)
+
+
+def is_license_dir_file(path: Path) -> bool:
+    """Every regular file in a `LICENSES/` directory is a notice.
+
+    No suffix filter and no BUNDLE_EXCLUDE here. Both of those exist for the
+    AmbiqSuite bundle: the suffix list matches how that bundle is laid out, and
+    BUNDLE_EXCLUDE encodes a rationale about that bundle's contents (LVGL is not
+    built, so its GPL text would misstate the binary). Neither reasoning
+    transfers to a module that follows the REUSE convention, where a
+    `LICENSES/gpl-3.0.txt` would be a license the module actually ships under.
+    Applying the bundle rules here would drop it silently.
+    """
+    return in_license_dir(path)
+
+
 def collect(module_dir: Path) -> list[Path]:
     found: list[Path] = []
     for path in module_dir.rglob("*"):
         # Relative, for the same reason as in declared_licenses().
         if set(path.relative_to(module_dir).parts) & SKIP_DIRS:
+            # Fail closed: nothing in a LICENSES/ directory may be dropped by a
+            # walk rule that exists for build output and VCS metadata.
+            if in_license_dir(path) and path.is_file():
+                sys.exit(
+                    f"error: {rel(path)} sits in a LICENSES/ directory but was skipped\n"
+                    "       by SKIP_DIRS. Every file in such a directory is a notice.\n"
+                    "       Move it out of the skipped path or handle it explicitly."
+                )
             continue
         if not path.is_file():
+            # Same reason: a symlink, a broken link or any other non-regular
+            # entry in a LICENSES/ directory is a notice this run cannot read.
+            if in_license_dir(path) and not path.is_dir():
+                sys.exit(
+                    f"error: {rel(path)} sits in a LICENSES/ directory but is not a\n"
+                    "       regular file, so its text cannot be reproduced. Replace it\n"
+                    "       with the license text or handle it explicitly in collect()."
+                )
             continue
         name = path.name.lower()
-        if name in LICENSE_FILENAMES or name == "license.rtf" or is_bundle_file(path):
+        if (
+            name in LICENSE_FILENAMES
+            or name == "license.rtf"
+            or is_bundle_file(path)
+            or is_license_dir_file(path)
+        ):
             found.append(path)
     return sorted(found, key=lambda p: (p.parent.as_posix(), p.name))
 
@@ -428,9 +495,14 @@ def render(boards: list[str], modules: dict[str, dict]) -> str:
     w(
         "The AS7058 sensor driver (`modules/nsx-as7058`) is proprietary ams-OSRAM "
         "software supplied to Ambiq under agreement. It is distributed only in "
-        "binary form as part of the prebuilt firmware; its source is not in this "
-        "repository and building from source requires access to the private "
-        "`nsx-as7058` module."
+        "binary form as part of the prebuilt firmware; the driver source is not "
+        "in this repository and building from source requires access to the "
+        "private `nsx-as7058` module. Other AS7058 material is in this "
+        "repository: the sensor configuration presets exported from the "
+        "ams-OSRAM GUI (`assets/Life_metrics_Click_*.json`) and the C profiles "
+        "generated from them under `src/generated/`. That material is not "
+        "Ambiq-authored and is not covered by this repository's BSD 3-Clause "
+        "License; see `assets/README.md` for its provenance."
     )
     w("")
     w(
