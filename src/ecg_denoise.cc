@@ -27,6 +27,7 @@
 #include "constants.h"
 #include "ecg_denoise.h"
 #include "ecg_denoise_flatbuffer.h"
+#include "ecg_tensor_copy.h"
 
 static constexpr int denTensorArenaSize = 1024 * ECG_DEN_MODEL_SIZE_KB;
 AM_SHARED_RW alignas(16) static uint8_t denTensorArena[denTensorArenaSize];
@@ -79,6 +80,13 @@ ecg_denoise_init() {
     // Store input and output pointers (assume single input/output tensor)
     ctx->input = ctx->interpreter->input(0);
     ctx->output = ctx->interpreter->output(0);
+
+    // A model narrower than the host window cannot fill it. See #36.
+    if ((ctx->input->dims->data[1] < ECG_DEN_WINDOW_LEN) || (ctx->output->dims->data[1] < ECG_DEN_WINDOW_LEN)) {
+        TF_LITE_REPORT_ERROR(ctx->reporter, "Window mismatch: given=(%d, %d) < expected=%d.", ctx->input->dims->data[1],
+                             ctx->output->dims->data[1], ECG_DEN_WINDOW_LEN);
+        return 1;
+    }
     return 0;
 }
 
@@ -88,12 +96,12 @@ ecg_denoise_inference(float32_t *ecgIn, float32_t *ecgOut, uint32_t padLen, floa
     tf_model_context_t *ctx = &ecgDenModelCtx;
 
     // Copy input and quantize
-    for (size_t i = 0; i < ECG_DEN_WINDOW_LEN; i++) {
-        if (ctx->input->quantization.type == kTfLiteAffineQuantization) {
-            ctx->input->data.int8[i] = ecgIn[i] / ctx->input->params.scale + ctx->input->params.zero_point;
-        } else {
-            ctx->input->data.f[i] = ecgIn[i];
-        }
+    if (ctx->input->quantization.type == kTfLiteAffineQuantization) {
+        hkv_tensor_input_i8(ctx->input->data.int8, hkv_tensor_len(ctx->input->dims->data[1]), ecgIn,
+                            hkv_host_len(ECG_DEN_WINDOW_LEN), ctx->input->params.scale, ctx->input->params.zero_point);
+    } else {
+        hkv_tensor_input_f32(ctx->input->data.f, hkv_tensor_len(ctx->input->dims->data[1]), ecgIn,
+                             hkv_host_len(ECG_DEN_WINDOW_LEN));
     }
 
     // Invoke model
@@ -103,12 +111,13 @@ ecg_denoise_inference(float32_t *ecgIn, float32_t *ecgOut, uint32_t padLen, floa
     }
 
     // Copy output and dequantize
-    for (int i = padLen; i < ctx->output->dims->data[1] - (int)padLen; i++) {
-        if (ctx->output->quantization.type == kTfLiteAffineQuantization) {
-            ecgOut[i] = ((float32_t)ctx->output->data.int8[i] - ctx->output->params.zero_point) * ctx->output->params.scale;
-        } else {
-            ecgOut[i] = ctx->output->data.f[i];
-        }
+    if (ctx->output->quantization.type == kTfLiteAffineQuantization) {
+        hkv_tensor_output_i8(ecgOut, hkv_host_len(ECG_DEN_WINDOW_LEN), ctx->output->data.int8,
+                             hkv_tensor_len(ctx->output->dims->data[1]), (int)padLen, ctx->output->params.scale,
+                             ctx->output->params.zero_point);
+    } else {
+        hkv_tensor_output_f32(ecgOut, hkv_host_len(ECG_DEN_WINDOW_LEN), ctx->output->data.f,
+                              hkv_tensor_len(ctx->output->dims->data[1]), (int)padLen);
     }
     return 0;
 }

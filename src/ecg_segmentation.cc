@@ -33,6 +33,7 @@
 #include "store.h"
 #include "ecg_segmentation_flatbuffer.h"
 #include "ecg_segmentation.h"
+#include "ecg_tensor_copy.h"
 
 
 static constexpr int segTensorArenaSize = 1024 * ECG_SEG_MODEL_SIZE_KB;
@@ -87,6 +88,13 @@ ecg_segmentation_init() {
     // Store input and output pointers (assume single input/output tensor)
     ctx->input = ctx->interpreter->input(0);
     ctx->output = ctx->interpreter->output(0);
+
+    // A model narrower than the host window cannot fill it. See #36.
+    if ((ctx->input->dims->data[1] < ECG_SEG_WINDOW_LEN) || (ctx->output->dims->data[1] < ECG_SEG_WINDOW_LEN)) {
+        TF_LITE_REPORT_ERROR(ctx->reporter, "Window mismatch: given=(%d, %d) < expected=%d.", ctx->input->dims->data[1],
+                             ctx->output->dims->data[1], ECG_SEG_WINDOW_LEN);
+        return 1;
+    }
     return 0;
 }
 
@@ -128,21 +136,16 @@ ecg_physiokit_segmentation_inference(float32_t *data, uint16_t *segMask, uint32_
 
 uint32_t
 ecg_segmentation_inference(float32_t *data, uint16_t *segMask, uint32_t padLen, float32_t threshold, float32_t *qos) {
-    uint32_t yIdx = 0;
-    uint8_t yMaxIdx = 0;
-    float32_t yVal = 0;
-    float32_t yMax = 0;
-    uint16_t qosMask = 0;
     float32_t avgQos = 0;
     tf_model_context_t *ctx = &ecgSegModelCtx;
 
     // Copy input and quantize
-    for (size_t i = 0; i < ECG_SEG_WINDOW_LEN; i++) {
-        if (ctx->input->quantization.type == kTfLiteAffineQuantization) {
-            ctx->input->data.int8[i] = data[i] / ctx->input->params.scale + ctx->input->params.zero_point;
-        } else {
-            ctx->input->data.f[i] = data[i];
-        }
+    if (ctx->input->quantization.type == kTfLiteAffineQuantization) {
+        hkv_tensor_input_i8(ctx->input->data.int8, hkv_tensor_len(ctx->input->dims->data[1]), data,
+                            hkv_host_len(ECG_SEG_WINDOW_LEN), ctx->input->params.scale, ctx->input->params.zero_point);
+    } else {
+        hkv_tensor_input_f32(ctx->input->data.f, hkv_tensor_len(ctx->input->dims->data[1]), data,
+                             hkv_host_len(ECG_SEG_WINDOW_LEN));
     }
 
     // Invoke model
@@ -150,28 +153,12 @@ ecg_segmentation_inference(float32_t *data, uint16_t *segMask, uint32_t padLen, 
     if (invokeStatus != kTfLiteOk) { return invokeStatus; }
 
     // Extract output and segmentation mask ([BATCH x TIME x CLASSES])
-    for (int i = padLen; i < ctx->output->dims->data[1] - (int)padLen; i++) {
-        for (int j = 0; j < ctx->output->dims->data[2]; j++) { // CLASSES
-            yIdx = i * ctx->output->dims->data[2] + j;
-            if (ctx->output->quantization.type == kTfLiteAffineQuantization) {
-                yVal = ((float32_t)ctx->output->data.int8[yIdx] - ctx->output->params.zero_point) * ctx->output->params.scale;
-            } else  {
-                yVal = ctx->output->data.f[yIdx];
-            }
-            if ((j == 0) || (yVal > yMax)) {
-                yMax = yVal;
-                yMaxIdx = j;
-            }
-        }
-        qosMask = yMax > ECG_QOS_GOOD_THRESH ? 3 : yMax > ECG_QOS_FAIR_THRESH ? 2 : yMax > ECG_QOS_POOR_THRESH ? 1 : 0;
-        avgQos += yMax;
-        if (false && yMaxIdx > 0) {
-            nsx_printf("Segment (%d, %d): QoS (%d, %f)\n", yMaxIdx, i, qosMask, yMax);
-        }
-        segMask[i] = yMax >= threshold ? yMaxIdx : 0;
-        segMask[i] |= ((qosMask & SIG_MASK_QOS_MASK) << SIG_MASK_QOS_OFFSET);
-    }
-    avgQos /= (ctx->output->dims->data[1] - 2 * padLen);
+    bool isQuantized = ctx->output->quantization.type == kTfLiteAffineQuantization;
+    avgQos = hkv_seg_output_mask(segMask, hkv_host_len(ECG_SEG_WINDOW_LEN),
+                                 isQuantized ? ctx->output->data.int8 : nullptr,
+                                 isQuantized ? nullptr : ctx->output->data.f,
+                                 hkv_tensor_len(ctx->output->dims->data[1]), ctx->output->dims->data[2], (int)padLen,
+                                 threshold, ctx->output->params.scale, ctx->output->params.zero_point);
     *qos = 100*avgQos;
 
     // if (avgQos < ECG_QOS_BAD_AVG_THRESH) {

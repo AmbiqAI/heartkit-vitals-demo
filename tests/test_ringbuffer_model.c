@@ -7,8 +7,8 @@
  *
  * Closes two coverage gaps the hand-written tests leave open:
  *   - non-power-of-two sizes. The index arithmetic is correct by construction
- *     for any size, but the real rings are 256/500/2000, so the sizes here
- *     include 3, 5, 200 and 500 as well as a power of two.
+ *     for any size, but the real rings are 256/512/2000, so the sizes here
+ *     include 3, 5, 200, 500 and 2000 as well as powers of two.
  *   - ringbuffer_seek(), which is the only function that advances an index by
  *     a multi-element amount in a single rb_advance() call and which has
  *     several call sites in main.cc, yet had no direct test.
@@ -25,7 +25,9 @@
 #include "ringbuffer.h"
 #include "test_assert.h"
 
-#define MODEL_MAX 512
+/* Fixture arrays. run_model_sequence() requests up to cap + 2 elements, so this
+ * must exceed the largest entry in caps[] by at least two. */
+#define MODEL_MAX 2048
 
 typedef struct {
     int32_t data[MODEL_MAX];
@@ -255,8 +257,8 @@ int main(void) {
     test_seek_clamps_and_preserves_order();
     test_inconsistent_indices_fail_closed();
 
-    /* Power of two, small primes, and sizes near the real rings (256/500). */
-    const size_t caps[] = {1, 2, 3, 5, 7, 8, 13, 200, 500};
+    /* Powers of two, small primes, and the real ring sizes (256/512/2000). */
+    const size_t caps[] = {1, 2, 3, 5, 7, 8, 13, 200, 256, 500, 512, 2000};
     for (size_t i = 0; i < sizeof(caps) / sizeof(caps[0]); i++) {
         for (uint32_t seed = 1; seed <= 3; seed++) {
             run_model_sequence(caps[i], seed, 400);
