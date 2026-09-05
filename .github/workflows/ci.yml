@@ -63,8 +63,51 @@ jobs:
       - name: Shell script lint
         run: shellcheck scripts/*.sh
 
-      - name: Lockfile matches the manifest
-        run: uv run nsx lock --app-dir . --check
+      - name: Lock consistency (manifest hash only)
+        # Deliberately narrower than `nsx lock --check`. This job holds no
+        # module credentials on purpose, so a full check cannot re-resolve the
+        # module sources: it printed `fatal: could not read Username for
+        # 'https://github.com'`, fell back to the locked closure and exited 0,
+        # which read as a full gate. nsx exposes no offline resolve mode, so
+        # the fallback is made explicit here instead. Comparing nsx.yml's
+        # manifest hash with the one recorded in nsx.lock is entirely local, so
+        # a passing log has no `fatal:` lines. It catches an nsx.yml edit that
+        # was never locked. Upstream module drift is NOT detected here; the
+        # credentialed firmware and notices jobs cover that. See #50.
+        run: |
+          uv run python - <<'PY'
+          import sys
+          from pathlib import Path
+
+          import yaml
+          from neuralspotx.nsx_lock import hash_manifest
+
+          # Imported rather than reimplemented: this must stay the same hash
+          # that `nsx sync --frozen` enforces, and an upstream rename should
+          # fail this step loudly rather than silently check something else.
+          current = hash_manifest(Path("nsx.yml"))
+          lock = yaml.safe_load(Path("nsx.lock").read_text(encoding="utf-8")) or {}
+          targets = (lock or {}).get("targets")
+          if not isinstance(targets, dict) or not targets:
+              sys.exit("nsx.lock has no targets mapping")
+
+          stale = {
+              name: ((target or {}).get("manifest") or {}).get("hash", "")
+              for name, target in targets.items()
+              if ((target or {}).get("manifest") or {}).get("hash", "") != current
+          }
+          for name, recorded in sorted(stale.items()):
+              print(
+                  f"::error::nsx.lock target {name} records manifest hash "
+                  f"{recorded or '<missing>'}, but nsx.yml hashes to {current}"
+              )
+          if stale:
+              sys.exit("nsx.yml was edited without running `nsx lock`")
+
+          print(f"manifest hash {current} matches every nsx.lock target:")
+          for name in sorted(targets):
+              print(f"  {name}")
+          PY
 
   firmware:
     name: firmware (${{ matrix.board }})
@@ -158,6 +201,10 @@ jobs:
           set -euo pipefail
           mkdir -p "${RUNNER_TEMP}/artifact"
           cp "build/${BOARD}/heartkit-vitals-demo.bin" "${RUNNER_TEMP}/artifact/firmware.bin"
+
+      - name: No build paths in firmware.bin
+        # No builder path may ship inside the binary. See #40.
+        run: '! strings -a "${RUNNER_TEMP}/artifact/firmware.bin" | grep -E "^/(Users|home)/"'
 
       - name: Upload firmware.bin
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

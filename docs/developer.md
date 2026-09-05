@@ -88,15 +88,33 @@ green run mean the same thing.
 
 | Job | Runner | What it runs |
 | --- | --- | --- |
-| `host` | `ubuntu-latest` | `scripts/ci-local.sh tests`, `shellcheck scripts/*.sh`, `uv run nsx lock --app-dir . --check` |
+| `host` | `ubuntu-latest` | `scripts/ci-local.sh tests`, `shellcheck scripts/*.sh`, a lock-consistency check that compares the manifest hash only |
 | `firmware` | `ubuntu-latest`, matrix over `apollo510b_evb`, `apollo510_evb`, `apollo330mP_evb` | frozen module sync, `scripts/ci-local.sh frozen`, per-board `nsx configure --frozen` and `nsx build`, uploads `firmware.bin` per board |
 | `notices` | `macos-latest` | frozen module sync, then `tools/release/gen_third_party_notices.py --check` |
 
-`uv run nsx lock --app-dir . --check` is not a full lockfile gate on the
-runner. The `host` job has no module credentials, so the check falls back to
-the lock closure rather than re-resolving every module source; it catches a
-manifest edit that was never locked, and it does not catch upstream drift. See
-[#50](https://github.com/AmbiqAI/heartkit-vitals-demo/issues/50).
+The `host` job runs a lock-consistency check, not a full lockfile gate. It
+holds no module credentials on purpose, so it cannot re-resolve module sources.
+It used to run `uv run nsx lock --app-dir . --check`, which printed
+`fatal: could not read Username for 'https://github.com'`, fell back to the
+closure recorded in `nsx.lock` and exited 0 anyway; a green step therefore
+looked like a full gate. nsx has no offline resolve mode, so instead of relying
+on that fallback the step now compares only what it can check without the
+network: the manifest hash of `nsx.yml` against the hash recorded for every
+target in `nsx.lock`, using nsx's own `hash_manifest`, which is the same hash
+`nsx sync --frozen` enforces. A passing log has no `fatal:` lines.
+
+What that check does and does not cover:
+
+- It catches an `nsx.yml` edit that was never followed by `nsx lock`.
+- It does not catch upstream drift, meaning a module repository moving ahead
+  of the commit recorded in `nsx.lock`. That is caught by the credentialed
+  `firmware` and `notices` jobs, which run `nsx sync --app-dir .` followed by
+  `git diff --exit-code -- nsx.lock`, and locally by `uv run nsx lock --check`
+  with module access.
+- Because `hash_manifest` re-serializes the parsed YAML, a comment-only edit to
+  `nsx.yml` does not change the hash and does not require a relock.
+
+See [#50](https://github.com/AmbiqAI/heartkit-vitals-demo/issues/50).
 
 `ci.yml` sets `CI_STRICT=1` for its `scripts/ci-local.sh` steps; the release
 job does not run that script. `scripts/ci-local.sh` skips a check it

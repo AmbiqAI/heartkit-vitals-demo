@@ -39,8 +39,9 @@
 # new names added alongside.
 #
 # Linker maps are opt-in (--with-maps) and off by default. The v4.1.0 drop the
-# FAEs already use shipped none, flashing does not need them, and GNU ld writes
-# around a thousand absolute paths from the build machine into each one.
+# FAEs already use shipped none and flashing does not need them. GNU ld writes
+# the build machine's absolute paths into every map, so the shipped copy has
+# the repo root and the toolchain root rewritten out of it (see #40).
 #
 # Every J-Link parameter is read from the SoC facts file that `nsx flash`
 # uses, then cross-checked against the parameters CMake actually resolved for
@@ -88,6 +89,11 @@ V410_REF_DIR="${HKV_V410_REF_DIR:-}"
 first_line() { local v; v="$(cat)"; printf '%s' "${v%%$'\n'*}"; }
 
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+
+# A build path used as a sed pattern must match itself literally; `.claude` in
+# a worktree path is a live example of a metacharacter in a real checkout.
+bre_escape() { printf '%s' "$1" | sed 's|[][\\.*^$/|]|\\&|g'; }
+
 note() { printf '==> %s\n' "$*"; }
 warn() { printf 'warning: %s\n' "$*" >&2; }
 
@@ -488,8 +494,23 @@ MISMATCH
   # The map ships only when asked for. Clear a map left by an earlier run so
   # the drop never carries one the current invocation did not intend.
   if [ "$WITH_MAPS" -eq 1 ]; then
-    cp "$MAP_PATH" "${PKG_ROOT}/${BOARD_DIR}-firmware.map"
-    chmod 644 "${PKG_ROOT}/${BOARD_DIR}-firmware.map"
+    # -fmacro-prefix-map never reaches the linker, so ld writes the builder's
+    # absolute paths into the map. Rewrite them out of the shipped copy; the
+    # build tree keeps its own map untouched so a debugger still resolves it.
+    local MAP_DEST="${PKG_ROOT}/${BOARD_DIR}-firmware.map"
+    local TOOLCHAIN_ROOT
+    TOOLCHAIN_ROOT="$(sed -n 's|^CMAKE_LINKER:[^=]*=\(.*\)/bin/[^/]*$|\1|p' \
+      "${BUILD_DIR}/CMakeCache.txt" | first_line)"
+    [ -n "$TOOLCHAIN_ROOT" ] \
+      || die "no CMAKE_LINKER setting in ${BUILD_DIR}/CMakeCache.txt; cannot scrub ${MAP_PATH}"
+    sed -e "s|$(bre_escape "$REPO_DIR")|.|g" \
+        -e "s|$(bre_escape "$TOOLCHAIN_ROOT")|<toolchain>|g" \
+        "$MAP_PATH" > "$MAP_DEST"
+    if grep -qE '^/(Users|home)/' "$MAP_DEST"; then
+      grep -nE '^/(Users|home)/' "$MAP_DEST" | head -5 >&2
+      die "absolute build paths remain in ${MAP_DEST}"
+    fi
+    chmod 644 "$MAP_DEST"
   else
     rm -f "${PKG_ROOT}/${BOARD_DIR}-firmware.map"
   fi
@@ -548,6 +569,8 @@ MISMATCH
   local BIN_SHA BIN_SIZE
   BIN_SHA="$(sha256_of "${BOARD_PKG}/firmware.bin")"
   BIN_SIZE="$(wc -c < "${BOARD_PKG}/firmware.bin" | tr -d ' ')"
+  # No builder path may ship inside the binary. See #40.
+  ! strings -a "${BOARD_PKG}/firmware.bin" | grep -qE '^/(Users|home)/' || die "absolute build paths in ${BOARD_PKG}/firmware.bin"
 
   local VALIDATION
   VALIDATION="$(validation_note_for "$BOARD")"

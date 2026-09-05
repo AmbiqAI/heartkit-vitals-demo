@@ -5,6 +5,18 @@ project(heartkit-vitals-demo LANGUAGES C CXX ASM)
 
 set(NSX_BOARD "apollo510b_evb" CACHE STRING "Target board")
 
+# __FILE__ in the vendored TFLM kernels otherwise bakes the builder's absolute
+# checkout path into every shipped binary. Applied at directory scope, before
+# nsx_bootstrap_app() runs its add_subdirectory() calls, so the module targets
+# inherit it: the module trees are vendored by `nsx sync` and are not editable
+# from this repo. Both values are resolved at configure time, so a hosted
+# runner is covered without naming any host path. Rewrites `__FILE__` only:
+# DWARF keeps absolute paths so a debugger still finds the sources. See #40.
+add_compile_options(
+    "-fmacro-prefix-map=${CMAKE_CURRENT_LIST_DIR}=."
+    "-fmacro-prefix-map=${CMAKE_BINARY_DIR}=."
+)
+
 # Reported verbatim in the HKV boot line so a captured SWO log is
 # self-describing. Deliberately NOT derived from a git describe here: that
 # would make the firmware identity depend on the state of the working tree at
