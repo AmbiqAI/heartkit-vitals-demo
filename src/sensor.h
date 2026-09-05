@@ -21,6 +21,7 @@
 #include "error_codes.h"
 
 #include "bio_spo2_a0_typedefs.h"
+#include "constants.h"
 #include "ringbuffer.h"
 
 #ifdef __cplusplus
@@ -65,6 +66,14 @@ bool sensor_get_spo2_config(bio_spo2_a0_configuration_t *p_cfg);
 void sensor_set_irq_task_handle(TaskHandle_t handle);
 void sensor_notify_irq_from_isr(BaseType_t *p_higher_priority_task_woken);
 void sensor_process_irq_events(void);
+
+#if HKV_SENSOR_ASYNC && HKV_SENSOR_ASYNC_SPIKE
+/**
+ * @brief Throwaway command-queue bring-up capture. Runs on the sensor task
+ *        before its normal loop and emits one `spike` record. See #65.
+ */
+void sensor_spike_run(void);
+#endif
 
 extern rb_config_t rbPpg1Sensor; /* Red (PPG1_SUB1) */
 extern rb_config_t rbPpg2Sensor; /* IR  (PPG1_SUB2) */

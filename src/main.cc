@@ -57,6 +57,7 @@
 #include "obs.h"
 #include "ringbuffer.h"
 #include "sensor.h"
+#include "sensor_bus.h"
 #include "store.h"
 #include "telemetry.h"
 #include "timebase.h"
@@ -1406,6 +1407,9 @@ void
 SensorIrqTask(void *pvParameters)
 {
     (void)pvParameters;
+#if HKV_SENSOR_ASYNC && HKV_SENSOR_ASYNC_SPIKE
+    sensor_spike_run();
+#endif
     while (true) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
         sensor_process_irq_events();
@@ -2350,6 +2354,13 @@ report_extra_sensor(void)
     hkv_log_u32("ecg_drop", sensor_get_ecg_drop_count());
     hkv_log_u32("isr_int_lo_ms", sensor_get_as7058_isr_min_interval_ms());
     hkv_log_u32("isr_int_hi_ms", sensor_get_as7058_isr_max_interval_ms());
+    /* A queued read that errors or times out is reported here, not just to the
+     * chiplib: the chiplib's own response is to stop the measurement, which
+     * looks like a dead sensor rather than a bus fault. `bus_sync` counts the
+     * reads that took the blocking fallback, which after boot should stay
+     * flat. See #65. */
+    hkv_log_u32("bus_err", sensor_bus_get_error_count());
+    hkv_log_u32("bus_sync", sensor_bus_get_fallback_count());
     sensor_reset_as7058_isr_interval_stats();
 }
 

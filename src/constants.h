@@ -266,6 +266,55 @@ extern "C" {
 #define AS7058_I2C_SPEED_HZ (400000)
 #endif
 
+/* Chiplib register reads go through the IOM command queue and the sensor task
+ * blocks until the IOM ISR completes them, instead of spinning in
+ * am_hal_iom_blocking_transfer. 0 restores the nsx-i2c blocking read as a
+ * fallback. See #65. */
+#ifndef HKV_SENSOR_ASYNC
+#define HKV_SENSOR_ASYNC (1)
+#endif
+
+/* Throwaway bring-up capture for the command queue: byte-identity against the
+ * blocking read plus a run-time share for the queued reads. See #65. */
+#ifndef HKV_SENSOR_ASYNC_SPIKE
+#define HKV_SENSOR_ASYNC_SPIKE (0)
+#endif
+
+/* Command queue depth, in 4-byte units. The chiplib issues one read at a time
+ * and waits for it, so a single entry would do; the HAL reserves 8 words of
+ * header and rounds down to whole entries, so this is the smallest round size
+ * that leaves headroom. */
+#ifndef HKV_SENSOR_BUS_CQ_WORDS
+#define HKV_SENSOR_BUS_CQ_WORDS (256)
+#endif
+
+/* A queued read that never completes must not park the sensor task forever;
+ * the caller sees a transfer error and the chiplib stops the measurement. */
+#ifndef HKV_SENSOR_BUS_TIMEOUT_MS
+#define HKV_SENSOR_BUS_TIMEOUT_MS (50)
+#endif
+
+/* Spike window. Interrupts arrive on the FIFO watermark, so this is seconds,
+ * not milliseconds, of capture. */
+#ifndef HKV_SENSOR_SPIKE_ASYNC_INTS
+#define HKV_SENSOR_SPIKE_ASYNC_INTS (40)
+#endif
+#ifndef HKV_SENSOR_SPIKE_BLOCKING_INTS
+#define HKV_SENSOR_SPIKE_BLOCKING_INTS (10)
+#endif
+
+/* Non-destructive window used for the byte-identity check: config space, well
+ * below the status and FIFO registers the chiplib reads. */
+#ifndef HKV_SENSOR_SPIKE_INTEG_BYTES
+#define HKV_SENSOR_SPIKE_INTEG_BYTES (64)
+#endif
+
+/* Generous against the watermark interval: a leg that stops seeing interrupts
+ * ends the spike rather than parking the sensor task. */
+#ifndef HKV_SENSOR_SPIKE_INT_TIMEOUT_MS
+#define HKV_SENSOR_SPIKE_INT_TIMEOUT_MS (2000)
+#endif
+
 #if AS7058_BOARD_PROFILE == AS7058_PROFILE_CLICK_I2C
 #define AS7058_LED_SUB1_CFG (0x02) // LED2 (red)
 #define AS7058_LED_SUB2_CFG (0x03) // LED3 (IR)
