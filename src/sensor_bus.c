@@ -61,7 +61,7 @@ static volatile uint32_t s_xfer_gen = 0;
 
 /* Bounded spin used to confirm the IOM has stopped writing s_rx_buf, in 10 us
  * units of the transfer timeout. */
-    #define SENSOR_BUS_IDLE_SPINS ((uint32_t)HKV_SENSOR_BUS_TIMEOUT_MS * 100u)
+    #define SENSOR_BUS_IDLE_SPINS ((uint32_t)HKV_SENSOR_BUS_TIMEOUT_MS)
 
 static volatile uint32_t s_error_count = 0;
 static volatile uint32_t s_fallback_count = 0;
@@ -123,7 +123,7 @@ sensor_bus_wait_idle(void)
         if (iom_status.bStatIdle && 0u == iom_status.ui32NumPendTransactions) {
             return;
         }
-        am_hal_delay_us(10);
+        vTaskDelay(pdMS_TO_TICKS(1));
     }
 }
 
@@ -136,8 +136,6 @@ am_iomaster1_isr(void)
         return;
     }
 
-    /* Clear on every exit, including the zero-status one: a status left set
-     * re-enters the ISR until it is acknowledged. */
     am_hal_iom_interrupt_clear(s_iom_handle, status);
     if (status) {
         am_hal_iom_interrupt_service(s_iom_handle, status);
