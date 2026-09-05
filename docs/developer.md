@@ -114,11 +114,13 @@ reports completion, instead of polling the IOM FIFO in task context. Set
 `-DHKV_SENSOR_ASYNC=OFF` to fall back to the nsx-i2c blocking read. The `sensor`
 line's `bus_err` and `bus_sync` counters report transfer failures and reads
 served by the blocking fallback. If a read times out and the IOM still has the
-transfer, the bus is marked wedged: every queued read is refused from then on,
-while a chiplib write still goes down the blocking path and fails fast in the
-HAL. The rebuild is driven from the sensor task rather than from the next read,
-since a wedged bus stops the sample stream and with it the reads: once the IOM
-reports itself idle the command queue is rebuilt and `bus_reset` increments.
+transfer, the bus is marked wedged. A read from task context then attempts the
+rebuild first and is served if it takes; a read from ISR context is refused
+outright. A chiplib write still goes down the blocking path, where a wedged IOM
+leaves the transfer to time out in the HAL rather than driving the bus. The
+rebuild is driven from the sensor task rather than left to the next read, since
+a wedged bus stops the sample stream and with it the reads: once the IOM reports
+itself idle the command queue is rebuilt and `bus_reset` increments.
 The chiplib stops the measurement whenever a read fails, so the sensor task
 restarts it, at most one attempt per second and only over a bus that is no
 longer wedged. After a few consecutive failures the attempts drop to one per
