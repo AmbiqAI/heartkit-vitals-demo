@@ -43,6 +43,20 @@ err_code_t sensor_configure(void);
 err_code_t sensor_start(void);
 err_code_t sensor_stop(void);
 
+/**
+ * @brief Restart the measurement if a read error stopped it.
+ *
+ * Must be called from the sensor task on every wake, notified or not: the
+ * chiplib stops the measurement on a failed FIFO read, so the INT line goes
+ * quiet and nothing else would drive the recovery. At most one attempt per
+ * AS7058_RESTART_INTERVAL_MS; abandons after AS7058_RESTART_MAX_FAILURES
+ * consecutive failures. See #67.
+ */
+void sensor_service_recovery(void);
+
+/** @brief Measurements restarted after a read error stopped them. */
+uint32_t sensor_get_restart_count(void);
+
 uint32_t sensor_get_as7058_int_isr_count(void);
 uint32_t sensor_get_as7058_isr_min_interval_ms(void);
 uint32_t sensor_get_as7058_isr_max_interval_ms(void);

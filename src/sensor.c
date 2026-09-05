@@ -76,6 +76,14 @@ static volatile uint32_t g_ecg_drop_count = 0;
 static TaskHandle_t g_sensor_irq_task_handle = NULL;
 static sensor_context_t *g_sensorCtx = NULL;
 
+/* Restart bookkeeping, touched only from the sensor task (the chiplib callback
+ * runs there too, under as7058_osal_interrupt_callback). See #67. */
+static bool g_restart_pending = false;
+static bool g_restart_abandoned = false;
+static uint32_t g_restart_count = 0;
+static uint32_t g_restart_failures = 0;
+static TickType_t g_restart_due_tick = 0;
+
 /* AS7058 INT GPIO ISR-to-ISR interval tracking, exposed via ReportTask's
  * once/sec breadcrumb: confirms whether the sensor's INT line is firing at
  * a uniform, expected cadence (normal FIFO-watermark batching -- e.g. one
@@ -298,7 +306,18 @@ sensor_as7058_callback(err_code_t error,
     M_UNUSED_PARAM(sensor_events);
     M_UNUSED_PARAM(p_cb_param);
 
-    if (error != ERR_SUCCESS || p_fifo_data == NULL || fifo_data_size == 0) {
+    if (error != ERR_SUCCESS) {
+        /* as7058_callback_t contract: a non-success error means the chiplib is
+         * stopping the measurement. Nothing else restarts it, so latch the
+         * request and let the task drive it once the bus has settled. */
+        if (!g_restart_abandoned) {
+            g_restart_pending = true;
+            g_restart_due_tick = xTaskGetTickCount() + pdMS_TO_TICKS(AS7058_RESTART_INTERVAL_MS);
+        }
+        return;
+    }
+
+    if (p_fifo_data == NULL || fifo_data_size == 0) {
         return;
     }
 
@@ -564,6 +583,49 @@ sensor_stop(void)
         return result;
     }
     return result;
+}
+
+void
+sensor_service_recovery(void)
+{
+    err_code_t result;
+
+    if (!g_restart_pending || g_restart_abandoned) {
+        return;
+    }
+    if ((int32_t)(xTaskGetTickCount() - g_restart_due_tick) < 0) {
+        return;
+    }
+    /* Spaced before the attempt, not after, so a slow attempt cannot turn into
+     * a tight retry loop on a bus that is still failing. */
+    g_restart_due_tick = xTaskGetTickCount() + pdMS_TO_TICKS(AS7058_RESTART_INTERVAL_MS);
+
+    /* The stop the chiplib ran on the failing bus may not have taken, and
+     * as7058_start_measurement rejects a start unless the library is back in
+     * its configuration state. The profile registers survive a stop, so the
+     * restart is stop + start rather than a full reconfigure. */
+    (void)as7058_stop_measurement();
+
+    result = sensor_start();
+    if (result == ERR_SUCCESS) {
+        g_restart_pending = false;
+        g_restart_failures = 0;
+        g_restart_count++;
+        return;
+    }
+
+    g_restart_failures++;
+    if (g_restart_failures >= AS7058_RESTART_MAX_FAILURES) {
+        g_restart_abandoned = true;
+        g_restart_pending = false;
+        nsx_printf("AS7058 measurement restart abandoned after %lu attempts.\n", (uint32_t)g_restart_failures);
+    }
+}
+
+uint32_t
+sensor_get_restart_count(void)
+{
+    return g_restart_count;
 }
 
 uint32_t
