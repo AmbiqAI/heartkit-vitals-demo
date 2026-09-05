@@ -56,6 +56,30 @@ python3 tools/tileio_usb_test.py --duration 5
 The test requires `pyusb` and should report `bad=0` while ECG, PPG, CPU, and
 metric packets are received.
 
+### Transport counters
+
+Capture the transport counters for three minutes with the TileIO dashboard
+open and streaming, so the host is actually draining the queue:
+
+```bash
+python3 tools/bench/swo_capture.py 180 /tmp/bench-usb.log --app-dir . --board apollo510b_evb
+python3 tools/bench/hkv_compare.py /tmp/bench-usb.log
+```
+
+The counters that matter are `ecg_retry`, `ecg_drop` and `stall` from the
+`tiousb` line, and `qdrop` and `qdepth` from the `tio` line. `hkv_compare.py`
+reports the `tiousb` counters as deltas over the whole capture and over its
+second half, `qdrop` as a whole-capture delta, and `qdepth` as a distribution,
+because the firmware counters are cumulative and a drop that only starts once
+buffers fill does not show in a whole-window average.
+
+Pass in this steady-state case, with the dashboard visible and the host
+draining, is zero drops and zero stalls in both halves of the capture. Any
+non-zero drop or stall here is a transport regression, tracked on #56. Under
+an induced stall, counted drops past the hold watermark are designed
+behavior; see `docs/design/streaming-pipeline.md` section 7 for the full
+acceptance matrix.
+
 ## Continuous Integration
 
 `.github/workflows/ci.yml` runs on every pull request and on pushes to `main`.
@@ -153,6 +177,38 @@ export HKV_V410_REF_DIR="$HOME/Library/CloudStorage/OneDrive-AmbiqMicroInc/AITG 
 Without `HKV_V410_REF_DIR` set, or if it points at a folder that is not
 there, packaging still succeeds; the log and `BUILD-INFO.txt` record the
 comparison as `not compared (HKV_V410_REF_DIR not set)`.
+
+`BUILD-INFO.txt` also records the C compiler version and path, read from the
+build tree's `CMakeFiles/<cmake-version>/CMakeCCompiler.cmake`, next to the
+NSX toolchain line, so the drop carries the toolchain it was built with.
+Packaging stops if that record is missing rather than shipping a placeholder.
+
+## Release Gate
+
+The gate runs by hand on hardware, on the packaged artifact rather than a
+local build tree. Publication is manual for the same reason: the gate result
+is written into the release notes before anything is published.
+
+1. Flash the packaged binary through the helper shipped in its own board
+   folder (`dist/<slug>/<board>/flash_mac.command` or the Windows or Linux
+   equivalent). Flashing from the build tree instead does not test what
+   ships.
+2. Capture 80 seconds of telemetry and read the settled figures:
+
+   ```bash
+   python3 tools/bench/swo_capture.py 80 /tmp/gate.log --app-dir . --board apollo510b_evb
+   python3 tools/bench/hkv_analyze.py /tmp/gate.log --label gate
+   ```
+
+3. Compare the settled `util_x100`, `batt_*_x100` and `avg_ips_x100` means
+   against the expected LP figures tracked on #27. The uptime against wall
+   clock ratio should sit near 1.0; a ratio far off means the capture or the
+   timebase is wrong and the figures cannot be read.
+4. Run the transport counter capture above.
+5. Record the result in the release notes, then publish. Publication is
+   manual until a reviewed helper lands. See #39.
+
+An empty capture is a stop-and-report condition. See `tools/bench/README.md`.
 
 ## Clean Working State
 
