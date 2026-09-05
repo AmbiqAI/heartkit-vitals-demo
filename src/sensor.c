@@ -42,6 +42,7 @@
 #include "constants.h"
 #include "ringbuffer.h"
 #include "sensor.h"
+#include "sensor_bus.h"
 #include "stimulus.h"
 
 #define SENSOR_RB_LEN (SENSOR_BUF_LEN)
@@ -398,12 +399,24 @@ sensor_init(sensor_context_t *ctx)
     s_as7058_transport.read_pin_state = as7058_osal_int_pin_read;
     result = nsx_as7058_spi_configure_osal(&s_as7058_transport);
 #else
+    /* Static: sensor_bus_init() retains the pointer for the life of the bus. */
     static nsx_as7058_i2c_transport_t s_as7058_transport = {0};
+    as7058_osal_config_t osalCfg;
+
     s_as7058_transport.p_i2c_cfg = &nsxI2cCfg;
     s_as7058_transport.i2c_addr = AS7058_I2C_ADDR;
     s_as7058_transport.p_pin_ctx = NULL;
     s_as7058_transport.read_pin_state = as7058_osal_int_pin_read;
-    result = nsx_as7058_i2c_configure_osal(&s_as7058_transport);
+    result = nsx_as7058_i2c_init_osal_config(&s_as7058_transport, &osalCfg);
+    if (result == ERR_SUCCESS) {
+    #if HKV_SENSOR_ASYNC
+        /* Blocking read stays installed when the queue will not attach. */
+        if (sensor_bus_init(&s_as7058_transport) == ERR_SUCCESS) {
+            osalCfg.read_registers = sensor_bus_read_registers;
+        }
+    #endif
+        result = as7058_osal_configure(&osalCfg);
+    }
 #endif
     if (result != ERR_SUCCESS) {
         nsx_printf("as7058 transport configure returned error code %d.\n", result);

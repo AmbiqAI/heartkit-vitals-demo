@@ -57,7 +57,9 @@
 #include "obs.h"
 #include "ringbuffer.h"
 #include "sensor.h"
+#include "sensor_bus.h"
 #include "store.h"
+#include "telemetry.h"
 #include "timebase.h"
 #include "tio_tx_sm.h"
 
@@ -1734,9 +1736,16 @@ PpgProcessTask(void *pvParameters)
 //   avgPower_mW   = (inf x INFERENCE + cmp x COMPUTE + idle x SLEEP) / MARGIN
 //   batteryDays   = BATT_POWER_CAP / avgPower_mW / 24
 //
-// `busy` is cpuPercUtil, the MEASURED 30 s rolling utilisation, unchanged by
-// this model. It includes demo transport, so it is conservative and needs no
-// duty-cycle argument.
+// `busy` is cpuPercUtil, the MEASURED 30 s rolling utilisation, the same figure
+// the TileIO CPU packet carries. Everything the core runs is billed: the
+// inference share at inference power and the remainder, transport included, at
+// compute power (issues #8, #65). One measured figure therefore drives both the
+// dashboard tile and this estimate. The duty-cycle projection is reported
+// separately and never feeds this model.
+//
+// The sleep term assumes a quiet bus: with the async sensor read the task is
+// blocked while the IOM moves the FIFO, so that time is billed as idle even
+// though the peripheral is active.
 //
 // THE MODEL FOLLOWS THE OPERATING POINT. INFERENCE and COMPUTE are read per
 // window from the LP/HP constant pair that matches `appState.speedMode`, the
@@ -1789,6 +1798,23 @@ stage_duty_frac(uint32_t runsDelta, float32_t ips, float32_t windowSec)
     return (2.0f / ips) * ((float32_t)runsDelta / windowSec);
 }
 
+/* One attribution term's 30 s history, advanced from the SAME ring index and
+ * fill state as the utilisation ring so every term describes one window. See #8. */
+typedef struct {
+    float32_t samples[kCpuStatsRollingSeconds];
+    float32_t sum;
+} cpu_rolling_t;
+
+static inline void
+cpu_rolling_put(cpu_rolling_t *ring, uint32_t index, bool filled, float32_t value)
+{
+    if (filled) {
+        ring->sum -= ring->samples[index];
+    }
+    ring->samples[index] = value;
+    ring->sum += value;
+}
+
 void
 CpuProcessTask(void *pvParameters)
 {
@@ -1818,8 +1844,16 @@ CpuProcessTask(void *pvParameters)
     uint32_t prevMetRuns = g_hkv_counters[HKV_CNT_PIPE_MET_RUNS];
     uint32_t runTimeTicks = 0;
     float32_t ecgTaskPerc = 0, ppgTaskPerc = 0, totalTaskPerc = 0;
-    uint32_t prevRun = 0, prevEcg = 0, prevPpg = 0, prevIdle = 0;
+    /* Attribution terms (issue #8): sensor capture and TileIO transmit are whole
+     * tasks, so they come from the same run-time counters as the ECG/PPG pair. */
+    cpu_rolling_t capRolling = {};
+    cpu_rolling_t txRolling = {};
+    cpu_rolling_t projInfRolling = {};
+    float32_t capSecondAccum = 0.0f;
+    float32_t txSecondAccum = 0.0f;
+    uint32_t prevRun = 0, prevEcg = 0, prevPpg = 0, prevIdle = 0, prevCap = 0, prevTx = 0;
     uint32_t runDelta, ecgDelta, ppgDelta, idleDelta;
+    float32_t capTaskPerc = 0, txTaskPerc = 0;
     size_t numTasks;
 
     while (true) {
@@ -1857,6 +1891,10 @@ CpuProcessTask(void *pvParameters)
                     prevEcg = xTaskDetails[i].ulRunTimeCounter;
                 } else if (xTaskDetails[i].xHandle == ppgProcessTaskHandle) {
                     prevPpg = xTaskDetails[i].ulRunTimeCounter;
+                } else if (xTaskDetails[i].xHandle == sensorIrqTaskHandle) {
+                    prevCap = xTaskDetails[i].ulRunTimeCounter;
+                } else if (xTaskDetails[i].xHandle == tioProcessTaskHandle) {
+                    prevTx = xTaskDetails[i].ulRunTimeCounter;
                 }
                 if (xTaskDetails[i].uxCurrentPriority == tskIDLE_PRIORITY) {
                     prevIdle += xTaskDetails[i].ulRunTimeCounter;
@@ -1878,6 +1916,8 @@ CpuProcessTask(void *pvParameters)
         ppgDelta = 0;
         ecgTaskPerc = 0;
         ppgTaskPerc = 0;
+        capTaskPerc = 0;
+        txTaskPerc = 0;
         for (size_t i = 0; i < numTasks; i++) {
             if (xTaskDetails[i].xHandle == ecgProcessTaskHandle) {
                 ecgDelta = xTaskDetails[i].ulRunTimeCounter - prevEcg;
@@ -1887,6 +1927,12 @@ CpuProcessTask(void *pvParameters)
                 ppgDelta = xTaskDetails[i].ulRunTimeCounter - prevPpg;
                 prevPpg = xTaskDetails[i].ulRunTimeCounter;
                 ppgTaskPerc = 100.0f * (float32_t)ppgDelta / (float32_t)runDelta;
+            } else if (xTaskDetails[i].xHandle == sensorIrqTaskHandle) {
+                capTaskPerc = 100.0f * (float32_t)(xTaskDetails[i].ulRunTimeCounter - prevCap) / (float32_t)runDelta;
+                prevCap = xTaskDetails[i].ulRunTimeCounter;
+            } else if (xTaskDetails[i].xHandle == tioProcessTaskHandle) {
+                txTaskPerc = 100.0f * (float32_t)(xTaskDetails[i].ulRunTimeCounter - prevTx) / (float32_t)runDelta;
+                prevTx = xTaskDetails[i].ulRunTimeCounter;
             }
             if (xTaskDetails[i].uxCurrentPriority == tskIDLE_PRIORITY) {
                 idleCounter += xTaskDetails[i].ulRunTimeCounter;
@@ -1901,12 +1947,18 @@ CpuProcessTask(void *pvParameters)
         }
         float32_t cpuUtilInstant = 100.0f - (float32_t)cpuIdlePerc;
         cpuUtilSecondAccum += cpuUtilInstant;
+        capSecondAccum += capTaskPerc;
+        txSecondAccum += txTaskPerc;
         cpuUtilSecondCount++;
         totalTaskPerc = ecgTaskPerc + ppgTaskPerc;
 
         if (cpuUtilSecondCount >= samplesPerPublish) {
             float32_t cpuUtilSecondAvg = cpuUtilSecondAccum / (float32_t)cpuUtilSecondCount;
+            float32_t capSecondAvg = capSecondAccum / (float32_t)cpuUtilSecondCount;
+            float32_t txSecondAvg = txSecondAccum / (float32_t)cpuUtilSecondCount;
             cpuUtilSecondAccum = 0.0f;
+            capSecondAccum = 0.0f;
+            txSecondAccum = 0.0f;
             cpuUtilSecondCount = 0;
 
             /* Inference duty for this window: each stage's own measured run
@@ -1942,14 +1994,23 @@ CpuProcessTask(void *pvParameters)
             const uint32_t denRuns = g_hkv_counters[HKV_CNT_PIPE_DEN_RUNS];
             const uint32_t segRuns = g_hkv_counters[HKV_CNT_PIPE_SEG_RUNS];
             const uint32_t metRuns = g_hkv_counters[HKV_CNT_PIPE_MET_RUNS];
-            const float32_t infFracInstant =
-                stage_duty_frac(denRuns - prevDenRuns, ecgMetResults.denoiseIps, publishWindowSec) +
-                stage_duty_frac(segRuns - prevSegRuns, ecgMetResults.segmentIps, publishWindowSec) +
+            /* Kept per stage rather than summed on the spot: the projection
+             * scales each one by its own duty factor. See #8. */
+            const float32_t denFrac = stage_duty_frac(denRuns - prevDenRuns, ecgMetResults.denoiseIps, publishWindowSec);
+            const float32_t segFrac = stage_duty_frac(segRuns - prevSegRuns, ecgMetResults.segmentIps, publishWindowSec);
+            const float32_t metFrac =
                 stage_duty_frac(metRuns - prevMetRuns, ecgMetResults.arrhythmiaIps, publishWindowSec);
+            const float32_t infFracInstant = denFrac + segFrac + metFrac;
+            const float32_t projInfPctInstant =
+                hkv_duty_inference_pct(100.0f * denFrac, 100.0f * segFrac, 100.0f * metFrac);
             prevDenRuns = denRuns;
             prevSegRuns = segRuns;
             prevMetRuns = metRuns;
 
+            const bool rollingFilled = (cpuUtilRollingCount >= kCpuStatsRollingSeconds);
+            cpu_rolling_put(&capRolling, cpuUtilRollingIndex, rollingFilled, capSecondAvg);
+            cpu_rolling_put(&txRolling, cpuUtilRollingIndex, rollingFilled, txSecondAvg);
+            cpu_rolling_put(&projInfRolling, cpuUtilRollingIndex, rollingFilled, projInfPctInstant);
             if (cpuUtilRollingCount < kCpuStatsRollingSeconds) {
                 cpuUtilRolling[cpuUtilRollingIndex] = cpuUtilSecondAvg;
                 cpuUtilRollingSum += cpuUtilSecondAvg;
@@ -1967,6 +2028,16 @@ CpuProcessTask(void *pvParameters)
             cpuUtilRollingIndex = (cpuUtilRollingIndex + 1) % kCpuStatsRollingSeconds;
 
             appMetResults.cpuPercUtil = cpuUtilRollingSum / (float32_t)cpuUtilRollingCount;
+
+            /* Measured and projected reported separately, never blended
+             * (issue #8). The split is coarse by design: PPG stage time and DSP
+             * paths have no per-stage counters, so they land in `other`. */
+            const float32_t windowCount = (float32_t)cpuUtilRollingCount;
+            const float32_t capturePerc = capRolling.sum / windowCount;
+            const float32_t transportPerc = txRolling.sum / windowCount;
+            appMetResults.cpuSplit = hkv_cpu_split(appMetResults.cpuPercUtil, capturePerc,
+                                                   100.0f * infFracRollingSum / windowCount, transportPerc);
+            appMetResults.cpuProjPerc = hkv_cpu_proj_pct(capturePerc, projInfRolling.sum / windowCount);
 
             /* Three-state split. See the header above CpuProcessTask and the
              * sourced constants in constants.h. */
@@ -2261,6 +2332,13 @@ report_extra_sensor(void)
     hkv_log_u32("ecg_drop", sensor_get_ecg_drop_count());
     hkv_log_u32("isr_int_lo_ms", sensor_get_as7058_isr_min_interval_ms());
     hkv_log_u32("isr_int_hi_ms", sensor_get_as7058_isr_max_interval_ms());
+    /* A queued read that errors or times out is reported here, not just to the
+     * chiplib: the chiplib's own response is to stop the measurement, which
+     * looks like a dead sensor rather than a bus fault. `bus_sync` counts the
+     * reads that took the blocking fallback, which after boot should stay
+     * flat. See #65. */
+    hkv_log_u32("bus_err", sensor_bus_get_error_count());
+    hkv_log_u32("bus_sync", sensor_bus_get_fallback_count());
     sensor_reset_as7058_isr_interval_stats();
 }
 
@@ -2375,8 +2453,8 @@ report_extra_cpu(void)
      * on SWO instead of only its result. Only the two INDEPENDENT terms are
      * emitted: the other two are exact derivations of these and `util`, and
      * every extra fixed-point field lengthens the hold on the global log mutex.
-     *   batt_cmp  = util - batt_inf     (compute % of wall time)
-     *   batt_idle = 100 - util          (idle % of wall time)
+     *   batt_cmp  = util - batt_inf   (compute % of wall time)
+     *   batt_idle = 100 - util        (idle % of wall time)
      * `batt_inf` equal to `util` means the clamp is active, i.e. derived
      * inference duty exceeded measured busy. batt_inf is a percentage of wall
      * time; batt_pwr is the modelled average in mW at the LIVE speed mode
@@ -2384,6 +2462,17 @@ report_extra_cpu(void)
     hkv_log_fx2("batt_inf", 100.0f * appMetResults.battInferenceFrac);
     hkv_log_fx2("batt_pwr", appMetResults.battAvgPowerMw);
     hkv_log_fx2("avg_ips", appMetResults.avgAiIps);
+    /* Measured and projected, never blended (issue #8): `util` above is the
+     * measured figure cpu_proj is stated against, and cpu_proj applies the
+     * per-stage duty factors (telemetry.h) with capture at 1.0. The coarse
+     * breakdown sums to 100 and carries two further terms that are not emitted
+     * because they follow from these: idle, and an `other` holding PPG stage
+     * time, DSP paths and RTOS overhead, which has no per-stage counters and
+     * which cpu_proj deliberately excludes. */
+    hkv_log_fx2("cpu_proj", appMetResults.cpuProjPerc);
+    hkv_log_fx2("cpu_cap", appMetResults.cpuSplit.capture);
+    hkv_log_fx2("cpu_inf", appMetResults.cpuSplit.inference);
+    hkv_log_fx2("cpu_tx", appMetResults.cpuSplit.transport);
     /* Free stack words on the BLE radio dispatcher task, and the tio_ble_init()
      * status that explains a zero. Both are CACHED VALUES -- the ~1 ms stack
      * walk happens in ReportTask before hkv_report_subsystem() takes the log

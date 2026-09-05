@@ -16,6 +16,9 @@ Parses the `HKV|<uptime_ms>|<seq>|<subsystem>|k=v` lines emitted by
   - settled means of `util_x100`, `batt_days_x100`, `batt_inf_x100`,
     `batt_pwr_x100` and `avg_ips_x100` from the `cpu` subsystem, each
     divided by 100 and printed with the sample count;
+  - the same for `cpu_proj_x100`, which is stated against the measured
+    `util_x100` above and never blended with it, and for the per-component
+    breakdown -- see `docs/developer.md`;
   - attempted ECG, PPG and CPU packet rates from the `tio` subsystem, as a
     rate over the window rather than a raw total.
 
@@ -44,6 +47,12 @@ MEAN_KEYS = [
     "batt_inf_x100",
     "batt_pwr_x100",
     "avg_ips_x100",
+    # Projected CPU, then the breakdown. The measured figure is util_x100
+    # above; other and idle are derivable and not emitted. See #8.
+    "cpu_proj_x100",
+    "cpu_cap_x100",
+    "cpu_inf_x100",
+    "cpu_tx_x100",
 ]
 PACKET_PREFIXES = ["ecg", "ppg", "cpu"]
 

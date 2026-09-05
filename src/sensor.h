@@ -21,6 +21,7 @@
 #include "error_codes.h"
 
 #include "bio_spo2_a0_typedefs.h"
+#include "constants.h"
 #include "ringbuffer.h"
 
 #ifdef __cplusplus

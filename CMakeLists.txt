@@ -24,6 +24,10 @@ add_compile_options(
 # expected to pass -DHKV_FW_VERSION=<tag>; anything else is honestly "dev".
 set(HKV_FW_VERSION "dev" CACHE STRING "Firmware version reported in the HKV boot line")
 
+# OFF puts the AS7058 register reads back on the nsx-i2c blocking transfer,
+# which spins in the sensor task. See src/sensor_bus.c and #65.
+option(HKV_SENSOR_ASYNC "Read the AS7058 over the IOM command queue" ON)
+
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/nsx/modules.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/nsx/nsx_app_bootstrap.cmake)
 
@@ -46,6 +50,7 @@ add_executable(heartkit-vitals-demo
     src/main.cc
     src/obs.c
     src/sensor.c
+    src/sensor_bus.c
     src/store.c
     src/metrics.c
     src/tflm.cc
@@ -97,6 +102,7 @@ endforeach()
 target_compile_definitions(heartkit-vitals-demo PRIVATE
     HKV_BOARD_NAME="${NSX_BOARD}"
     HKV_FW_VERSION="${HKV_FW_VERSION}"
+    HKV_SENSOR_ASYNC=$<BOOL:${HKV_SENSOR_ASYNC}>
 )
 
 target_link_libraries(heartkit-vitals-demo PRIVATE

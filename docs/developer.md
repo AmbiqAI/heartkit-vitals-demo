@@ -80,6 +80,41 @@ an induced stall, counted drops past the hold watermark are designed
 behavior; see `docs/design/streaming-pipeline.md` section 7 for the full
 acceptance matrix.
 
+### CPU attribution
+
+The `cpu` line reports the measured CPU figure, a deployment projection and a
+coarse per-component breakdown, all percentages of wall time over the same 30 s
+window. `util` is the measured `100 - idle`, what the silicon actually does on
+this build; it is the figure the projection is stated against, the figure the
+TileIO CPU packet carries, and the busy fraction the battery model bills.
+`cpu_proj` is the deployment projection: sensor capture at duty 1.0 plus each
+inference stage scaled by its own duty factor, derived from the window and
+stride constants in `src/constants.h` (see `src/telemetry.h`). The breakdown
+sums to 100 but only its independent terms are emitted, `cpu_cap`, `cpu_inf`
+and `cpu_tx`; the rest is idle plus a remainder carrying PPG stage time, DSP
+paths and RTOS overhead, which have no per-stage counters and which `cpu_proj`
+excludes.
+
+The battery model's sleep term assumes a quiet bus. With the async sensor read
+the task is blocked while the IOM moves the FIFO, so that transfer time is
+billed as idle even though the peripheral is active for a few milliseconds per
+interrupt.
+
+### Sensor bus
+
+The AS7058 FIFO read runs at 400 kHz (`AS7058_I2C_SPEED_HZ` in
+`src/constants.h`) and goes through the IOM command queue: `src/sensor_bus.c`
+queues the transfer and the sensor task blocks on a semaphore until the IOM ISR
+reports completion, instead of polling the IOM FIFO in task context. Set
+`-DHKV_SENSOR_ASYNC=OFF` to fall back to the nsx-i2c blocking read. The `sensor`
+line's `bus_err` and `bus_sync` counters report transfer failures and reads
+served by the blocking fallback.
+
+The read path lives in the app rather than in the nsx modules: those are
+vendored by `nsx sync` and hash-locked in `nsx.lock`, and the AS7058 OSAL takes
+its transport as a function-pointer config (`as7058_osal_configure`), which is
+the supported substitution point.
+
 ## Continuous Integration
 
 `.github/workflows/ci.yml` runs on every pull request and on pushes to `main`.

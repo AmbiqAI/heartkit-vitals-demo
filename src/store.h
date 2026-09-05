@@ -34,6 +34,7 @@ extern "C" {
 #include "constants.h"
 #include "metrics.h"
 #include "sensor.h"
+#include "telemetry.h"
 
 ///////////////////////////////////////////////////////////////////////////////
 // App State
@@ -52,6 +53,12 @@ typedef struct {
      * 0..1 fraction of wall time. */
     float32_t battInferenceFrac;
     float32_t battAvgPowerMw;
+    /* Deployment projection and its coarse breakdown (issues #8, #65).
+     * Percentages of wall time over the same 30 s window as cpuPercUtil, the
+     * measured figure they are stated against. Diagnostics only: emitted on the
+     * `cpu` HKV report line, not in the TileIO CPU metrics packet. */
+    float32_t cpuProjPerc;
+    hkv_cpu_split_t cpuSplit;
 } metrics_app_results_t;
 
 typedef struct {

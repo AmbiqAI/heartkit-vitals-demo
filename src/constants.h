@@ -69,8 +69,8 @@ extern "C" {
 // The demo does not sleep: FreeRTOSConfig.h sets `configUSE_TICKLESS_IDLE 0`,
 // so idle time is spent spinning in the idle task at run power, not in Sleep 1.
 // The idle term states what the same workload would draw if the port slept.
-// The busy fraction, by contrast, IS measured (`cpuPercUtil`, 30 s rolling)
-// and includes demo transport, so it is conservative.
+// The busy fraction, by contrast, IS measured: `cpuPercUtil`, the 30 s rolling
+// utilisation, so everything the core runs is billed at active power. See #65.
 //
 // SLEEP 1, NOT DEEP SLEEP, DELIBERATELY. The sensor wakes the MCU ~7.7 times
 // per second. Sleep 1 keeps HFRC running so a wake is cheap; deep sleep at that
@@ -260,7 +260,43 @@ extern "C" {
 #endif
 
 #ifndef AS7058_I2C_SPEED_HZ
-#define AS7058_I2C_SPEED_HZ (100000)
+#define AS7058_I2C_SPEED_HZ (400000)
+#endif
+
+/* Chiplib register reads go through the IOM command queue and the sensor task
+ * blocks until the IOM ISR completes them, instead of spinning in
+ * am_hal_iom_blocking_transfer. 0 restores the nsx-i2c blocking read as a
+ * fallback. See #65. */
+#ifndef HKV_SENSOR_ASYNC
+#define HKV_SENSOR_ASYNC (1)
+#endif
+
+/* Command queue depth, in 4-byte units. The chiplib issues one read at a time
+ * and waits for it, so a single entry would do; the HAL reserves 8 words of
+ * header and rounds down to whole entries, so this is the smallest round size
+ * that leaves headroom. */
+#ifndef HKV_SENSOR_BUS_CQ_WORDS
+#define HKV_SENSOR_BUS_CQ_WORDS (256)
+#endif
+
+/* Largest single queued read, in bytes. Must track AS7058_FIFO_DATA_BUFFER_SIZE;
+ * constants.h stays free of chiplib includes, so sensor_bus.c asserts the two
+ * agree. See #65. */
+#ifndef HKV_SENSOR_BUS_MAX_READ_BYTES
+#define HKV_SENSOR_BUS_MAX_READ_BYTES (1536)
+#endif
+
+/* Wire time for that read: 9 bit times per byte (8 data + ack) plus four byte
+ * times of addressing overhead (start, write address, register, repeated start
+ * and read address). See #65. */
+#define HKV_SENSOR_BUS_XFER_MS (((HKV_SENSOR_BUS_MAX_READ_BYTES + 4u) * 9u * 1000u) / AS7058_I2C_SPEED_HZ)
+
+/* A queued read that never completes must not park the sensor task forever;
+ * the caller sees a transfer error and the chiplib stops the measurement.
+ * 2x the wire time covers clock stretching and scheduler jitter; the floor
+ * keeps a short read on a fast bus from timing out on tick granularity. */
+#ifndef HKV_SENSOR_BUS_TIMEOUT_MS
+#define HKV_SENSOR_BUS_TIMEOUT_MS ((2u * HKV_SENSOR_BUS_XFER_MS) > 20u ? (2u * HKV_SENSOR_BUS_XFER_MS) : 20u)
 #endif
 
 #if AS7058_BOARD_PROFILE == AS7058_PROFILE_CLICK_I2C

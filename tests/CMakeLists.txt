@@ -38,6 +38,7 @@ set(HKV_TEST_SOURCES
     test_obs_format.c
     test_ecg_tensor_copy.c
     test_tio_tx_sm.c
+    test_telemetry.c
 )
 
 foreach(test_src ${HKV_TEST_SOURCES})
