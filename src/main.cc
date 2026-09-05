@@ -59,6 +59,7 @@
 #include "sensor.h"
 #include "store.h"
 #include "timebase.h"
+#include "tio_tx_sm.h"
 
 #include "tflm.h"
 #include "ecg_arrhythmia.h"
@@ -107,15 +108,10 @@ static volatile uint32_t g_cpu_num_tasks = 0;
 
 static QueueHandle_t g_tioTxQueue = NULL;
 static const TickType_t kTioTxTaskPollTicks = pdMS_TO_TICKS(10);
-/* Total USB send attempts allowed for one held packet (first try + retries),
- * one attempt per drain iteration. Covers a transient FIFO-full window
- * (~80 ms) without ever pausing the drain; past that the host counts as
- * stalled. */
-static const uint32_t kTioUsbMaxSendAttempts = 8;
-/* While the stall latch is set, packets to skip between USB probe sends, so a
- * mounted-but-not-draining host is polled at roughly producer_rate/10 rather
- * than on every packet. */
-static const uint32_t kTioUsbStallProbePackets = 10;
+/* Hold time after which a packet USB will not take counts as a stalled host
+ * rather than a hiccup: past TIO_JITTER_BUDGET_MS the gap is visible at the
+ * host. Observability only -- the packet is still retried, never dropped. */
+static const uint32_t kTioUsbStallThresholdMs = TIO_JITTER_BUDGET_MS;
 static const uint32_t kCpuStatsSamplePeriodMs = 100;
 static const uint32_t kCpuStatsPublishPeriodMs = 1000;
 static const uint32_t kCpuStatsRollingSeconds = 30;
@@ -2037,145 +2033,135 @@ CpuProcessTask(void *pvParameters)
 // TileIO TX queue drain task
 ///////////////////////////////////////////////////////////////////////////////
 
-/* USB delivery state owned by TioProcessTask.
+/* USB delivery, owned by TioProcessTask. The decision logic (hold, retry,
+ * stall, and whether to take another packet off the queue) lives in
+ * src/tio_tx_sm.h so it can be driven by tests/test_tio_tx_sm.c on the host;
+ * everything below is the wiring to FreeRTOS, nsx and the counter table.
  *
  * USB BUSY invariant: tio_usb_send_slot_packet() refuses a frame the TinyUSB
  * FIFO cannot take whole (NSX_USB_STATUS_BUSY) and reports a short write as
- * NSX_USB_STATUS_PARTIAL. Neither counts as delivered.
- *  - Transient: the packet is held in `packet` and retried once per drain
- *    iteration, up to kTioUsbMaxSendAttempts (~80 ms). USB ordering is
- *    preserved, so a packet drained while one is held cannot be sent and is
- *    dropped deliberately and counted.
- *  - Sustained: when that budget runs out -- host still mounted but not
- *    draining, e.g. the dashboard died without a clean close -- `stalled`
- *    latches. USB sends are then skipped and counted, except one probe send
- *    every kTioUsbStallProbePackets packets; a probe that succeeds clears the
- *    latch and delivers that packet. Probing is only cheap because
- *    tio_usb_send_slot_packet() checks nsx_usb_vendor_write_available()
- *    before entering nsx_usb_vendor_send() (tio_usb.c) and so returns BUSY
- *    immediately against a stalled host. If that guard is ever relaxed --
- *    including by the transport extraction in issue #5 -- each probe can
- *    block this task in the multi-second USB timeout path, and the probe
- *    interval here has to be rethought.
- * The drain itself runs at full rate in every state, so BLE keeps receiving
- * 100% of packets and a stalled host cannot back the queue up into
- * producer-side drops or starve UIO/metric traffic. The task never blocks on
- * USB. A retried PARTIAL re-sends the whole 256 B frame; the host resyncs by
+ * NSX_USB_STATUS_PARTIAL. Neither counts as delivered, and both clear on
+ * their own once the host reads. Every other status is terminal for that
+ * packet -- TIMEOUT above all, since nsx_usb_vendor_send() can spin in it for
+ * seconds and must never be re-entered on a retry.
+ *
+ * A packet leaves g_tioTxQueue for USB only when USB can be offered it now, so
+ * a slow host backs the queue up instead of costing packets; the queue, not a
+ * one-packet holding slot, is what absorbs host jitter. Once the backlog
+ * reaches TIO_TX_USB_HOLD_WATERMARK the head is drained anyway so BLE keeps
+ * receiving, and counted as a USB drop. Retrying the held
+ * packet is only cheap because tio_usb_send_slot_packet() checks
+ * nsx_usb_vendor_write_available() before entering nsx_usb_vendor_send()
+ * (tio_usb.c). If that guard is ever relaxed -- including by the transport
+ * extraction in issue #5 -- a retry can block this task in the multi-second
+ * USB timeout path and the pacing here has to be rethought. See #56.
+ *
+ * A retried PARTIAL re-sends the whole 256 B frame; the host resyncs by
  * scanning for the start/stop bytes. */
+static_assert(TIO_TX_SM_PACKET_LEN == TIO_USB_PACKET_LEN, "tio_tx_sm.h packet size must match the TileIO frame");
+
+/* BLE fan-out state, refreshed per iteration and read by the dequeue hook. */
 typedef struct
 {
-    uint8_t packet[TIO_USB_PACKET_LEN]; /* packet held for retry */
-    bool pending;                       /* packet[] is valid */
-    uint32_t attempts;                  /* send attempts spent on packet[] */
-    TickType_t lastAttemptTick;         /* tick of the last attempt on packet[] */
-    bool stalled;                       /* host mounted but not draining */
-    uint32_t probeCountdown;            /* packets to skip before next probe */
-} tio_usb_tx_state_t;
+    bool bleReady;
+} tio_tx_fanout_t;
 
-/* BUSY/PARTIAL clear on their own once the host reads. Every other status is
- * terminal for this packet -- TIMEOUT above all, since nsx_usb_vendor_send()
- * can spin in it for seconds and must never be re-entered on a retry. */
 static bool
-tio_usb_status_retryable(uint32_t status)
+tio_tx_queue_receive(void *user, uint8_t *packet)
 {
-    return (status == NSX_USB_STATUS_BUSY) || (status == NSX_USB_STATUS_PARTIAL);
+    (void)user;
+    return xQueueReceive(g_tioTxQueue, packet, kTioTxTaskPollTicks) == pdTRUE;
 }
 
-static void
-tio_usb_enter_stall(tio_usb_tx_state_t *usb)
-{
-    if (!usb->stalled) {
-        hkv_count(HKV_CNT_USB_STALL);
-    }
-    usb->stalled = true;
-    usb->probeCountdown = kTioUsbStallProbePackets;
-}
-
-/* One retry attempt for a held packet. Never blocks, and never lets the
- * caller skip its queue drain. */
-static void
-tio_usb_service_pending(tio_usb_tx_state_t *usb, bool usbReady)
+static tio_tx_send_result_t
+tio_tx_send(void *user, uint8_t *packet)
 {
     uint32_t status;
+    (void)user;
 
-    if (!usb->pending) {
-        return;
-    }
-    if (!usbReady) {
-        /* Host went away mid-retry: the held frame can never land. */
-        count_tio_usb_event(HKV_USB_WHICH_DROP, usb->packet);
-        usb->pending = false;
-        return;
-    }
-    /* Space attempts by wall clock, not by drain iterations. With packets
-     * already queued xQueueReceive returns immediately, so iteration-paced
-     * retries would burn the whole budget inside a millisecond and turn a
-     * FIFO-full window that clears in a few ms into a drop plus a spurious
-     * stall latch. Returning early here costs no attempt and still falls
-     * through to the caller's drain. */
-    if ((xTaskGetTickCount() - usb->lastAttemptTick) < kTioTxTaskPollTicks) {
-        return;
-    }
-    usb->lastAttemptTick = xTaskGetTickCount();
-    status = tio_usb_send_slot_packet(usb->packet, TIO_USB_PACKET_LEN);
-    if (status == NSX_STATUS_SUCCESS) {
-        usb->pending = false;
-        usb->stalled = false;
-        return;
-    }
-    usb->attempts++;
-    if (tio_usb_status_retryable(status) && (usb->attempts < kTioUsbMaxSendAttempts)) {
-        count_tio_usb_event(HKV_USB_WHICH_RETRY, usb->packet);
-        return;
-    }
-    count_tio_usb_event(HKV_USB_WHICH_DROP, usb->packet);
-    usb->pending = false;
-    tio_usb_enter_stall(usb);
-}
-
-/* Offer a freshly drained packet to USB. Caller guarantees usbReady. The
- * buffer is non-const only because tio_usb_send_slot_packet() takes uint8_t*;
- * it is not modified here. */
-static void
-tio_usb_offer_packet(tio_usb_tx_state_t *usb, uint8_t packet[TIO_USB_PACKET_LEN])
-{
-    uint32_t status;
-
-    if (usb->pending) {
-        /* An older packet is still held: sending this one now would reorder
-         * the stream. */
-        count_tio_usb_event(HKV_USB_WHICH_DROP, packet);
-        return;
-    }
-    if (usb->stalled && (usb->probeCountdown > 0)) {
-        usb->probeCountdown--;
-        count_tio_usb_event(HKV_USB_WHICH_DROP, packet);
-        return;
-    }
     status = tio_usb_send_slot_packet(packet, TIO_USB_PACKET_LEN);
     if (status == NSX_STATUS_SUCCESS) {
-        /* Includes the probe path: the host is draining again. */
-        usb->stalled = false;
-        return;
+        return TIO_TX_SEND_OK;
     }
-    if (!usb->stalled && tio_usb_status_retryable(status)) {
-        memcpy(usb->packet, packet, TIO_USB_PACKET_LEN);
-        usb->pending = true;
-        usb->attempts = 1;
-        usb->lastAttemptTick = xTaskGetTickCount();
-        count_tio_usb_event(HKV_USB_WHICH_RETRY, packet);
-        return;
+    if ((status == NSX_USB_STATUS_BUSY) || (status == NSX_USB_STATUS_PARTIAL)) {
+        return TIO_TX_SEND_BUSY;
     }
+    return TIO_TX_SEND_FAIL;
+}
+
+static uint32_t
+tio_tx_now_ms(void *user)
+{
+    (void)user;
+    return (uint32_t)pdTICKS_TO_MS(xTaskGetTickCount());
+}
+
+static uint32_t
+tio_tx_queue_depth(void *user)
+{
+    (void)user;
+    return (uint32_t)uxQueueMessagesWaiting(g_tioTxQueue);
+}
+
+/* Second transport gets every packet the queue yields, whatever USB does. */
+static void
+tio_tx_on_dequeued(void *user, const uint8_t *packet)
+{
+#if defined(AM_PART_APOLLO510B) && TIO_BLE_ENABLED
+    tio_tx_fanout_t *fanout = (tio_tx_fanout_t *)user;
+    if (fanout->bleReady) {
+        /* Non-blocking (see ble_bringup_send_slot_packet's doc comment):
+         * never allowed to stall USB delivery. */
+        ble_bringup_send_slot_packet((uint8_t *)packet, TIO_USB_PACKET_LEN);
+    }
+#else
+    (void)user;
+    (void)packet;
+#endif
+}
+
+static void
+tio_tx_on_retry(void *user, const uint8_t *packet)
+{
+    (void)user;
+    count_tio_usb_event(HKV_USB_WHICH_RETRY, packet);
+}
+
+static void
+tio_tx_on_drop(void *user, const uint8_t *packet)
+{
+    (void)user;
     count_tio_usb_event(HKV_USB_WHICH_DROP, packet);
-    tio_usb_enter_stall(usb);
+}
+
+static void
+tio_tx_on_stall(void *user)
+{
+    (void)user;
+    hkv_count(HKV_CNT_USB_STALL);
 }
 
 void
 TioProcessTask(void *pvParameters)
 {
     (void)pvParameters;
-    uint8_t packet[TIO_USB_PACKET_LEN];
-    tio_usb_tx_state_t usb = {};
+    tio_tx_sm_t usb;
+    tio_tx_fanout_t fanout = {};
+    const tio_tx_ops_t ops = {
+        .queue_receive = &tio_tx_queue_receive,
+        .send = &tio_tx_send,
+        .now_ms = &tio_tx_now_ms,
+        .queue_depth = &tio_tx_queue_depth,
+        .on_dequeued = &tio_tx_on_dequeued,
+        .on_retry = &tio_tx_on_retry,
+        .on_drop = &tio_tx_on_drop,
+        .on_stall = &tio_tx_on_stall,
+        .stall_ms = kTioUsbStallThresholdMs,
+        .hold_watermark = TIO_TX_USB_HOLD_WATERMARK,
+        .user = &fanout,
+    };
+
+    tio_tx_sm_reset(&usb);
     while (true) {
         check_tio_state();
         if (g_uio_state_request_pending) {
@@ -2193,45 +2179,33 @@ TioProcessTask(void *pvParameters)
         /* BLE is a second, independent consumer of the SAME queue item (not
          * a second queue): dual queues would double memory and complexity
          * for no benefit here, since both transports need every packet.
-         * Draining once and fanning out to both transports in-line (below)
+         * Draining once and fanning out to both transports (tio_tx_on_dequeued)
          * keeps a single-consumer queue with clean semantics, at the cost of
          * a disconnected BLE not being distinguishable from "no work yet" --
          * acceptable since bleReady already covers that case explicitly. */
 #if defined(AM_PART_APOLLO510B) && TIO_BLE_ENABLED
-        bool bleReady = ble_bringup_connected();
+        fanout.bleReady = ble_bringup_connected();
 #else
-        bool bleReady = false;
+        fanout.bleReady = false;
 #endif
-        /* At most one USB retry attempt per iteration, then fall through: the
-         * queue is drained every iteration whatever USB is doing, so BLE
-         * fan-out and queue depth are never held hostage to a stalled host
-         * (see tio_usb_tx_state_t for the full invariant). */
-        tio_usb_service_pending(&usb, usbReady);
         if (!usbReady) {
-            /* Nothing to probe once the host is gone; start clean on the next
-             * connect. */
-            usb.stalled = false;
-            usb.probeCountdown = 0;
+            /* Nothing held can ever land now; start clean on the next connect. */
+            tio_tx_sm_host_lost(&usb, &ops);
         }
-        if (!usbReady && !bleReady) {
+        if (!usbReady && !fanout.bleReady) {
             /* Neither transport has anyone listening: leave packets queued
-             * (bounded depth, oldest producer-side drops apply) rather than
-             * draining into the void -- matches the pre-BLE USB-only
-             * behavior exactly when BLE is compiled out/disconnected. */
+             * (bounded depth, producer-side drops apply) rather than draining
+             * into the void -- matches the pre-BLE USB-only behavior exactly
+             * when BLE is compiled out/disconnected. */
             vTaskDelay(kTioTxTaskPollTicks);
             continue;
         }
-        if (xQueueReceive(g_tioTxQueue, packet, kTioTxTaskPollTicks) == pdTRUE) {
-            if (usbReady) {
-                tio_usb_offer_packet(&usb, packet);
-            }
-#if defined(AM_PART_APOLLO510B) && TIO_BLE_ENABLED
-            if (bleReady) {
-                /* Non-blocking (see ble_bringup_send_slot_packet's doc
-                 * comment): never allowed to stall USB delivery above. */
-                ble_bringup_send_slot_packet(packet, TIO_USB_PACKET_LEN);
-            }
-#endif
+        tio_tx_sm_step(&usb, &ops, usbReady);
+        if (usb.pending) {
+            /* Retry pacing, and the release rate above the watermark: below it
+             * the queue receive is skipped, so this loop has nothing else to
+             * block on. */
+            vTaskDelay(kTioTxTaskPollTicks);
         }
     }
 }
@@ -2514,7 +2488,7 @@ ReportTask(void *pvParameters)
 int
 main(void)
 {
-    const uint32_t tioTxQueueDepth = 32;
+    const uint32_t tioTxQueueDepth = TIO_TX_QUEUE_DEPTH;
 
     nsx_core_config_t core_cfg = {
         .api = &nsx_core_V1_0_0,

@@ -37,6 +37,7 @@ set(HKV_TEST_SOURCES
     test_ringbuffer_model.c
     test_obs_format.c
     test_ecg_tensor_copy.c
+    test_tio_tx_sm.c
 )
 
 foreach(test_src ${HKV_TEST_SOURCES})

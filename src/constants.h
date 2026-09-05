@@ -543,6 +543,20 @@ extern "C" {
 #define TIO_BLE_ENABLED true // Enable Tileio BLE
 #define TIO_USB_ENABLED true // Enable Tileio USB
 
+/* TileIO TX queue depth, in packets. This is the buffer that absorbs host
+ * jitter; the steady-state packet rate (signal slots plus the periodic metric
+ * packets) and the seconds of hold it buys are worked out in #56.
+ * A full queue (HKV_CNT_TIO_QDROP) is the largest but not the only loss path
+ * with a connected host: see tio_tx_sm.h for the other two.
+ * 48 x 256 B = 12 KiB of the FreeRTOS heap, sized in config/FreeRTOSConfig.h. */
+#define TIO_TX_QUEUE_DEPTH (48)
+
+/* Queue occupancy at which a held USB packet stops gating the drain. Past it
+ * the head is released to the second transport and charged to USB as a drop,
+ * so a stalled host bounds BLE delay at this depth instead of at the stall
+ * length; the remaining third of the queue is the resume margin. See #56. */
+#define TIO_TX_USB_HOLD_WATERMARK ((TIO_TX_QUEUE_DEPTH * 2) / 3)
+
 #define TIO_SLOT0_NUM_CH (2)
 #define TIO_SLOT0_SIG_NUM_VALS (10)
 #define TIO_SLOT0_FS (ECG_TARGET_RATE / TIO_SLOT0_SIG_NUM_VALS)
