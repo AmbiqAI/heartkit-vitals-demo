@@ -69,11 +69,8 @@ extern "C" {
 // The demo does not sleep: FreeRTOSConfig.h sets `configUSE_TICKLESS_IDLE 0`,
 // so idle time is spent spinning in the idle task at run power, not in Sleep 1.
 // The idle term states what the same workload would draw if the port slept.
-// The busy fraction, by contrast, IS measured: `cpuNoDemoPerc`, the 30 s
-// rolling utilisation with the TileIO transmit task subtracted, so the demo's
-// transport is not billed at inference or compute power (issue #8).
-// Producer-side pack and CRC work stays inside the pipeline tasks and is still
-// billed, so the fraction remains an upper bound on the deployed workload.
+// The busy fraction, by contrast, IS measured: `cpuPercUtil`, the 30 s rolling
+// utilisation, so everything the core runs is billed at active power. See #65.
 //
 // SLEEP 1, NOT DEEP SLEEP, DELIBERATELY. The sensor wakes the MCU ~7.7 times
 // per second. Sleep 1 keeps HFRC running so a wake is cheap; deep sleep at that

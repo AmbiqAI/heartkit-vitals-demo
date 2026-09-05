@@ -11,7 +11,7 @@ This note captures current wiring assumptions and firmware mapping differences b
 
 ## Transport
 - EVK profile: SPI
-- Click profile: I2C (`0x55`, `100 kHz` default)
+- Click profile: I2C (`0x55`, `400 kHz`, `AS7058_I2C_SPEED_HZ`)
 
 ## Schematic Wiring Summary
 - EVK:
