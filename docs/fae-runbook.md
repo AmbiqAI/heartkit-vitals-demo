@@ -75,10 +75,13 @@ one. Estimated, never measured.
 back.
 > "The operating point is a runtime control. Both modes are supported. At
 > 250 MHz you get 2 to 3x the AI throughput, varying by model and build, the
-> efficiency tiles always drop, by roughly a tenth to a third depending on the
-> model and build, because each inference costs more energy, and the modelled
-> battery life falls to about 15 days. You trade energy for headroom, without
-> stopping the stream."
+> efficiency tiles change by model, so a tile may read higher or lower, and the
+> modelled battery life falls to about 15 days. You trade energy for headroom,
+> without stopping the stream."
+
+Read the efficiency tiles on the screen in front of you before you say anything
+about their direction. Paired readings on the released build came out mixed
+across the three models (#25).
 
 If a customer mentions that high-performance figures looked wrong on an older
 build, that was a timebase defect, fixed in v5.0.0 (#25).
@@ -103,10 +106,11 @@ build, that was a timebase defect, fixed in v5.0.0 (#25).
 - **On the Apollo330, do not toggle high performance and do not quote the
   battery tile.** High-performance mode is not supported on that board in
   v5.0.0, and its battery tile uses unsourced fallback figures.
-- **Do not quote a specific efficiency percentage in high-performance mode.** The
-  drop has measured anywhere from roughly a tenth to a third across builds,
-  because binary layout moves throughput. Say only that efficiency is lower in
-  high performance, and read the live tile if someone wants a number.
+- **Do not say the efficiency tiles drop in high-performance mode, and do not
+  quote a percentage.** Efficiency changes by model, and a tile may read higher
+  or lower on the same build, because binary layout moves throughput. Give the
+  direction you can see on the tile in front of the customer, say that it is per
+  model, and read the live number if someone wants one.
 
 ## When it misbehaves
 

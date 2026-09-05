@@ -215,7 +215,7 @@ figure, from the same bench runlogs dated 2026-02-26.
 250 MHz high-performance operation. **Both modes are supported.** The default is
 96 MHz low power.
 
-Measured on an Apollo510B EVB, 2026-09-01 (issue #25), in 250 MHz
+Measured on an Apollo510B EVB, 2026-09-01 and 2026-09-02 (issue #25), in 250 MHz
 high-performance mode expect:
 
 - AI throughput **2 to 3x, varying by model and build**. Two builds of the same
@@ -224,13 +224,15 @@ high-performance mode expect:
   arenas in shared SRAM, so binary layout changes how the largest model caches
   and moves the three-stage mean without moving inference duty. The bench
   harness, with the models and arena held in TCM, measured 2.59x.
-- The three efficiency tiles are **always lower in high performance, by roughly a
-  tenth to a third, depending on the model and build layout**. The tiles are
-  throughput divided by inference power: the earlier build gives 0.66 of the
-  low-power value, the release candidate gives 0.91. The direction is firm
-  because energy per inference rises about 17 percent in high-performance mode
-  (bench runlogs 2026-02-26, issue #18); the size of the drop moves with the same
-  binary layout effect as throughput, so quote the direction, not a percentage.
+- The three efficiency tiles **change by model in high performance: a tile may
+  read higher or lower**. The tiles are throughput divided by inference power, so
+  they carry the same binary layout effect as throughput and the three models do
+  not move together. Paired low-power and high-performance readings on the
+  released v5.0.0 build recorded mixed directions across the three tiles (issue
+  #25). The 2026-02-26 bench runlogs measured energy per inference rising about
+  17 percent for segmentation in the harness (issue #18); that is a harness
+  result, and the on-device tile did not reproduce it. Read the live tiles rather
+  than quoting a direction or a percentage in advance.
 - A lower battery figure: about 15 days modelled at 250 MHz, 14.6 days against a
   measured 22.3 percent busy fraction, compared with 27.7 days at 96 MHz.
 
