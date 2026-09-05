@@ -69,8 +69,11 @@ extern "C" {
 // The demo does not sleep: FreeRTOSConfig.h sets `configUSE_TICKLESS_IDLE 0`,
 // so idle time is spent spinning in the idle task at run power, not in Sleep 1.
 // The idle term states what the same workload would draw if the port slept.
-// The busy fraction, by contrast, IS measured (`cpuPercUtil`, 30 s rolling)
-// and includes demo transport, so it is conservative.
+// The busy fraction, by contrast, IS measured: `cpuNoDemoPerc`, the 30 s
+// rolling utilisation with the TileIO transmit task subtracted, so the demo's
+// transport is not billed at inference or compute power (issue #8).
+// Producer-side pack and CRC work stays inside the pipeline tasks and is still
+// billed, so the fraction remains an upper bound on the deployed workload.
 //
 // SLEEP 1, NOT DEEP SLEEP, DELIBERATELY. The sensor wakes the MCU ~7.7 times
 // per second. Sleep 1 keeps HFRC running so a wake is cheap; deep sleep at that
@@ -542,6 +545,16 @@ extern "C" {
 
 #define TIO_BLE_ENABLED true // Enable Tileio BLE
 #define TIO_USB_ENABLED true // Enable Tileio USB
+
+/* Default 1: the demo telemetry producers -- the ECG/PPG/CPU signal and metric
+ * slot sends, and the pack, CRC and queue work they do. Capture, inference and
+ * the UIO control path are outside it, so -DHKV_TELEMETRY_ENABLE=OFF builds an
+ * image that runs the advertised workload and nothing else. That A/B is how the
+ * demo's CPU cost is measured rather than argued; gating the queue drain
+ * instead would leave the producer-side cost in place. See #8. */
+#ifndef HKV_TELEMETRY_ENABLE
+#define HKV_TELEMETRY_ENABLE (1)
+#endif
 
 /* TileIO TX queue depth, in packets. This is the buffer that absorbs host
  * jitter; the steady-state packet rate (signal slots plus the periodic metric

@@ -215,6 +215,9 @@ hkv_log_boot(void)
     hkv_log_str("board", HKV_BOARD_NAME);
     hkv_log_u32("trace", EN_APP_TRACE);
     hkv_log_u32("report", EN_APP_REPORT);
+    /* The A/B pair the demo's CPU cost is measured from is two images that are
+     * otherwise identical, so the capture has to say which one it came from. See #8. */
+    hkv_log_u32("telemetry", HKV_TELEMETRY_ENABLE);
 #if defined(AM_PART_APOLLO510B) && TIO_BLE_ENABLED
     hkv_log_u32("ble", 1);
 #else

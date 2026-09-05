@@ -9,7 +9,9 @@ Usage:
 For each log written by `swo_capture.py`, prints:
 
   - distributions (n, min, median, max) of ECG quality `qos`, model
-    `cossim`, heart rate, CPU `util` and `avg_ips`, plus TileIO `qdepth`;
+    `cossim`, heart rate, CPU `util`, `cpu_nodemo` (measured minus demo
+    transport) and `cpu_proj` (deployment projection) and `avg_ips`, plus
+    TileIO `qdepth`;
   - the `tio` stream line: the cumulative `ecg_ok` counter at the first and
     last line of the capture, labelled as such, then ECG packets accepted as
     a per-second rate over that window, with `qdrop` and `ecg_fail` as
@@ -44,11 +46,14 @@ ECGMET_RE = re.compile(
     r"ecgmet\|hr_x100=(-?\d+) hrv_x100=(-?\d+) qos_x100=(-?\d+) cossim_x100=(-?\d+)"
 )
 UTIL_RE = re.compile(r"util_x100=(-?\d+)")
+# The three CPU figures are reported separately and must be read that way. See #8.
+NODEMO_RE = re.compile(r"cpu_nodemo_x100=(-?\d+)")
+PROJ_RE = re.compile(r"cpu_proj_x100=(-?\d+)")
 IPS_RE = re.compile(r"avg_ips_x100=(-?\d+)")
 TIO_RE = re.compile(r"tio\|.*?qdrop=(\d+).*?ecg_ok=(\d+).*?ecg_fail=(\d+).*?qdepth=(\d+)")
 USB_RE = re.compile(r"tiousb\|ecg_retry=(\d+) ecg_drop=(\d+).*?stall=(\d+)")
 
-DIST_KEYS = ["qos", "cossim", "hr", "util", "ips", "qdepth"]
+DIST_KEYS = ["qos", "cossim", "hr", "util", "nodemo", "proj", "ips", "qdepth"]
 
 
 def load(path):
@@ -69,6 +74,14 @@ def load(path):
             match = UTIL_RE.search(line)
             if match:
                 dist["util"].append(int(match.group(1)) / 100)
+
+            match = NODEMO_RE.search(line)
+            if match:
+                dist["nodemo"].append(int(match.group(1)) / 100)
+
+            match = PROJ_RE.search(line)
+            if match:
+                dist["proj"].append(int(match.group(1)) / 100)
 
             match = IPS_RE.search(line)
             if match:

@@ -24,6 +24,11 @@ add_compile_options(
 # expected to pass -DHKV_FW_VERSION=<tag>; anything else is honestly "dev".
 set(HKV_FW_VERSION "dev" CACHE STRING "Firmware version reported in the HKV boot line")
 
+# OFF builds the same capture and inference pipeline with the demo's TileIO
+# producers compiled out, which is how the demo's own CPU cost is measured.
+# See src/constants.h and #8.
+option(HKV_TELEMETRY_ENABLE "Send TileIO signal and metric packets" ON)
+
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/nsx/modules.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/nsx/nsx_app_bootstrap.cmake)
 
@@ -97,6 +102,7 @@ endforeach()
 target_compile_definitions(heartkit-vitals-demo PRIVATE
     HKV_BOARD_NAME="${NSX_BOARD}"
     HKV_FW_VERSION="${HKV_FW_VERSION}"
+    HKV_TELEMETRY_ENABLE=$<BOOL:${HKV_TELEMETRY_ENABLE}>
 )
 
 target_link_libraries(heartkit-vitals-demo PRIVATE
