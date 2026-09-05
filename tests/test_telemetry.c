@@ -40,20 +40,6 @@ test_duty_factors_derived_from_windows(void)
 }
 
 static void
-test_nodemo_subtracts_transport(void)
-{
-    TEST_CASE("cpu_nodemo");
-
-    CHECK_NEAR(hkv_cpu_nodemo_pct(38.0f, 12.0f), 26.0f, TOL);
-    CHECK_NEAR(hkv_cpu_nodemo_pct(38.0f, 0.0f), 38.0f, TOL);
-    /* Independent measurements, so transport can exceed measured busy on a
-     * skewed window; the figure floors at zero rather than going negative. */
-    CHECK_NEAR(hkv_cpu_nodemo_pct(10.0f, 40.0f), 0.0f, TOL);
-    CHECK_NEAR(hkv_cpu_nodemo_pct(-5.0f, 3.0f), 0.0f, TOL);
-    CHECK_NEAR(hkv_cpu_nodemo_pct(140.0f, 20.0f), 80.0f, TOL);
-}
-
-static void
 test_projection_scales_inference_only(void)
 {
     TEST_CASE("cpu_proj");
@@ -114,31 +100,27 @@ test_split_sums_to_wall_time(void)
 }
 
 static void
-test_split_agrees_with_the_three_figures(void)
+test_split_agrees_with_the_measured_figure(void)
 {
     TEST_CASE("figures agree");
 
     const float meas = 38.0f;
     const float capture = 5.0f;
-    const float transport = 12.0f;
-    hkv_cpu_split_t split = hkv_cpu_split(meas, capture, 18.0f, transport);
-    const float nodemo = hkv_cpu_nodemo_pct(meas, transport);
+    hkv_cpu_split_t split = hkv_cpu_split(meas, capture, 18.0f, 12.0f);
     const float proj = hkv_cpu_proj_pct(capture, hkv_duty_inference_pct(6.0f, 6.0f, 6.0f));
 
-    /* The three figures describe the same window and must stay ordered:
-     * the projection discounts inference, cpu_nodemo drops only transport. */
-    CHECK_NEAR(nodemo, meas - split.transport, TOL);
-    CHECK(proj < nodemo);
-    CHECK(nodemo < meas);
+    /* Both describe the same window: the split accounts for all of it, and the
+     * projection discounts inference so it must stay below the measurement. */
+    CHECK_NEAR(split.capture + split.inference + split.transport + split.other, meas, TOL);
+    CHECK(proj < meas);
 }
 
 int
 main(void)
 {
     test_duty_factors_derived_from_windows();
-    test_nodemo_subtracts_transport();
     test_projection_scales_inference_only();
     test_split_sums_to_wall_time();
-    test_split_agrees_with_the_three_figures();
+    test_split_agrees_with_the_measured_figure();
     return TEST_RESULT();
 }

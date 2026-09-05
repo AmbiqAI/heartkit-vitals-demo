@@ -82,36 +82,37 @@ acceptance matrix.
 
 ### CPU attribution
 
-The `cpu` line reports three separately labelled CPU figures, all percentages
-of wall time over the same 30 s window, plus a coarse per-component breakdown.
-`util` is the measured `100 - idle`, what the silicon actually does on this
-build, and is the figure the other two are stated against. `cpu_nodemo` is
-`util` with the TileIO transmit task subtracted, so it is capture and inference
-as this build runs them; the producer-side pack and CRC work runs inside the
-pipeline tasks and is still counted, so `cpu_nodemo` is an upper bound.
+The `cpu` line reports the measured CPU figure, a deployment projection and a
+coarse per-component breakdown, all percentages of wall time over the same 30 s
+window. `util` is the measured `100 - idle`, what the silicon actually does on
+this build; it is the figure the projection is stated against, the figure the
+TileIO CPU packet carries, and the busy fraction the battery model bills.
 `cpu_proj` is the deployment projection: sensor capture at duty 1.0 plus each
 inference stage scaled by its own duty factor, derived from the window and
 stride constants in `src/constants.h` (see `src/telemetry.h`). The breakdown
 sums to 100 but only its independent terms are emitted, `cpu_cap`, `cpu_inf`
 and `cpu_tx`; the rest is idle plus a remainder carrying PPG stage time, DSP
 paths and RTOS overhead, which have no per-stage counters and which `cpu_proj`
-excludes. To measure the demo's own cost, build the same pipeline with the
-telemetry producers compiled out and compare `util` between the two images:
+excludes.
 
-```bash
-uv run nsx configure --app-dir . --board apollo510b_evb --build-dir build/apollo510b_evb_notele
-cmake -B build/apollo510b_evb_notele -DHKV_TELEMETRY_ENABLE=OFF
-uv run nsx build --app-dir . --board apollo510b_evb --build-dir build/apollo510b_evb_notele
-```
+The battery model's sleep term assumes a quiet bus. With the async sensor read
+the task is blocked while the IOM moves the FIFO, so that transfer time is
+billed as idle even though the peripheral is active for a few milliseconds per
+interrupt.
 
-`nsx configure` has no pass-through for a `-D`, so the option is set on that
-build directory's cache between configure and build; keep it in its own
-directory so the default image is not silently rebuilt with telemetry off. The
-`boot` line reports `telemetry=0` or `telemetry=1`, so a capture says which of
-the two images it came from. Capture, inference and the UIO control path keep
-running in the telemetry-off image; only the ECG/PPG/CPU signal and metric
-sends are gone. Nothing drains the TX rings in that image, so the `ring` line in
-an OFF capture reads full and that is not a transport stall.
+### Sensor bus
+
+The AS7058 FIFO read goes through the IOM command queue: `src/sensor_bus.c`
+queues the transfer and the sensor task blocks on a semaphore until the IOM ISR
+reports completion, instead of polling the IOM FIFO in task context. Set
+`-DHKV_SENSOR_ASYNC=OFF` to fall back to the nsx-i2c blocking read. The `sensor`
+line's `bus_err` and `bus_sync` counters report transfer failures and reads
+served by the blocking fallback.
+
+The read path lives in the app rather than in the nsx modules: those are
+vendored by `nsx sync` and hash-locked in `nsx.lock`, and the AS7058 OSAL takes
+its transport as a function-pointer config (`as7058_osal_configure`), which is
+the supported substitution point.
 
 ## Continuous Integration
 

@@ -1206,16 +1206,9 @@ tio_pump_wait(TickType_t *pLastWake)
     vTaskDelayUntil(pLastWake, period);
 }
 
-/* The six functions below are the demo telemetry producers, and each opens with
- * the same guard: with HKV_TELEMETRY_ENABLE off, none of the pack, CRC or queue
- * work happens, while capture, inference and the UIO control path are untouched.
- * Gating the queue drain instead would leave that work in place. See #8. */
 static void
 send_ecg_signals(void)
 {
-    if (!HKV_TELEMETRY_ENABLE) {
-        return;
-    }
     /* Sized for the drift-drain maximum, not the nominal packet. */
     uint8_t buffer[TIO_ECG_MAX_SAMPLES_PER_PKT * (sizeof(uint16_t) + 2 * sizeof(int16_t))];
     float32_t rawVal, denVal;
@@ -1251,9 +1244,6 @@ send_ecg_signals(void)
 static void
 send_ecg_metrics(void)
 {
-    if (!HKV_TELEMETRY_ENABLE) {
-        return;
-    }
     float32_t buffer[16];
     buffer[0] = ecgMetResults.hr;
     buffer[1] = ecgMetResults.hrv;
@@ -1302,9 +1292,6 @@ ppg_display_sample(ppg_tx_display_state_t *state, float32_t sample)
 static void
 send_ppg_signals(void)
 {
-    if (!HKV_TELEMETRY_ENABLE) {
-        return;
-    }
     /* Sized for the drift-drain maximum, not the nominal packet. */
     uint8_t buffer[TIO_PPG_MAX_SAMPLES_PER_PKT * (sizeof(uint16_t) + 2 * sizeof(int16_t))];
     float32_t val1, val2;
@@ -1343,9 +1330,6 @@ send_ppg_signals(void)
 static void
 send_ppg_metrics(void)
 {
-    if (!HKV_TELEMETRY_ENABLE) {
-        return;
-    }
     float32_t buffer[4];
     buffer[0] = ppgMetResults.pr;
     buffer[1] = ppgMetResults.spo2;
@@ -1356,9 +1340,6 @@ send_ppg_metrics(void)
 static void
 send_cpu_signals(void)
 {
-    if (!HKV_TELEMETRY_ENABLE) {
-        return;
-    }
     uint8_t buffer[240];
     float32_t val;
     uint32_t length;
@@ -1389,9 +1370,6 @@ send_cpu_signals(void)
 static void
 send_cpu_metrics(void)
 {
-    if (!HKV_TELEMETRY_ENABLE) {
-        return;
-    }
     float32_t buffer[3];
     buffer[0] = appMetResults.cpuPercUtil;
     buffer[1] = appMetResults.batteryDays;
@@ -1758,12 +1736,16 @@ PpgProcessTask(void *pvParameters)
 //   avgPower_mW   = (inf x INFERENCE + cmp x COMPUTE + idle x SLEEP) / MARGIN
 //   batteryDays   = BATT_POWER_CAP / avgPower_mW / 24
 //
-// `busy` is cpuNoDemoPerc, the MEASURED 30 s rolling utilisation with the
-// TileIO transmit task subtracted, so demo transport is not billed at inference
-// or compute power (issue #8). Producer-side pack and CRC work still runs
-// inside the pipeline tasks and is still billed, so the fraction stays an upper
-// bound on the deployed workload and needs no duty-cycle argument. The
-// duty-cycle projection is reported separately and never feeds this model.
+// `busy` is cpuPercUtil, the MEASURED 30 s rolling utilisation, the same figure
+// the TileIO CPU packet carries. Everything the core runs is billed: the
+// inference share at inference power and the remainder, transport included, at
+// compute power (issues #8, #65). One measured figure therefore drives both the
+// dashboard tile and this estimate. The duty-cycle projection is reported
+// separately and never feeds this model.
+//
+// The sleep term assumes a quiet bus: with the async sensor read the task is
+// blocked while the IOM moves the FIFO, so that time is billed as idle even
+// though the peripheral is active.
 //
 // THE MODEL FOLLOWS THE OPERATING POINT. INFERENCE and COMPUTE are read per
 // window from the LP/HP constant pair that matches `appState.speedMode`, the
@@ -2047,7 +2029,7 @@ CpuProcessTask(void *pvParameters)
 
             appMetResults.cpuPercUtil = cpuUtilRollingSum / (float32_t)cpuUtilRollingCount;
 
-            /* Three separately labelled figures, never one blended number
+            /* Measured and projected reported separately, never blended
              * (issue #8). The split is coarse by design: PPG stage time and DSP
              * paths have no per-stage counters, so they land in `other`. */
             const float32_t windowCount = (float32_t)cpuUtilRollingCount;
@@ -2055,12 +2037,11 @@ CpuProcessTask(void *pvParameters)
             const float32_t transportPerc = txRolling.sum / windowCount;
             appMetResults.cpuSplit = hkv_cpu_split(appMetResults.cpuPercUtil, capturePerc,
                                                    100.0f * infFracRollingSum / windowCount, transportPerc);
-            appMetResults.cpuNoDemoPerc = hkv_cpu_nodemo_pct(appMetResults.cpuPercUtil, transportPerc);
             appMetResults.cpuProjPerc = hkv_cpu_proj_pct(capturePerc, projInfRolling.sum / windowCount);
 
             /* Three-state split. See the header above CpuProcessTask and the
              * sourced constants in constants.h. */
-            float32_t busyFrac = appMetResults.cpuNoDemoPerc / 100.0f;
+            float32_t busyFrac = appMetResults.cpuPercUtil / 100.0f;
             if (busyFrac < 0.0f) {
                 busyFrac = 0.0f;
             } else if (busyFrac > 1.0f) {
@@ -2470,27 +2451,24 @@ report_extra_cpu(void)
     hkv_log_fx2("batt_days", appMetResults.batteryDays);
     /* Battery-model breakdown (issue #17), so the three-state split is legible
      * on SWO instead of only its result. Only the two INDEPENDENT terms are
-     * emitted: the other two are exact derivations of these and `cpu_nodemo`,
-     * and every extra fixed-point field lengthens the hold on the global log
-     * mutex.
-     *   batt_cmp  = cpu_nodemo - batt_inf   (compute % of wall time)
-     *   batt_idle = 100 - cpu_nodemo        (idle % of wall time)
-     * `batt_inf` equal to `cpu_nodemo` means the clamp is active, i.e. derived
+     * emitted: the other two are exact derivations of these and `util`, and
+     * every extra fixed-point field lengthens the hold on the global log mutex.
+     *   batt_cmp  = util - batt_inf   (compute % of wall time)
+     *   batt_idle = 100 - util        (idle % of wall time)
+     * `batt_inf` equal to `util` means the clamp is active, i.e. derived
      * inference duty exceeded measured busy. batt_inf is a percentage of wall
      * time; batt_pwr is the modelled average in mW at the LIVE speed mode
      * (see `speed_mode` on the `app` line -- the two must be read together). */
     hkv_log_fx2("batt_inf", 100.0f * appMetResults.battInferenceFrac);
     hkv_log_fx2("batt_pwr", appMetResults.battAvgPowerMw);
     hkv_log_fx2("avg_ips", appMetResults.avgAiIps);
-    /* Demo telemetry separated from the advertised workload (issue #8). Three
-     * labelled figures, never blended: `util` above is the measured figure the
-     * other two are stated against, cpu_nodemo drops the transmit task,
-     * cpu_proj applies the per-stage duty factors (telemetry.h) with capture at
-     * 1.0. The coarse breakdown sums to 100 and carries two further terms that
-     * are not emitted because they follow from these: idle, and an `other`
-     * holding PPG stage time, DSP paths and RTOS overhead, which has no
-     * per-stage counters and which cpu_proj deliberately excludes. */
-    hkv_log_fx2("cpu_nodemo", appMetResults.cpuNoDemoPerc);
+    /* Measured and projected, never blended (issue #8): `util` above is the
+     * measured figure cpu_proj is stated against, and cpu_proj applies the
+     * per-stage duty factors (telemetry.h) with capture at 1.0. The coarse
+     * breakdown sums to 100 and carries two further terms that are not emitted
+     * because they follow from these: idle, and an `other` holding PPG stage
+     * time, DSP paths and RTOS overhead, which has no per-stage counters and
+     * which cpu_proj deliberately excludes. */
     hkv_log_fx2("cpu_proj", appMetResults.cpuProjPerc);
     hkv_log_fx2("cpu_cap", appMetResults.cpuSplit.capture);
     hkv_log_fx2("cpu_inf", appMetResults.cpuSplit.inference);

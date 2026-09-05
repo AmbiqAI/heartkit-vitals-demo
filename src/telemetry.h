@@ -4,18 +4,12 @@
  * @file telemetry.h
  * @brief Demo-telemetry separation: CPU attribution and duty-cycle projection.
  *
- * Three CPU figures are reported, never one blended number (see #8):
+ * Two CPU figures are reported (see #8, #65):
  *
- *   util        raw 100 - idle, what the silicon actually does on this build;
- *   cpu_nodemo  measured minus the TileIO transmit task, i.e. capture and
- *               inference as this build runs them;
- *   cpu_proj    deployment projection -- capture at duty 1.0 plus each
- *               inference stage scaled by its own duty factor.
- *
- * cpu_nodemo subtracts the transmit TASK only. Producer-side pack and CRC work
- * runs inside the pipeline tasks and stays in the figure, so cpu_nodemo is an
- * upper bound on the telemetry-free cost; the HKV_TELEMETRY_ENABLE=OFF image is
- * what measures the remainder.
+ *   util      raw 100 - idle, what the silicon actually does on this build and
+ *             the figure both the battery model and the dashboard tile use;
+ *   cpu_proj  deployment projection -- capture at duty 1.0 plus each inference
+ *             stage scaled by its own duty factor.
  *
  * Duty factors are stride/window, derived from the constants that define the
  * pipeline, so retuning a window retunes the projection. Only includes stdbool
@@ -81,21 +75,6 @@ hkv_clamp_pct(float pct)
 }
 
 /**
- * @brief Measured busy time with the transmit task removed.
- *
- * @param measPct       Measured 100 - idle, percent of wall time.
- * @param transportPct  Transmit task run time, percent of wall time.
- * @return Percent of wall time, clamped to [0, measPct].
- */
-static inline float
-hkv_cpu_nodemo_pct(float measPct, float transportPct)
-{
-    float meas = hkv_clamp_pct(measPct);
-    float transport = hkv_clamp_pct(transportPct);
-    return (transport >= meas) ? 0.0f : (meas - transport);
-}
-
-/**
  * @brief Inference cost the same stages would carry without window overlap.
  *
  * Each stage is scaled by its own duty factor, so this needs per-stage input
@@ -120,7 +99,7 @@ hkv_duty_inference_pct(float denPct, float segPct, float arrPct)
  *
  * Everything the split calls `other` -- RTOS overhead, DSP, ring copies, the
  * reporter -- is deliberately absent, so cpu_proj is a floor and the gap to
- * cpu_nodemo is visible on the same line rather than folded away.
+ * `util` is visible on the same line rather than folded away.
  *
  * @param capturePct        Capture run time, percent of wall time.
  * @param dutyInferencePct  Output of hkv_duty_inference_pct().

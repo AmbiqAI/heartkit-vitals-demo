@@ -568,16 +568,6 @@ extern "C" {
 #define TIO_BLE_ENABLED true // Enable Tileio BLE
 #define TIO_USB_ENABLED true // Enable Tileio USB
 
-/* Default 1: the demo telemetry producers -- the ECG/PPG/CPU signal and metric
- * slot sends, and the pack, CRC and queue work they do. Capture, inference and
- * the UIO control path are outside it, so -DHKV_TELEMETRY_ENABLE=OFF builds an
- * image that runs the advertised workload and nothing else. That A/B is how the
- * demo's CPU cost is measured rather than argued; gating the queue drain
- * instead would leave the producer-side cost in place. See #8. */
-#ifndef HKV_TELEMETRY_ENABLE
-#define HKV_TELEMETRY_ENABLE (1)
-#endif
-
 /* TileIO TX queue depth, in packets. This is the buffer that absorbs host
  * jitter; the steady-state packet rate (signal slots plus the periodic metric
  * packets) and the seconds of hold it buys are worked out in #56.

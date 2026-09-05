@@ -27,7 +27,6 @@ set(HKV_FW_VERSION "dev" CACHE STRING "Firmware version reported in the HKV boot
 # OFF builds the same capture and inference pipeline with the demo's TileIO
 # producers compiled out, which is how the demo's own CPU cost is measured.
 # See src/constants.h and #8.
-option(HKV_TELEMETRY_ENABLE "Send TileIO signal and metric packets" ON)
 
 # OFF puts the AS7058 register reads back on the nsx-i2c blocking transfer,
 # which spins in the sensor task. See src/sensor_bus.c and #65.
@@ -109,7 +108,6 @@ endforeach()
 target_compile_definitions(heartkit-vitals-demo PRIVATE
     HKV_BOARD_NAME="${NSX_BOARD}"
     HKV_FW_VERSION="${HKV_FW_VERSION}"
-    HKV_TELEMETRY_ENABLE=$<BOOL:${HKV_TELEMETRY_ENABLE}>
     HKV_SENSOR_ASYNC=$<BOOL:${HKV_SENSOR_ASYNC}>
 )
 
