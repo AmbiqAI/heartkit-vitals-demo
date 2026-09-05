@@ -176,7 +176,16 @@ firmware does, which means the USB or BLE transport that exists only to feed
 this dashboard is counted in the number. A deployed product that streams nothing
 would read lower. BLE reads higher than USB for the same reason: measurements
 put BLE at 37.7 percent against roughly 27 to 28 percent for USB (issue #19).
-Attributing the number across subsystems is separate work (issue #8).
+The same number is the busy fraction the battery model bills, so the CPU tile
+and the battery tile derive from one measurement. A per-task breakdown and a
+deployment projection are emitted on the SWO `cpu` line as diagnostics; see
+`docs/developer.md`.
+
+Measured on branch 65-sensor-opt before release, Apollo510B over USB, dashboard
+connected, 180 s: 16.0 percent utilization, a 36.4 day battery estimate and
+71.3 inferences per second, against 39.9 percent, 24.0 days and 58.5 inferences
+per second in the same conditions on the v5.0.0-era build (issue #65). The
+v5.0.0 figures quoted in this section stand as the record of that release.
 
 **MCU Battery Life (est., excl. sensor).** This is a **model, not a
 measurement**. It covers **MCU energy only; sensor power is deliberately
@@ -186,7 +195,9 @@ into inference, general compute, and sleep, and bills each at its own figure:
 sleep and per-MHz compute from the Apollo510B SoC Datasheet DS-A510B-1p1p0
 Table 39, inference from bench runlogs dated 2026-02-26. It models about
 28 days at 96 MHz: 27.7 days against a measured 30.5 percent busy fraction
-(issues #17, #25).
+(issues #17, #25). The busy fraction it bills is the measured CPU figure above,
+so everything the core runs, the demo transport included, is billed at active
+power.
 
 It assumes a 1485 mWh budget (2 x 225 mAh at 3.3 V); the cell capacity is a
 chosen assumption, not a sourced figure (issue #18). The known errors run
@@ -196,7 +207,8 @@ segmentation figure, and the bench figures were taken on `apollo510_evb`.
 What it is not: it is not a product battery specification, it is not a system
 power measurement, and it is not a single-coin-cell figure. The sleep term is a
 projection rather than a measurement of this build, because the demo does not
-actually sleep.
+actually sleep, and it assumes a quiet bus: the sensor task is blocked while the
+IOM moves the sensor FIFO, so that transfer time is billed as idle.
 
 **AI Throughput (max sustained).** Inferences per second expressed as
 `2e6 / duration`, the scale the host dashboard expects (`ips_from_delta_us` in

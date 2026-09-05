@@ -102,7 +102,8 @@ interrupt.
 
 ### Sensor bus
 
-The AS7058 FIFO read goes through the IOM command queue: `src/sensor_bus.c`
+The AS7058 FIFO read runs at 400 kHz (`AS7058_I2C_SPEED_HZ` in
+`src/constants.h`) and goes through the IOM command queue: `src/sensor_bus.c`
 queues the transfer and the sensor task blocks on a semaphore until the IOM ISR
 reports completion, instead of polling the IOM FIFO in task context. Set
 `-DHKV_SENSOR_ASYNC=OFF` to fall back to the nsx-i2c blocking read. The `sensor`

@@ -71,6 +71,13 @@ themselves and think it is broken.
 Say the caveat in the same breath as the number, every time. Two cells, never
 one. Estimated, never measured.
 
+The script figures above are the v5.0.0 package figures. Read the tile in front
+of you; on a newer build it will differ. Measured on branch 65-sensor-opt before
+release, Apollo510B over USB, dashboard connected, 180 s: 16.0 percent
+utilization, a 36.4 day battery estimate and 71.3 inferences per second, against
+39.9 percent, 24.0 days and 58.5 inferences per second in the same conditions on
+the v5.0.0-era build (#65).
+
 **4:30 Speed toggle.** Flip to 250 MHz, show that streaming continues, flip
 back.
 > "The operating point is a runtime control. Both modes are supported. At
@@ -97,8 +104,10 @@ build, that was a timebase defect, fixed in v5.0.0 (#25).
   singular. The cell capacity is a chosen assumption, not a sourced figure.
 - **Do not present AI Throughput as a run rate.** It is throughput. The models
   run about once every 2 seconds.
-- **Do not present the CPU number as product CPU load.** It includes the demo
-  transport. BLE reads about 10 points higher than USB for that reason (#19).
+- **Do not present the CPU number as product CPU load.** The tile shows the
+  measured busy figure, everything the firmware runs including the demo
+  transport, and the battery estimate derives from that same number. BLE reads
+  about 10 points higher than USB for that reason (#19).
 - **Do not quote sensor power or whole-system power.** Neither is modelled or
   measured here.
 - **Do not present the efficiency tiles as measured.** They divide throughput by
