@@ -51,19 +51,8 @@ static SemaphoreHandle_t s_done_sem = NULL;
 static volatile uint32_t s_xfer_status = 0;
 static bool s_ready = false;
 
-static volatile uint32_t s_read_count = 0;
-static volatile uint32_t s_byte_count = 0;
 static volatile uint32_t s_error_count = 0;
 static volatile uint32_t s_fallback_count = 0;
-
-    #if HKV_SENSOR_ASYNC_SPIKE
-static volatile uint32_t s_busy_cycles = 0;
-        #define SENSOR_BUS_CYCLES_MARK(v) ((v) = DWT->CYCCNT)
-        #define SENSOR_BUS_CYCLES_ADD(v) (s_busy_cycles += DWT->CYCCNT - (v))
-    #else
-        #define SENSOR_BUS_CYCLES_MARK(v) ((void)(v))
-        #define SENSOR_BUS_CYCLES_ADD(v) ((void)(v))
-    #endif
 
 static inline uint8_t
 sensor_bus_dev_addr(void)
@@ -154,7 +143,6 @@ err_code_t
 sensor_bus_read_registers(void *p_ctx, uint8_t address, uint16_t number, uint8_t *p_values)
 {
     am_hal_iom_transfer_t txn;
-    uint32_t startCycles = 0;
     err_code_t result;
 
     if (NULL == p_ctx || NULL == p_values) {
@@ -168,8 +156,6 @@ sensor_bus_read_registers(void *p_ctx, uint8_t address, uint16_t number, uint8_t
         s_fallback_count++;
         return sensor_bus_read_blocking(address, number, p_values);
     }
-
-    SENSOR_BUS_CYCLES_MARK(startCycles);
 
     /* Same transaction shape as nsx_i2c_read_sequential_regs, so a queued read
      * and a blocking read differ only in how completion is observed. */
@@ -207,12 +193,9 @@ sensor_bus_read_registers(void *p_ctx, uint8_t address, uint16_t number, uint8_t
         result = ERR_DATA_TRANSFER;
     } else {
         memcpy(p_values, s_rx_buf, number);
-        s_read_count++;
-        s_byte_count += number;
         result = ERR_SUCCESS;
     }
 
-    SENSOR_BUS_CYCLES_ADD(startCycles);
     return result;
 }
 
@@ -227,38 +210,6 @@ sensor_bus_get_fallback_count(void)
 {
     return s_fallback_count;
 }
-
-    #if HKV_SENSOR_ASYNC_SPIKE
-
-uint32_t
-sensor_bus_get_read_count(void)
-{
-    return s_read_count;
-}
-
-uint32_t
-sensor_bus_get_byte_count(void)
-{
-    return s_byte_count;
-}
-
-uint32_t
-sensor_bus_get_busy_cycles(void)
-{
-    return s_busy_cycles;
-}
-
-void
-sensor_bus_reset_stats(void)
-{
-    s_read_count = 0;
-    s_byte_count = 0;
-    s_error_count = 0;
-    s_fallback_count = 0;
-    s_busy_cycles = 0;
-}
-
-    #endif // HKV_SENSOR_ASYNC_SPIKE
 
 #else // HKV_SENSOR_ASYNC
 

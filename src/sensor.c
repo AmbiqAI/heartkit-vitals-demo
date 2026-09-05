@@ -45,14 +45,6 @@
 #include "sensor_bus.h"
 #include "stimulus.h"
 
-#if HKV_SENSOR_ASYNC && HKV_SENSOR_ASYNC_SPIKE
-    #include "obs.h"
-
-/* FreeRTOS run-time stats source, defined by the app (see FreeRTOSConfig.h
- * portGET_RUN_TIME_COUNTER_VALUE). */
-extern uint32_t RTOS_AppGetRuntimeCounterValueFromISR(void);
-#endif
-
 #define SENSOR_RB_LEN (SENSOR_BUF_LEN)
 
 static float32_t s_ppg1_rb_buf[SENSOR_RB_LEN];
@@ -73,14 +65,6 @@ rb_config_t rbEcgSensor = {
  * ownership); declared here to keep sensor.c self-contained during phase 2. */
 extern nsx_i2c_config_t nsxI2cCfg;
 extern nsx_spi_config_t nsxSpiCfg;
-
-#if !AS7058_USE_SPI
-/* File scope so the bring-up spike can swap the chiplib between the queued
- * and the blocking read without rebuilding the transport. See #65. */
-static nsx_as7058_i2c_transport_t s_as7058_transport = {0};
-static as7058_osal_config_t s_osal_cfg_blocking;
-static as7058_osal_config_t s_osal_cfg_async;
-#endif
 
 static volatile as7058_extract_metadata_t g_extract_metadata;
 static volatile uint32_t g_as7058_int_isr_count = 0;
@@ -294,115 +278,6 @@ sensor_process_irq_events(void)
     as7058_osal_interrupt_callback();
 }
 
-#if HKV_SENSOR_ASYNC && HKV_SENSOR_ASYNC_SPIKE
-
-static volatile uint32_t g_spike_fifo_bytes = 0;
-static volatile uint32_t g_spike_fifo_ints = 0;
-
-typedef struct {
-    uint32_t ints;
-    uint32_t runTicks;
-    uint32_t wallTicks;
-    uint32_t fifoBytes;
-    uint32_t fifoInts;
-} spike_leg_t;
-
-/* One capture leg on whichever read path the chiplib is currently configured
- * with. runTicks is the sensor task's own FreeRTOS run-time counter, so the
- * share below is time the task was scheduled -- not time it spent parked on
- * the completion semaphore, which is the whole point of the queued path.
- * wallTicks comes from the same counter, so the ratio carries no clock
- * assumption. */
-static void
-spike_run_leg(uint32_t targetInts, spike_leg_t *p_leg)
-{
-    uint32_t runStart;
-    uint32_t wallStart;
-
-    memset(p_leg, 0, sizeof(*p_leg));
-    g_spike_fifo_bytes = 0;
-    g_spike_fifo_ints = 0;
-    runStart = (uint32_t)ulTaskGetRunTimeCounter(NULL);
-    wallStart = RTOS_AppGetRuntimeCounterValueFromISR();
-
-    while (p_leg->ints < targetInts) {
-        if (0 == ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(HKV_SENSOR_SPIKE_INT_TIMEOUT_MS))) {
-            break;
-        }
-        sensor_process_irq_events();
-        p_leg->ints++;
-    }
-
-    p_leg->runTicks = (uint32_t)ulTaskGetRunTimeCounter(NULL) - runStart;
-    p_leg->wallTicks = RTOS_AppGetRuntimeCounterValueFromISR() - wallStart;
-    p_leg->fifoBytes = g_spike_fifo_bytes;
-    p_leg->fifoInts = g_spike_fifo_ints;
-}
-
-void
-sensor_spike_run(void)
-{
-    static uint8_t blockA[HKV_SENSOR_SPIKE_INTEG_BYTES];
-    static uint8_t blockB[HKV_SENSOR_SPIKE_INTEG_BYTES];
-    static uint8_t asyncC[HKV_SENSOR_SPIKE_INTEG_BYTES];
-    spike_leg_t asyncLeg;
-    spike_leg_t blockingLeg;
-    uint32_t stable;
-    uint32_t mismatch = 0;
-    uint32_t queuedReads;
-    uint32_t queuedBytes;
-
-    /* Byte identity on a config-space window: two blocking reads establish
-     * that the window is not changing under us, then the queued read of the
-     * same address and length must return the same bytes. The FIFO register
-     * itself cannot be used for this -- reading it pops the data. */
-    as7058_osal_configure(&s_osal_cfg_blocking);
-    (void)as7058_osal_read_registers(0x00, (uint16_t)sizeof(blockA), blockA);
-    (void)as7058_osal_read_registers(0x00, (uint16_t)sizeof(blockB), blockB);
-    stable = (0 == memcmp(blockA, blockB, sizeof(blockA))) ? 1u : 0u;
-
-    as7058_osal_configure(&s_osal_cfg_async);
-    (void)as7058_osal_read_registers(0x00, (uint16_t)sizeof(asyncC), asyncC);
-    for (size_t i = 0; i < sizeof(asyncC); i++) {
-        if (asyncC[i] != blockA[i]) {
-            mismatch++;
-        }
-    }
-
-    sensor_bus_reset_stats();
-    spike_run_leg(HKV_SENSOR_SPIKE_ASYNC_INTS, &asyncLeg);
-    queuedReads = sensor_bus_get_read_count();
-    queuedBytes = sensor_bus_get_byte_count();
-
-    as7058_osal_configure(&s_osal_cfg_blocking);
-    spike_run_leg(HKV_SENSOR_SPIKE_BLOCKING_INTS, &blockingLeg);
-    as7058_osal_configure(&s_osal_cfg_async);
-
-    hkv_log_begin("spike");
-    hkv_log_u32("ints", asyncLeg.ints);
-    hkv_log_u32("reads", queuedReads);
-    hkv_log_u32("bytes", queuedBytes);
-    hkv_log_u32("fifo_bytes", asyncLeg.fifoBytes);
-    hkv_log_u32("errs", sensor_bus_get_error_count());
-    hkv_log_u32("fallback", sensor_bus_get_fallback_count());
-    hkv_log_u32("fifo_ints", asyncLeg.fifoInts);
-    hkv_log_fx2("task_pct", (0u == asyncLeg.wallTicks)
-                                ? 0.0f
-                                : (100.0f * (float)asyncLeg.runTicks / (float)asyncLeg.wallTicks));
-    hkv_log_u32("blk_ints", blockingLeg.ints);
-    hkv_log_u32("blk_fifo_bytes", blockingLeg.fifoBytes);
-    hkv_log_u32("blk_fifo_ints", blockingLeg.fifoInts);
-    hkv_log_fx2("blk_task_pct", (0u == blockingLeg.wallTicks)
-                                    ? 0.0f
-                                    : (100.0f * (float)blockingLeg.runTicks / (float)blockingLeg.wallTicks));
-    hkv_log_u32("integ_len", (uint32_t)sizeof(blockA));
-    hkv_log_u32("integ_stable", stable);
-    hkv_log_u32("integ_mismatch", mismatch);
-    hkv_log_end();
-}
-
-#endif // HKV_SENSOR_ASYNC && HKV_SENSOR_ASYNC_SPIKE
-
 static void
 sensor_as7058_callback(err_code_t error,
                         const uint8_t *p_fifo_data,
@@ -426,11 +301,6 @@ sensor_as7058_callback(err_code_t error,
     if (error != ERR_SUCCESS || p_fifo_data == NULL || fifo_data_size == 0) {
         return;
     }
-
-#if HKV_SENSOR_ASYNC && HKV_SENSOR_ASYNC_SPIKE
-    g_spike_fifo_bytes += fifo_data_size;
-    g_spike_fifo_ints++;
-#endif
 
     // PPG1_SUB1 (Red PPG channel)
     sample_cnt = (uint16_t)(sizeof(samples) / sizeof(samples[0]));
@@ -529,19 +399,23 @@ sensor_init(sensor_context_t *ctx)
     s_as7058_transport.read_pin_state = as7058_osal_int_pin_read;
     result = nsx_as7058_spi_configure_osal(&s_as7058_transport);
 #else
+    /* Static: sensor_bus_init() retains the pointer for the life of the bus. */
+    static nsx_as7058_i2c_transport_t s_as7058_transport = {0};
+    as7058_osal_config_t osalCfg;
+
     s_as7058_transport.p_i2c_cfg = &nsxI2cCfg;
     s_as7058_transport.i2c_addr = AS7058_I2C_ADDR;
     s_as7058_transport.p_pin_ctx = NULL;
     s_as7058_transport.read_pin_state = as7058_osal_int_pin_read;
-    result = nsx_as7058_i2c_init_osal_config(&s_as7058_transport, &s_osal_cfg_blocking);
+    result = nsx_as7058_i2c_init_osal_config(&s_as7058_transport, &osalCfg);
     if (result == ERR_SUCCESS) {
-        s_osal_cfg_async = s_osal_cfg_blocking;
     #if HKV_SENSOR_ASYNC
+        /* Blocking read stays installed when the queue will not attach. */
         if (sensor_bus_init(&s_as7058_transport) == ERR_SUCCESS) {
-            s_osal_cfg_async.read_registers = sensor_bus_read_registers;
+            osalCfg.read_registers = sensor_bus_read_registers;
         }
     #endif
-        result = as7058_osal_configure(&s_osal_cfg_async);
+        result = as7058_osal_configure(&osalCfg);
     }
 #endif
     if (result != ERR_SUCCESS) {

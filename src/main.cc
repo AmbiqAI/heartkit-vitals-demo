@@ -1407,9 +1407,6 @@ void
 SensorIrqTask(void *pvParameters)
 {
     (void)pvParameters;
-#if HKV_SENSOR_ASYNC && HKV_SENSOR_ASYNC_SPIKE
-    sensor_spike_run();
-#endif
     while (true) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
         sensor_process_irq_events();

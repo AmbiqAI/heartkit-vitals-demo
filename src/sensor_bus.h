@@ -56,17 +56,6 @@ uint32_t sensor_bus_get_error_count(void);
 /** @brief Reads served by the blocking fallback rather than the queue. */
 uint32_t sensor_bus_get_fallback_count(void);
 
-#if HKV_SENSOR_ASYNC && HKV_SENSOR_ASYNC_SPIKE
-/** @brief Reads completed through the command queue. */
-uint32_t sensor_bus_get_read_count(void);
-/** @brief Bytes delivered through the command queue. */
-uint32_t sensor_bus_get_byte_count(void);
-/** @brief Core cycles spent inside the queued read, wait included. */
-uint32_t sensor_bus_get_busy_cycles(void);
-/** @brief Zero the counters above. */
-void sensor_bus_reset_stats(void);
-#endif
-
 #ifdef __cplusplus
 }
 #endif

@@ -34,7 +34,6 @@ option(HKV_TELEMETRY_ENABLE "Send TileIO signal and metric packets" ON)
 option(HKV_SENSOR_ASYNC "Read the AS7058 over the IOM command queue" ON)
 
 # Throwaway bring-up capture, not part of the shipped pipeline. See #65.
-option(HKV_SENSOR_ASYNC_SPIKE "Run the command-queue bring-up capture at start" OFF)
 
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/nsx/modules.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/nsx/nsx_app_bootstrap.cmake)
@@ -112,7 +111,6 @@ target_compile_definitions(heartkit-vitals-demo PRIVATE
     HKV_FW_VERSION="${HKV_FW_VERSION}"
     HKV_TELEMETRY_ENABLE=$<BOOL:${HKV_TELEMETRY_ENABLE}>
     HKV_SENSOR_ASYNC=$<BOOL:${HKV_SENSOR_ASYNC}>
-    HKV_SENSOR_ASYNC_SPIKE=$<BOOL:${HKV_SENSOR_ASYNC_SPIKE}>
 )
 
 target_link_libraries(heartkit-vitals-demo PRIVATE
