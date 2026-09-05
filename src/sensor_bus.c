@@ -72,6 +72,11 @@ static volatile uint32_t s_reset_count = 0;
  * Written only by the sensor task. See #67. */
 static volatile bool s_wedged = false;
 
+/* Half-rebuilt: the disable took but the enable did not, so the instance is
+ * down and the next attempt must only re-enable. Disabling again would be
+ * applied to an already-disabled instance. See #67. */
+static volatile bool s_disabled = false;
+
 static inline uint8_t
 sensor_bus_dev_addr(void)
 {
@@ -156,12 +161,16 @@ sensor_bus_wait_idle(void)
 static bool
 sensor_bus_recover(void)
 {
-    if (!sensor_bus_is_idle() || AM_HAL_STATUS_SUCCESS != am_hal_iom_disable(s_iom_handle)) {
-        return false;
+    if (!s_disabled) {
+        if (!sensor_bus_is_idle() || AM_HAL_STATUS_SUCCESS != am_hal_iom_disable(s_iom_handle)) {
+            return false;
+        }
+        s_disabled = true;
     }
     if (AM_HAL_STATUS_SUCCESS != am_hal_iom_enable(s_iom_handle)) {
         return false;
     }
+    s_disabled = false;
 
     /* The rebuilt queue cannot deliver the orphaned completion, but the
      * semaphore may still carry it. */
@@ -247,8 +256,9 @@ sensor_bus_read_registers(void *p_ctx, uint8_t address, uint16_t number, uint8_t
 
     /* Ahead of the fallback check: a wedged bus must not take a blocking
      * transfer either, and recovery touches the queue, so it is left to task
-     * context. The chiplib sees the error and retries on its next read, which
-     * is where the rebuild is attempted again. See #67. */
+     * context. A wedged bus stops the measurement and with it the reads, so the
+     * rebuild cannot be left to the next read; sensor_bus_recover_if_wedged()
+     * is what drives it from then on. See #67. */
     if (s_wedged) {
         if (pdFALSE != xPortIsInsideInterrupt() || !sensor_bus_recover()) {
             s_error_count++;
@@ -318,6 +328,18 @@ sensor_bus_read_registers(void *p_ctx, uint8_t address, uint16_t number, uint8_t
     return result;
 }
 
+bool
+sensor_bus_recover_if_wedged(void)
+{
+    if (!s_wedged) {
+        return true;
+    }
+    if (pdFALSE != xPortIsInsideInterrupt()) {
+        return false;
+    }
+    return sensor_bus_recover();
+}
+
 uint32_t
 sensor_bus_get_error_count(void)
 {
@@ -353,6 +375,12 @@ sensor_bus_read_registers(void *p_ctx, uint8_t address, uint16_t number, uint8_t
     (void)number;
     (void)p_values;
     return ERR_NOT_SUPPORTED;
+}
+
+bool
+sensor_bus_recover_if_wedged(void)
+{
+    return true;
 }
 
 uint32_t

@@ -50,6 +50,18 @@ err_code_t sensor_bus_init(nsx_as7058_i2c_transport_t *p_transport);
  */
 err_code_t sensor_bus_read_registers(void *p_ctx, uint8_t address, uint16_t number, uint8_t *p_values);
 
+/**
+ * @brief Rebuild the command queue if a read left the bus unusable.
+ *
+ * Task context only. A wedged bus refuses every read, and the chiplib's own
+ * restart path issues none, so the caller driving the measurement restart has
+ * to attempt the rebuild itself before it tries.
+ *
+ * @return true when the bus is usable (nothing to do, or the rebuild took),
+ *         false while the IOM still has the transfer. See #67.
+ */
+bool sensor_bus_recover_if_wedged(void);
+
 /** @brief Reads that returned a transfer error or timed out. */
 uint32_t sensor_bus_get_error_count(void);
 

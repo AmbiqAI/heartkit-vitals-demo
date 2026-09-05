@@ -114,12 +114,20 @@ reports completion, instead of polling the IOM FIFO in task context. Set
 `-DHKV_SENSOR_ASYNC=OFF` to fall back to the nsx-i2c blocking read. The `sensor`
 line's `bus_err` and `bus_sync` counters report transfer failures and reads
 served by the blocking fallback. If a read times out and the IOM still has the
-transfer, no further transfer is issued on it: reads fail until the IOM reports
-itself idle, at which point the command queue is rebuilt and `bus_reset`
-increments. The chiplib stops the measurement whenever a read fails, so the
-sensor task restarts it (at most one attempt per second, abandoned after a few
-consecutive failures) and counts each restart as `sens_restart`: a `bus_err`
-that leaves `sens_restart` flat means the sample stream did not come back.
+transfer, the bus is marked wedged: every queued read is refused from then on,
+while a chiplib write still goes down the blocking path and fails fast in the
+HAL. The rebuild is driven from the sensor task rather than from the next read,
+since a wedged bus stops the sample stream and with it the reads: once the IOM
+reports itself idle the command queue is rebuilt and `bus_reset` increments.
+The chiplib stops the measurement whenever a read fails, so the sensor task
+restarts it, at most one attempt per second and only over a bus that is no
+longer wedged. After a few consecutive failures the attempts drop to one per
+long backoff (`AS7058_RESTART_BACKOFF_MS`) rather than stopping, so a sensor
+that does come back is picked up without a reset. Each restart counts as
+`sens_restart`, and the three counters read as a sequence: `bus_err` rises
+first, `bus_reset` follows when the queue is rebuilt, and `sens_restart`
+follows when the measurement is running again. A `bus_err` that leaves
+`sens_restart` flat means the sample stream did not come back.
 
 The read path lives in the app rather than in the nsx modules: those are
 vendored by `nsx sync` and hash-locked in `nsx.lock`, and the AS7058 OSAL takes

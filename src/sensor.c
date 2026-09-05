@@ -78,11 +78,10 @@ static sensor_context_t *g_sensorCtx = NULL;
 
 /* Restart bookkeeping, touched only from the sensor task (the chiplib callback
  * runs there too, under as7058_osal_interrupt_callback). See #67. */
-static bool g_restart_pending = false;
-static bool g_restart_abandoned = false;
-static uint32_t g_restart_count = 0;
-static uint32_t g_restart_failures = 0;
-static TickType_t g_restart_due_tick = 0;
+static volatile bool g_restart_pending = false;
+static volatile uint32_t g_restart_count = 0;
+static volatile uint32_t g_restart_failures = 0;
+static volatile TickType_t g_restart_due_tick = 0;
 
 /* AS7058 INT GPIO ISR-to-ISR interval tracking, exposed via ReportTask's
  * once/sec breadcrumb: confirms whether the sensor's INT line is firing at
@@ -309,8 +308,10 @@ sensor_as7058_callback(err_code_t error,
     if (error != ERR_SUCCESS) {
         /* as7058_callback_t contract: a non-success error means the chiplib is
          * stopping the measurement. Nothing else restarts it, so latch the
-         * request and let the task drive it once the bus has settled. */
-        if (!g_restart_abandoned) {
+         * request and let the task drive it once the bus has settled. A later
+         * error must not re-arm a request that is already waiting: that would
+         * push the due tick out and defeat the backoff. */
+        if (!g_restart_pending) {
             g_restart_pending = true;
             g_restart_due_tick = xTaskGetTickCount() + pdMS_TO_TICKS(AS7058_RESTART_INTERVAL_MS);
         }
@@ -585,12 +586,25 @@ sensor_stop(void)
     return result;
 }
 
+/* Attempts are spaced by the plain interval until the failure budget is spent,
+ * then by the long backoff: a sensor that is not coming back costs one attempt
+ * per backoff instead of latching the restart off for good. See #67. */
+static TickType_t
+sensor_restart_next_due(void)
+{
+    uint32_t ms = (g_restart_failures >= AS7058_RESTART_MAX_FAILURES) ? AS7058_RESTART_BACKOFF_MS
+                                                                     : AS7058_RESTART_INTERVAL_MS;
+    return xTaskGetTickCount() + pdMS_TO_TICKS(ms);
+}
+
 void
 sensor_service_recovery(void)
 {
     err_code_t result;
+    uint32_t rebuilds;
+    bool spent;
 
-    if (!g_restart_pending || g_restart_abandoned) {
+    if (!g_restart_pending) {
         return;
     }
     if ((int32_t)(xTaskGetTickCount() - g_restart_due_tick) < 0) {
@@ -598,7 +612,18 @@ sensor_service_recovery(void)
     }
     /* Spaced before the attempt, not after, so a slow attempt cannot turn into
      * a tight retry loop on a bus that is still failing. */
-    g_restart_due_tick = xTaskGetTickCount() + pdMS_TO_TICKS(AS7058_RESTART_INTERVAL_MS);
+    g_restart_due_tick = sensor_restart_next_due();
+
+    /* A wedged bus refuses every read and the chiplib's restart path issues
+     * none, so the rebuild has to be driven from here. Nothing can be attempted
+     * over a bus that is still wedged, so it does not count as an attempt. */
+    rebuilds = sensor_bus_get_reset_count();
+    if (!sensor_bus_recover_if_wedged()) {
+        return;
+    }
+    if (sensor_bus_get_reset_count() != rebuilds) {
+        g_restart_failures = 0;
+    }
 
     /* The stop the chiplib ran on the failing bus may not have taken, and
      * as7058_start_measurement rejects a start unless the library is back in
@@ -606,20 +631,24 @@ sensor_service_recovery(void)
      * restart is stop + start rather than a full reconfigure. */
     (void)as7058_stop_measurement();
 
+    spent = (g_restart_failures >= AS7058_RESTART_MAX_FAILURES);
     result = sensor_start();
     if (result == ERR_SUCCESS) {
         g_restart_pending = false;
         g_restart_failures = 0;
         g_restart_count++;
+        if (spent) {
+            nsx_printf("AS7058 measurement restart recovered on the backoff retry.\n");
+        }
         return;
     }
 
     g_restart_failures++;
-    if (g_restart_failures >= AS7058_RESTART_MAX_FAILURES) {
-        g_restart_abandoned = true;
-        g_restart_pending = false;
-        nsx_printf("AS7058 measurement restart abandoned after %lu attempts.\n", (uint32_t)g_restart_failures);
+    if (g_restart_failures == AS7058_RESTART_MAX_FAILURES) {
+        nsx_printf("AS7058 measurement restart abandoned after %lu attempts; retrying on a long backoff.\n",
+                   (uint32_t)g_restart_failures);
     }
+    g_restart_due_tick = sensor_restart_next_due();
 }
 
 uint32_t
