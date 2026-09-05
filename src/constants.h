@@ -279,10 +279,24 @@ extern "C" {
 #define HKV_SENSOR_BUS_CQ_WORDS (256)
 #endif
 
+/* Largest single queued read, in bytes. Must track AS7058_FIFO_DATA_BUFFER_SIZE;
+ * constants.h stays free of chiplib includes, so sensor_bus.c asserts the two
+ * agree. See #65. */
+#ifndef HKV_SENSOR_BUS_MAX_READ_BYTES
+#define HKV_SENSOR_BUS_MAX_READ_BYTES (1536)
+#endif
+
+/* Wire time for that read: 9 bit times per byte (8 data + ack) plus four byte
+ * times of addressing overhead (start, write address, register, repeated start
+ * and read address). See #65. */
+#define HKV_SENSOR_BUS_XFER_MS (((HKV_SENSOR_BUS_MAX_READ_BYTES + 4u) * 9u * 1000u) / AS7058_I2C_SPEED_HZ)
+
 /* A queued read that never completes must not park the sensor task forever;
- * the caller sees a transfer error and the chiplib stops the measurement. */
+ * the caller sees a transfer error and the chiplib stops the measurement.
+ * 2x the wire time covers clock stretching and scheduler jitter; the floor
+ * keeps a short read on a fast bus from timing out on tick granularity. */
 #ifndef HKV_SENSOR_BUS_TIMEOUT_MS
-#define HKV_SENSOR_BUS_TIMEOUT_MS (50)
+#define HKV_SENSOR_BUS_TIMEOUT_MS ((2u * HKV_SENSOR_BUS_XFER_MS) > 20u ? (2u * HKV_SENSOR_BUS_XFER_MS) : 20u)
 #endif
 
 #if AS7058_BOARD_PROFILE == AS7058_PROFILE_CLICK_I2C

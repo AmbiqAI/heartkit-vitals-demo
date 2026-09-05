@@ -45,11 +45,23 @@ static uint32_t s_cq_buf[HKV_SENSOR_BUS_CQ_WORDS];
  * non-word-multiple length. */
 AM_SHARED_RW __attribute__((aligned(32))) static uint8_t s_rx_buf[AS7058_FIFO_DATA_BUFFER_SIZE + 32u];
 
+_Static_assert(HKV_SENSOR_BUS_MAX_READ_BYTES == AS7058_FIFO_DATA_BUFFER_SIZE,
+               "HKV_SENSOR_BUS_TIMEOUT_MS is derived from the FIFO size; keep the two in step");
+
 static nsx_as7058_i2c_transport_t *s_transport = NULL;
 static void *s_iom_handle = NULL;
 static SemaphoreHandle_t s_done_sem = NULL;
 static volatile uint32_t s_xfer_status = 0;
 static bool s_ready = false;
+
+/* Stamped into the callback context of each queued transfer and bumped when the
+ * caller stops waiting, so a completion can be matched to the read that asked
+ * for it. Written only by the sensor task, read by the ISR. See #65. */
+static volatile uint32_t s_xfer_gen = 0;
+
+/* Bounded spin used to confirm the IOM has stopped writing s_rx_buf, in 10 us
+ * units of the transfer timeout. */
+    #define SENSOR_BUS_IDLE_SPINS ((uint32_t)HKV_SENSOR_BUS_TIMEOUT_MS * 100u)
 
 static volatile uint32_t s_error_count = 0;
 static volatile uint32_t s_fallback_count = 0;
@@ -75,10 +87,18 @@ sensor_bus_complete(void *p_ctx, uint32_t status)
 {
     BaseType_t higherPriorityTaskWoken = pdFALSE;
     am_hal_cachectrl_range_t range;
-    (void)p_ctx;
+
+    /* A transfer whose caller already gave up must not report: its status and
+     * its buffer belong to nobody, and satisfying the semaphore here would hand
+     * the next read a mid-DMA buffer as a success. See #65. */
+    if ((uint32_t)(uintptr_t)p_ctx != s_xfer_gen) {
+        return;
+    }
 
     s_xfer_status = status;
 
+    /* Invalidate without a clean is correct: after init s_rx_buf is written
+     * only by IOM DMA, so no dirty line for it can exist in the cache. */
     range.ui32StartAddr = (uint32_t)s_rx_buf;
     range.ui32Size = (uint32_t)sizeof(s_rx_buf);
     am_hal_cachectrl_dcache_invalidate(&range, false);
@@ -87,16 +107,40 @@ sensor_bus_complete(void *p_ctx, uint32_t status)
     portYIELD_FROM_ISR(higherPriorityTaskWoken);
 }
 
+/* After a timeout the transfer is still queued and may still be writing
+ * s_rx_buf, which the next read reuses; hold the caller until the IOM reports
+ * no work. See #65. */
+static void
+sensor_bus_wait_idle(void)
+{
+    am_hal_iom_status_t iom_status;
+    uint32_t spins;
+
+    for (spins = 0; spins < SENSOR_BUS_IDLE_SPINS; spins++) {
+        if (AM_HAL_STATUS_SUCCESS != am_hal_iom_status_get(s_iom_handle, &iom_status)) {
+            return;
+        }
+        if (iom_status.bStatIdle && 0u == iom_status.ui32NumPendTransactions) {
+            return;
+        }
+        am_hal_delay_us(10);
+    }
+}
+
 void
 am_iomaster1_isr(void)
 {
     uint32_t status;
 
-    if (AM_HAL_STATUS_SUCCESS == am_hal_iom_interrupt_status_get(s_iom_handle, true, &status)) {
-        if (status) {
-            am_hal_iom_interrupt_clear(s_iom_handle, status);
-            am_hal_iom_interrupt_service(s_iom_handle, status);
-        }
+    if (AM_HAL_STATUS_SUCCESS != am_hal_iom_interrupt_status_get(s_iom_handle, true, &status)) {
+        return;
+    }
+
+    /* Clear on every exit, including the zero-status one: a status left set
+     * re-enters the ISR until it is acknowledged. */
+    am_hal_iom_interrupt_clear(s_iom_handle, status);
+    if (status) {
+        am_hal_iom_interrupt_service(s_iom_handle, status);
     }
 }
 
@@ -121,8 +165,16 @@ sensor_bus_init(nsx_as7058_i2c_transport_t *p_transport)
     p_cfg->sIomCfg.pNBTxnBuf = s_cq_buf;
     p_cfg->sIomCfg.ui32NBTxnBufLength = (uint32_t)(sizeof(s_cq_buf) / sizeof(s_cq_buf[0]));
 
-    if (am_hal_iom_disable(s_iom_handle) || am_hal_iom_configure(s_iom_handle, &p_cfg->sIomCfg) ||
-        am_hal_iom_enable(s_iom_handle)) {
+    if (AM_HAL_STATUS_SUCCESS != am_hal_iom_disable(s_iom_handle)) {
+        nsx_printf("sensor_bus: command queue attach failed, staying on the blocking path\n");
+        return ERR_SYSTEM_CONFIG;
+    }
+
+    if (AM_HAL_STATUS_SUCCESS != am_hal_iom_configure(s_iom_handle, &p_cfg->sIomCfg) ||
+        AM_HAL_STATUS_SUCCESS != am_hal_iom_enable(s_iom_handle)) {
+        /* The blocking fallback still needs the IOM up, and the disable above
+         * took it down; a failed configure would otherwise leave it dead. */
+        (void)am_hal_iom_enable(s_iom_handle);
         nsx_printf("sensor_bus: command queue attach failed, staying on the blocking path\n");
         return ERR_SYSTEM_CONFIG;
     }
@@ -144,14 +196,17 @@ sensor_bus_read_registers(void *p_ctx, uint8_t address, uint16_t number, uint8_t
 {
     am_hal_iom_transfer_t txn;
     err_code_t result;
+    uint32_t gen;
 
     if (NULL == p_ctx || NULL == p_values) {
         return ERR_POINTER;
     }
 
     /* Register access before the scheduler starts (probe, profile apply) and
-     * anything larger than the staging buffer stays on the blocking path. */
-    if (!s_ready || 0u == number || number > sizeof(s_rx_buf) ||
+     * anything larger than the staging buffer stays on the blocking path. The
+     * bound is the payload size, not sizeof(s_rx_buf): the tail padding is
+     * reserved for the DMA write past a non-word-multiple length. */
+    if (!s_ready || 0u == number || number > AS7058_FIFO_DATA_BUFFER_SIZE ||
         taskSCHEDULER_RUNNING != xTaskGetSchedulerState() || pdFALSE != xPortIsInsideInterrupt()) {
         s_fallback_count++;
         return sensor_bus_read_blocking(address, number, p_values);
@@ -174,16 +229,23 @@ sensor_bus_read_registers(void *p_ctx, uint8_t address, uint16_t number, uint8_t
     txn.bContinue = false;
     txn.uPeerInfo.ui32I2CDevAddr = sensor_bus_dev_addr();
 
+    /* Drops a completion that landed after a previous timeout. */
     (void)xSemaphoreTake(s_done_sem, 0);
     s_xfer_status = AM_HAL_STATUS_SUCCESS;
+    gen = ++s_xfer_gen;
 
-    if (AM_HAL_STATUS_SUCCESS != am_hal_iom_nonblocking_transfer(s_iom_handle, &txn, sensor_bus_complete, NULL)) {
+    if (AM_HAL_STATUS_SUCCESS !=
+        am_hal_iom_nonblocking_transfer(s_iom_handle, &txn, sensor_bus_complete, (void *)(uintptr_t)gen)) {
         s_error_count++;
         s_fallback_count++;
         return sensor_bus_read_blocking(address, number, p_values);
     }
 
     if (pdTRUE != xSemaphoreTake(s_done_sem, pdMS_TO_TICKS(HKV_SENSOR_BUS_TIMEOUT_MS))) {
+        /* Orphan the completion first, then let the DMA finish, so the transfer
+         * can neither report nor still be writing s_rx_buf when it is reused. */
+        s_xfer_gen++;
+        sensor_bus_wait_idle();
         s_error_count++;
         return ERR_DATA_TRANSFER;
     }
