@@ -1,3 +1,8 @@
+<!--
+SPDX-License-Identifier: BSD-3-Clause
+Copyright (c) 2026, Ambiq
+-->
+
 # Bench tools
 
 Host-side tools for capturing and reading firmware telemetry over SWO.

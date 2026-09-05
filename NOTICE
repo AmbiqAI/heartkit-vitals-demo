@@ -12,8 +12,10 @@ is not part of this repository. Building the firmware from source therefore
 requires access to the private `nsx-as7058` module referenced by `nsx.lock`.
 
 Hand-written Ambiq source files under `config/`, `scripts/`, `src/`, `tests/`
-and `tools/` carry SPDX headers. The files under `src/generated/` do not: they
-are produced by `tools/as7058_json_to_profile.py` from ams-OSRAM AS7058
+and `tools/` carry SPDX headers, as does the `nsx.yml` module manifest at the
+repository root; the exception is `tools/release/templates/`, whose files are
+rendered into customer drops. The files under `src/generated/` do not: they are
+produced by `tools/as7058_json_to_profile.py` from ams-OSRAM AS7058
 configuration presets, are not Ambiq-authored, and carry no header; see
 THIRD-PARTY-NOTICES.md for the ams-OSRAM terms that accompany the AS7058
 material in this repository.
