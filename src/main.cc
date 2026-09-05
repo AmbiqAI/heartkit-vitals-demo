@@ -2339,6 +2339,10 @@ report_extra_sensor(void)
      * flat. See #65. */
     hkv_log_u32("bus_err", sensor_bus_get_error_count());
     hkv_log_u32("bus_sync", sensor_bus_get_fallback_count());
+    /* `bus_reset` counts IOM rebuilds after a read timed out with its transfer
+     * still outstanding; each one costs the reads taken until the IOM went
+     * quiet. See #67. */
+    hkv_log_u32("bus_reset", sensor_bus_get_reset_count());
     sensor_reset_as7058_isr_interval_stats();
 }
 

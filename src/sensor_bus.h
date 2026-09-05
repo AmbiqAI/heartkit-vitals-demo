@@ -56,6 +56,14 @@ uint32_t sensor_bus_get_error_count(void);
 /** @brief Reads served by the blocking fallback rather than the queue. */
 uint32_t sensor_bus_get_fallback_count(void);
 
+/**
+ * @brief Command queue rebuilds after a read left a transfer outstanding.
+ *
+ * Reads fail while the bus waits for the IOM to go quiet, so a rising count
+ * pairs with a rising error count. See #67.
+ */
+uint32_t sensor_bus_get_reset_count(void);
+
 #ifdef __cplusplus
 }
 #endif

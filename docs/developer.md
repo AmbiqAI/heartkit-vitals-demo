@@ -108,7 +108,10 @@ queues the transfer and the sensor task blocks on a semaphore until the IOM ISR
 reports completion, instead of polling the IOM FIFO in task context. Set
 `-DHKV_SENSOR_ASYNC=OFF` to fall back to the nsx-i2c blocking read. The `sensor`
 line's `bus_err` and `bus_sync` counters report transfer failures and reads
-served by the blocking fallback.
+served by the blocking fallback. If a read times out and the IOM still has the
+transfer, no further transfer is issued on it: reads fail until the IOM reports
+itself idle, at which point the command queue is rebuilt and `bus_reset`
+increments.
 
 The read path lives in the app rather than in the nsx modules: those are
 vendored by `nsx sync` and hash-locked in `nsx.lock`, and the AS7058 OSAL takes

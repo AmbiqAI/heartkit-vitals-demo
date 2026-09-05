@@ -65,6 +65,12 @@ static volatile uint32_t s_xfer_gen = 0;
 
 static volatile uint32_t s_error_count = 0;
 static volatile uint32_t s_fallback_count = 0;
+static volatile uint32_t s_reset_count = 0;
+
+/* Set when a timed-out transfer is still outstanding after the idle wait. No
+ * transfer, queued or blocking, may be issued on the IOM until it is rebuilt.
+ * Written only by the sensor task. See #67. */
+static volatile bool s_wedged = false;
 
 static inline uint8_t
 sensor_bus_dev_addr(void)
@@ -107,24 +113,63 @@ sensor_bus_complete(void *p_ctx, uint32_t status)
     portYIELD_FROM_ISR(higherPriorityTaskWoken);
 }
 
+/* Queue empty, module idle and no DMA in flight. DMATIP is the bit the HAL's
+ * own CQ pause polls to decide a transfer has stopped moving data
+ * (am_hal_iom.c iom_cq_pause), so it is what says s_rx_buf is nobody's. */
+static bool
+sensor_bus_is_idle(void)
+{
+    am_hal_iom_status_t iom_status;
+
+    if (AM_HAL_STATUS_SUCCESS != am_hal_iom_status_get(s_iom_handle, &iom_status)) {
+        return false;
+    }
+    return iom_status.bStatIdle && 0u == iom_status.ui32NumPendTransactions &&
+           0u == (iom_status.ui32DmaStat & IOM0_DMASTAT_DMATIP_Msk);
+}
+
 /* After a timeout the transfer is still queued and may still be writing
  * s_rx_buf, which the next read reuses; hold the caller until the IOM reports
  * no work. See #65. */
-static void
+static bool
 sensor_bus_wait_idle(void)
 {
-    am_hal_iom_status_t iom_status;
     uint32_t spins;
 
     for (spins = 0; spins < SENSOR_BUS_IDLE_SPINS; spins++) {
-        if (AM_HAL_STATUS_SUCCESS != am_hal_iom_status_get(s_iom_handle, &iom_status)) {
-            return;
-        }
-        if (iom_status.bStatIdle && 0u == iom_status.ui32NumPendTransactions) {
-            return;
+        if (sensor_bus_is_idle()) {
+            return true;
         }
         vTaskDelay(pdMS_TO_TICKS(1));
     }
+    return false;
+}
+
+/* Rebuild the command queue after a wedged read. Gated on the idle check
+ * because the HAL offers no way to take the bus back from a live transfer:
+ * am_hal_iom_disable() returns AM_HAL_STATUS_IN_USE while the queue holds
+ * pending transactions and does not abort a DMA that is already moving
+ * (am_hal_iom.c, and the abort used internally on error is not exported).
+ * Once the IOM reports itself quiet, disable/enable is a full rebuild: the
+ * enable path re-inits the queue and zeroes the pending counters. Until then
+ * the caller keeps failing reads rather than issuing one. See #67. */
+static bool
+sensor_bus_recover(void)
+{
+    if (!sensor_bus_is_idle() || AM_HAL_STATUS_SUCCESS != am_hal_iom_disable(s_iom_handle)) {
+        return false;
+    }
+    if (AM_HAL_STATUS_SUCCESS != am_hal_iom_enable(s_iom_handle)) {
+        return false;
+    }
+
+    /* The rebuilt queue cannot deliver the orphaned completion, but the
+     * semaphore may still carry it. */
+    (void)xSemaphoreTake(s_done_sem, 0);
+    s_xfer_gen++;
+    s_reset_count++;
+    s_wedged = false;
+    return true;
 }
 
 void
@@ -200,6 +245,17 @@ sensor_bus_read_registers(void *p_ctx, uint8_t address, uint16_t number, uint8_t
         return ERR_POINTER;
     }
 
+    /* Ahead of the fallback check: a wedged bus must not take a blocking
+     * transfer either, and recovery touches the queue, so it is left to task
+     * context. The chiplib sees the error and retries on its next read, which
+     * is where the rebuild is attempted again. See #67. */
+    if (s_wedged) {
+        if (pdFALSE != xPortIsInsideInterrupt() || !sensor_bus_recover()) {
+            s_error_count++;
+            return ERR_DATA_TRANSFER;
+        }
+    }
+
     /* Register access before the scheduler starts (probe, profile apply) and
      * anything larger than the staging buffer stays on the blocking path. The
      * bound is the payload size, not sizeof(s_rx_buf): the tail padding is
@@ -243,7 +299,10 @@ sensor_bus_read_registers(void *p_ctx, uint8_t address, uint16_t number, uint8_t
         /* Orphan the completion first, then let the DMA finish, so the transfer
          * can neither report nor still be writing s_rx_buf when it is reused. */
         s_xfer_gen++;
-        sensor_bus_wait_idle();
+        if (!sensor_bus_wait_idle()) {
+            s_wedged = true;
+            (void)sensor_bus_recover();
+        }
         s_error_count++;
         return ERR_DATA_TRANSFER;
     }
@@ -269,6 +328,12 @@ uint32_t
 sensor_bus_get_fallback_count(void)
 {
     return s_fallback_count;
+}
+
+uint32_t
+sensor_bus_get_reset_count(void)
+{
+    return s_reset_count;
 }
 
 #else // HKV_SENSOR_ASYNC
@@ -298,6 +363,12 @@ sensor_bus_get_error_count(void)
 
 uint32_t
 sensor_bus_get_fallback_count(void)
+{
+    return 0;
+}
+
+uint32_t
+sensor_bus_get_reset_count(void)
 {
     return 0;
 }
