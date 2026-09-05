@@ -211,8 +211,13 @@ typedef enum {
     X(HKV_CNT_TIO_CPU_PACKFAIL,  "tio",    "cpu_packfail", HKV_EMIT_TOTAL)                         \
     /* --- tiousb: USB delivery health ------------------------------------- */                    \
     /* Per USB bucket, in bucket order (0=ECG, 1=PPG, 2=CPU, 3=UIO) with      */                   \
-    /* stride 2 (retry, drop). retry>0 with drop==0 is a transient FIFO-full  */                   \
-    /* window every packet survived; drop>0 is real USB-side loss.            */                   \
+    /* stride 2 (retry, drop). retry counts one BUSY send attempt; a held     */                   \
+    /* packet is retried until it lands, so retries are not loss.             */                   \
+    /* drop is a packet USB gave up on: host disconnect, a terminal send      */                   \
+    /* status, or a TIO_TX_USB_HOLD_WATERMARK release (see tio_tx_sm.h);      */                   \
+    /* queue-full loss is tio/qdrop. stall counts once per held packet        */                   \
+    /* that crosses the jitter budget, not once per stall episode, and        */                   \
+    /* clears on the next successful send. See #56.                           */                   \
     X(HKV_CNT_USB_ECG_RETRY,     "tiousb", "ecg_retry",    HKV_EMIT_TOTAL)                         \
     X(HKV_CNT_USB_ECG_DROP,      "tiousb", "ecg_drop",     HKV_EMIT_TOTAL)                         \
     X(HKV_CNT_USB_PPG_RETRY,     "tiousb", "ppg_retry",    HKV_EMIT_TOTAL)                         \

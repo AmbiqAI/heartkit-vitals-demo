@@ -52,28 +52,29 @@ extern uint32_t SystemCoreClock;
 #define configMINIMAL_SECURE_STACK_SIZE                 ( 1024 )
 #define configMAX_TASK_NAME_LEN                         ( 16 )
 /* Bumped from the phase-1 scaffold default of 32 KiB: phase 6 adds
- * CpuProcessTask + TioProcessTask (2 more task stacks) plus a 32-entry x
- * 256B TileIO TX queue (8 KiB) sized to match legacy's queue depth --
- * heap_4 must cover all task stacks + TCBs + the queue's own storage,
- * which alone exceeds 32 KiB. Sized with headroom on top of the ~41 KiB
- * hard minimum (6 task stacks ~32 KiB + TIO queue 8 KiB + TCB/idle/timer
- * overhead ~3 KiB). Malloc-failed-hook fires immediately at boot
+ * CpuProcessTask + TioProcessTask (2 more task stacks) plus a 48-entry x
+ * 256B TileIO TX queue (12 KiB, see TIO_TX_QUEUE_DEPTH in constants.h) -- heap_4
+ * must cover all task stacks + TCBs + the queue's own storage, which alone
+ * exceeds 32 KiB. Sized with headroom on top of the ~45 KiB
+ * hard minimum (6 task stacks ~32 KiB + TIO queue 12 KiB + TCB/idle/timer
+ * overhead ~3 KiB). The 4 KiB the queue gained in #56 was added here too,
+ * so the headroom above that minimum is unchanged. Malloc-failed-hook fires immediately at boot
  * (xQueueCreate for the TIO queue) if this is too small -- confirmed via
  * SWO (neuralspotx PR #175 / nsx 0.7.4) after this heap bump.
  *
  * apollo510b_evb only: TileIO BLE (ble_bringup.c) adds a 7th task
  * (BleRadioTask, 4096-word/16 KiB stack -- matches the ble_webble
- * reference example's radio task sizing) on top of the 48 KiB baseline
+ * reference example's radio task sizing) on top of the 52 KiB baseline
  * above, which is otherwise sufficient for the other 2 boards (no BLE
  * task there -- ble_bringup.c is compiled out, see CMakeLists.txt).
- * 48 KiB + ~16 KiB task stack + TCB overhead rounds up to 72 KiB with
+ * 52 KiB + ~16 KiB task stack + TCB overhead rounds up to 76 KiB with
  * headroom. Reproduced + confirmed via SWO: without this bump,
  * xTaskCreate(BleRadioTask, ...) exhausts the heap and
  * vApplicationMallocFailedHook() fires at boot on apollo510b_evb. */
 #if defined(AM_PART_APOLLO510B)
-#define configTOTAL_HEAP_SIZE                           ( ( size_t ) ( 72 * 1024 ) )
+#define configTOTAL_HEAP_SIZE                           ( ( size_t ) ( 76 * 1024 ) )
 #else
-#define configTOTAL_HEAP_SIZE                           ( ( size_t ) ( 48 * 1024 ) )
+#define configTOTAL_HEAP_SIZE                           ( ( size_t ) ( 52 * 1024 ) )
 #endif
 
 /* Phase 1 uses a plain SysTick tick; tickless idle is disabled. */
