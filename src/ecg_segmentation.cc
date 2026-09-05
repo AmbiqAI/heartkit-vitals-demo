@@ -11,6 +11,7 @@
  *
  */
 #include <arm_math.h>
+#include <cmath>
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
@@ -180,7 +181,7 @@ ecg_segmentation_extract_fiducials(uint16_t *segMask, float32_t *data)
     uint16_t prevSegVal = segMask[0] & SIG_MASK_SEG_MASK;
     uint16_t segVal = 0;
     int startIdx = 0;
-    float32_t maxVal = abs(data[0]);
+    float32_t maxVal = std::abs(data[0]);
     int maxIdx = 0;
     for (size_t i = 1; i < ECG_SEG_WINDOW_LEN; i++)
     {
@@ -189,7 +190,7 @@ ecg_segmentation_extract_fiducials(uint16_t *segMask, float32_t *data)
         if ((segVal != 0) && (prevSegVal == 0))
         {
             startIdx = i;
-            maxVal = abs(data[i]);
+            maxVal = std::abs(data[i]);
             maxIdx = i;
         }
         // If end of segment, mark fiducial
@@ -205,9 +206,9 @@ ecg_segmentation_extract_fiducials(uint16_t *segMask, float32_t *data)
         }
         else if (startIdx >= 0)
         {
-            if (abs(data[i]) > maxVal)
+            if (std::abs(data[i]) > maxVal)
             {
-                maxVal = abs(data[i]);
+                maxVal = std::abs(data[i]);
                 maxIdx = i;
             }
         }

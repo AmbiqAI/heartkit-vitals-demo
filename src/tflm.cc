@@ -24,7 +24,8 @@ static TflmProfiler *profiler = nullptr;
 uint32_t
 tflm_init() {
 
-    tflite::MicroErrorReporter micro_error_reporter;
+    // Must outlive tflm_init(): every model context keeps this pointer. See #52
+    static tflite::MicroErrorReporter micro_error_reporter;
     errorReporter = &micro_error_reporter;
 
     tflite::InitializeTarget();
