@@ -384,7 +384,8 @@ extern "C" {
 
 #define ECG_DEN_MODEL_SIZE_KB (140)
 #define ECG_DEN_THRESHOLD (0.5)
-#define ECG_DEN_WINDOW_LEN (250)
+// 256 matches the deployed model's time axis, so the window carries no padded tail. See #36.
+#define ECG_DEN_WINDOW_LEN (256)
 #define ECG_DEN_PAD_LEN (25)
 #define ECG_DEN_VALID_LEN (ECG_DEN_WINDOW_LEN - 2 * ECG_DEN_PAD_LEN)
 #define ECG_DEN_BUF_LEN (2 * ECG_DEN_WINDOW_LEN)
@@ -396,7 +397,8 @@ extern "C" {
 #define ECG_SEG_MODEL_SIZE_KB (145)
 #define ECG_SEG_THRESHOLD (0.5)
 #define ECG_SEG_NUM_CLASS (4) // 2
-#define ECG_SEG_WINDOW_LEN (250)
+// 256 matches the deployed model's time axis, so the window carries no padded tail. See #36.
+#define ECG_SEG_WINDOW_LEN (256)
 #define ECG_SEG_PAD_LEN (25)
 #define ECG_SEG_VALID_LEN (ECG_SEG_WINDOW_LEN - 2 * ECG_SEG_PAD_LEN)
 #define ECG_SEG_BUF_LEN (2 * ECG_SEG_WINDOW_LEN)
@@ -832,8 +834,8 @@ extern "C" {
 #define TIO_TX_SLIP_SAMPLES (30)
 
 /* ECG structural block: the segmentation branch is the sole producer of the
- * ECG TX taps and it pushes ECG_SEG_VALID_LEN (200) samples at once, once per
- * 2 s (main.cc, ECG SEGMENTATION). 200 + 10 + 40 + 30 = 280. */
+ * ECG TX taps and it pushes one whole ECG_SEG_VALID_LEN batch per cycle
+ * (main.cc, ECG SEGMENTATION). See #36. */
 #define TIO_ECG_TX_BLOCK_SAMPLES (ECG_SEG_VALID_LEN)
 #define TIO_ECG_TX_HIGH_WATER                                                                                          \
     (TIO_ECG_TX_BLOCK_SAMPLES + TIO_ECG_SAMPLES_PER_PKT + TIO_TX_SLACK_SAMPLES + TIO_TX_SLIP_SAMPLES)

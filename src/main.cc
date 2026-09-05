@@ -864,10 +864,14 @@ static tio_tx_group_t g_ppgTxGroup = {
  * ever leaves FEWER samples behind, so the worst case is still the tick that
  * pops the nominal count.
  *
- * Headroom as configured: ECG 280 - 10 + 200 = 470 against ECG_TX_BUF_LEN 500,
- * leaving 30 samples (300 ms). PPG 93 - 10 + 13 = 96 against PPG_TX_BUF_LEN
- * 500, leaving 404. The ECG figure is the one to watch -- raising H or the
- * segmentation window eats it directly, and at H = 310 it is gone. */
+ * ECG is the binding case, and its margin is a function of the PAD, not the
+ * window: ECG_TX_BUF_LEN is 2 * ECG_SEG_WINDOW_LEN while the block is
+ * ECG_SEG_WINDOW_LEN - 2 * ECG_SEG_PAD_LEN, so the window cancels out of
+ * BUF_LEN - (H - pkt + block) and what remains is
+ * 4 * ECG_SEG_PAD_LEN - TIO_TX_SLACK_SAMPLES - TIO_TX_SLIP_SAMPLES.
+ * Widening the window is therefore free; SHRINKING ECG_SEG_PAD_LEN, or raising
+ * either of the two allowances, eats the margin directly and can take it
+ * negative. See #36. */
 static_assert(TIO_ECG_TX_HIGH_WATER - TIO_ECG_SAMPLES_PER_PKT + TIO_ECG_TX_BLOCK_SAMPLES <= ECG_TX_BUF_LEN,
               "ECG TX peak occupancy (H - pkt + block) exceeds ring capacity");
 static_assert(TIO_PPG_TX_HIGH_WATER - TIO_PPG_SAMPLES_PER_PKT + TIO_PPG_TX_BLOCK_SAMPLES <= PPG_TX_BUF_LEN,
