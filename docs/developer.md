@@ -84,18 +84,19 @@ acceptance matrix.
 
 The `cpu` line reports three separately labelled CPU figures, all percentages
 of wall time over the same 30 s window, plus a coarse per-component breakdown.
-`cpu_meas` is the measured `100 - idle`, what the silicon actually does on this
-build. `cpu_nodemo` is `cpu_meas` with the TileIO transmit task subtracted, so
-it is capture and inference as this build runs them; the producer-side pack and
-CRC work runs inside the pipeline tasks and is still counted, so `cpu_nodemo` is
-an upper bound. `cpu_proj` is the deployment projection: sensor capture at duty
-1.0 plus each inference stage scaled by its own duty factor, derived from the
-window and stride constants in `src/constants.h` (see `src/telemetry.h`). The
-breakdown keys `cpu_cap`, `cpu_inf`, `cpu_tx`, `cpu_oth` and `cpu_idle` sum to
-100; `cpu_oth` carries PPG stage time, DSP paths and RTOS overhead, which have
-no per-stage counters, and `cpu_proj` excludes it. To measure the demo's own
-cost, build the same pipeline with the telemetry producers compiled out and
-compare `cpu_meas` between the two images:
+`util` is the measured `100 - idle`, what the silicon actually does on this
+build, and is the figure the other two are stated against. `cpu_nodemo` is
+`util` with the TileIO transmit task subtracted, so it is capture and inference
+as this build runs them; the producer-side pack and CRC work runs inside the
+pipeline tasks and is still counted, so `cpu_nodemo` is an upper bound.
+`cpu_proj` is the deployment projection: sensor capture at duty 1.0 plus each
+inference stage scaled by its own duty factor, derived from the window and
+stride constants in `src/constants.h` (see `src/telemetry.h`). The breakdown
+sums to 100 but only its independent terms are emitted, `cpu_cap`, `cpu_inf`
+and `cpu_tx`; the rest is idle plus a remainder carrying PPG stage time, DSP
+paths and RTOS overhead, which have no per-stage counters and which `cpu_proj`
+excludes. To measure the demo's own cost, build the same pipeline with the
+telemetry producers compiled out and compare `util` between the two images:
 
 ```bash
 uv run nsx configure --app-dir . --board apollo510b_evb --build-dir build/apollo510b_evb_notele
@@ -109,7 +110,8 @@ directory so the default image is not silently rebuilt with telemetry off. The
 `boot` line reports `telemetry=0` or `telemetry=1`, so a capture says which of
 the two images it came from. Capture, inference and the UIO control path keep
 running in the telemetry-off image; only the ECG/PPG/CPU signal and metric
-sends are gone.
+sends are gone. Nothing drains the TX rings in that image, so the `ring` line in
+an OFF capture reads full and that is not a transport stall.
 
 ## Continuous Integration
 

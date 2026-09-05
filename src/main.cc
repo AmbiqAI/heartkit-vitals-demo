@@ -2462,11 +2462,12 @@ report_extra_cpu(void)
     hkv_log_fx2("batt_days", appMetResults.batteryDays);
     /* Battery-model breakdown (issue #17), so the three-state split is legible
      * on SWO instead of only its result. Only the two INDEPENDENT terms are
-     * emitted: the other two are exact derivations of these and `util`, and
-     * every extra fixed-point field lengthens the hold on the global log mutex.
-     *   batt_cmp  = util - batt_inf     (compute % of wall time)
-     *   batt_idle = 100 - util          (idle % of wall time)
-     * `batt_inf` equal to `util` means the clamp is active, i.e. derived
+     * emitted: the other two are exact derivations of these and `cpu_nodemo`,
+     * and every extra fixed-point field lengthens the hold on the global log
+     * mutex.
+     *   batt_cmp  = cpu_nodemo - batt_inf   (compute % of wall time)
+     *   batt_idle = 100 - cpu_nodemo        (idle % of wall time)
+     * `batt_inf` equal to `cpu_nodemo` means the clamp is active, i.e. derived
      * inference duty exceeded measured busy. batt_inf is a percentage of wall
      * time; batt_pwr is the modelled average in mW at the LIVE speed mode
      * (see `speed_mode` on the `app` line -- the two must be read together). */
@@ -2474,20 +2475,18 @@ report_extra_cpu(void)
     hkv_log_fx2("batt_pwr", appMetResults.battAvgPowerMw);
     hkv_log_fx2("avg_ips", appMetResults.avgAiIps);
     /* Demo telemetry separated from the advertised workload (issue #8). Three
-     * labelled figures, never blended: cpu_meas is `util` above restated under
-     * the name the other two are stated against, cpu_nodemo drops the transmit
-     * task, cpu_proj applies the per-stage duty factors (telemetry.h) with
-     * capture at 1.0. The breakdown that follows is coarse and its terms sum to
-     * 100: cpu_oth carries PPG stage time, DSP paths and RTOS overhead, none of
-     * which have per-stage counters, and cpu_proj deliberately excludes it. */
-    hkv_log_fx2("cpu_meas", appMetResults.cpuPercUtil);
+     * labelled figures, never blended: `util` above is the measured figure the
+     * other two are stated against, cpu_nodemo drops the transmit task,
+     * cpu_proj applies the per-stage duty factors (telemetry.h) with capture at
+     * 1.0. The coarse breakdown sums to 100 and carries two further terms that
+     * are not emitted because they follow from these: idle, and an `other`
+     * holding PPG stage time, DSP paths and RTOS overhead, which has no
+     * per-stage counters and which cpu_proj deliberately excludes. */
     hkv_log_fx2("cpu_nodemo", appMetResults.cpuNoDemoPerc);
     hkv_log_fx2("cpu_proj", appMetResults.cpuProjPerc);
     hkv_log_fx2("cpu_cap", appMetResults.cpuSplit.capture);
     hkv_log_fx2("cpu_inf", appMetResults.cpuSplit.inference);
     hkv_log_fx2("cpu_tx", appMetResults.cpuSplit.transport);
-    hkv_log_fx2("cpu_oth", appMetResults.cpuSplit.other);
-    hkv_log_fx2("cpu_idle", appMetResults.cpuSplit.idle);
     /* Free stack words on the BLE radio dispatcher task, and the tio_ble_init()
      * status that explains a zero. Both are CACHED VALUES -- the ~1 ms stack
      * walk happens in ReportTask before hkv_report_subsystem() takes the log

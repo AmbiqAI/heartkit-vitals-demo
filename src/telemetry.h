@@ -6,7 +6,7 @@
  *
  * Three CPU figures are reported, never one blended number (see #8):
  *
- *   cpu_meas    raw 100 - idle, what the silicon actually does on this build;
+ *   util        raw 100 - idle, what the silicon actually does on this build;
  *   cpu_nodemo  measured minus the TileIO transmit task, i.e. capture and
  *               inference as this build runs them;
  *   cpu_proj    deployment projection -- capture at duty 1.0 plus each
