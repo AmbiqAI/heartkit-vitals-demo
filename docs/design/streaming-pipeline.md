@@ -161,9 +161,11 @@ more available by right-sizing the metrics buffers - separate follow-up).
 ### 3.6 Transport topology
 
 Two bounded drop-oldest queues (depth 8 each), one drain task. Today's single
-shared 32-deep queue couples the transports - it is the reason the stall latch
-exists, and while a packet is held for USB retry **every packet drained behind
-it is dropped** (`main.cc:1319-1324`) even though BLE would have taken them.
+shared queue (`TIO_TX_QUEUE_DEPTH`) couples the transports. Since #56 a packet
+held for USB retry backs the queue up rather than dropping what is behind it;
+BLE keeps draining once occupancy reaches `TIO_TX_USB_HOLD_WATERMARK`, with the
+released packets counted as USB loss (see Verification). Separate queues remain
+the way to decouple the two transports fully.
 
 USB BUSY handling simplifies: bounded <=15 ms wait, then drop that packet only
 and continue. **Delete the latch and probe machinery** - it was engineered for
@@ -254,8 +256,14 @@ Steady state, per second, per slot:
 
 - `pkt_rate[slot]` = 10 +/- 1 for ECG and PPG signal slots; no burst > 2 packets
   within 20 ms for the same slot.
-- `pkt_gap_max_ms[slot]` <= `TIO_JITTER_BUDGET_MS` (250). **The single most
-  important number in the exercise.**
+- `pkt_gap_max_ms[slot]` <= `TIO_JITTER_BUDGET_MS` with the host draining, and
+  **still the single most important number in the exercise.** A host read gap
+  no longer turns into loss: while queue occupancy stays below
+  `TIO_TX_USB_HOLD_WATERMARK` the affected packets arrive late rather than
+  short, and delivery resumes within one drain poll of the host draining again.
+  Past the watermark USB loses packets to keep the queue bounded, counted in
+  `tiousb drop`, so the criterion there is that the loss is counted and stops
+  when the backlog clears.
 - `trim[slot]` = 0 in steady state (non-zero is a bug, not a policy).
 - `txlen_max[slot]` <= H; `qdepth_max[usb|ble]` <= 2 steady, <= 8 ever.
 - `as7058 isr interval` min ~= max; a max > 3x min is IRQ starvation.
@@ -263,6 +271,11 @@ Steady state, per second, per slot:
 - Enqueue `fail` = 0 with a sink attached; no packing at all with none.
 
 Test matrix: 60 s USB baseline; 60 s BLE; USB+BLE concurrent; induced 30 s USB
-stall (BLE rate must be unaffected, and on resume packet rate returns to 10/s
-not 40/s); 20x disconnect/reconnect; 10 min with no host (counters flat, CPU
-delta recorded); 8 h soak; 10 min dashboard visual check.
+stall; 20x disconnect/reconnect; 10 min with no host (counters flat, CPU delta
+recorded); 8 h soak; 10 min dashboard visual check.
+
+The induced stall is the criterion that moved. BLE must lose no packet the
+queue accepted: BLE delivery is delayed while USB holds a packet, but the delay
+is bounded by `TIO_TX_USB_HOLD_WATERMARK` rather than by the stall length, and
+BLE is back at full rate once the watermark starts releasing. On resume the USB
+packet rate returns to 10/s, not 40/s.
