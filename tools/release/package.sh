@@ -529,6 +529,22 @@ MISMATCH
   fi
   [ -n "$CMAKE_BUILD_TYPE" ] || CMAKE_BUILD_TYPE="(unset)"
 
+  # The NSX toolchain file sets the compiler as a plain variable, so it never
+  # reaches CMakeCache.txt; CMake records it here instead. See #51.
+  local CC_FILE="" C_COMPILER CC_VERSION CC_PATH
+  local CC_CANDIDATE
+  for CC_CANDIDATE in "${BUILD_DIR}"/CMakeFiles/*/CMakeCCompiler.cmake; do
+    [ -f "$CC_CANDIDATE" ] && CC_FILE="$CC_CANDIDATE"
+  done
+  [ -n "$CC_FILE" ] \
+    || die "no CMakeFiles/*/CMakeCCompiler.cmake under ${BUILD_DIR}; configure and build ${BOARD} before packaging"
+  C_COMPILER="$(sed -n 's/^set(CMAKE_C_COMPILER "\([^"]*\)".*/\1/p' "$CC_FILE" | first_line)"
+  [ -n "$C_COMPILER" ] || die "no CMAKE_C_COMPILER setting in ${CC_FILE}"
+  [ -x "$C_COMPILER" ] || die "C compiler recorded in ${CC_FILE} is not executable: ${C_COMPILER}"
+  CC_VERSION="$("$C_COMPILER" --version 2>/dev/null | first_line)"
+  [ -n "$CC_VERSION" ] || die "${C_COMPILER} --version produced nothing; cannot record the compiler for ${BOARD}"
+  CC_PATH="$(relpath "$C_COMPILER")"
+
   local BIN_SHA BIN_SIZE
   BIN_SHA="$(sha256_of "${BOARD_PKG}/firmware.bin")"
   BIN_SIZE="$(wc -c < "${BOARD_PKG}/firmware.bin" | tr -d ' ')"
@@ -575,6 +591,8 @@ Git describe   : ${GIT_DESCRIBE}
 Firmware sources identical to tag ${REF_TAG}: ${SOURCES_VS_TAG}
                  (compared paths: ${REF_PATHS[*]})
 NSX toolchain  : ${NSX_VERSION}
+C compiler     : ${CC_VERSION}
+                 ${CC_PATH}
 nsx.yml pin    : tooling.nsx.version = ${NSX_PINNED}
 Build command  : uv run nsx configure --app-dir . --board ${BOARD} --frozen
                  uv run nsx build --app-dir . --board ${BOARD}
