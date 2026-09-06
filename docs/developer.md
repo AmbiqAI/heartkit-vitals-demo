@@ -63,13 +63,16 @@ metric packets are received.
 
 ### Transport counters
 
-Capture the transport counters for three minutes with the TileIO dashboard
-open and streaming, so the host is actually draining the queue:
+Capture the transport counters for three minutes with a host draining the
+queue. Preferred path, no browser needed:
 
 ```bash
-python3 tools/bench/swo_capture.py 180 /tmp/bench-usb.log --app-dir . --board apollo510b_evb
+python3 tools/bench/usb_bench.py --speed lp --seconds 180 --log /tmp/bench-usb.log --app-dir . --board apollo510b_evb
 python3 tools/bench/hkv_compare.py /tmp/bench-usb.log
 ```
+
+Alternatively, open the TileIO dashboard and leave it streaming, then run
+`tools/bench/swo_capture.py 180 /tmp/bench-usb.log` directly.
 
 The counters that matter are `ecg_retry`, `ecg_drop` and `stall` from the
 `tiousb` line, and `qdrop` and `qdepth` from the `tio` line. `hkv_compare.py`
@@ -78,8 +81,8 @@ second half, `qdrop` as a whole-capture delta, and `qdepth` as a distribution,
 because the firmware counters are cumulative and a drop that only starts once
 buffers fill does not show in a whole-window average.
 
-Pass in this steady-state case, with the dashboard visible and the host
-draining, is zero drops and zero stalls in both halves of the capture. Any
+Pass in this steady-state case, with a host draining the stream, is zero
+drops and zero stalls in both halves of the capture. Any
 non-zero drop or stall here is a transport regression, tracked on #56. Under
 an induced stall, counted drops past the hold watermark are designed
 behavior; see `docs/design/streaming-pipeline.md` section 7 for the full
@@ -156,6 +159,11 @@ green run mean the same thing.
 | `host` | `ubuntu-latest` | `scripts/ci-local.sh tests`, `shellcheck scripts/*.sh`, a lock-consistency check that compares the manifest hash only |
 | `firmware` | `ubuntu-latest`, matrix over `apollo510b_evb`, `apollo510_evb`, `apollo330mP_evb` | frozen module sync, `scripts/ci-local.sh frozen`, per-board `nsx configure --frozen` and `nsx build`, uploads `firmware.bin` per board |
 | `notices` | `macos-latest` | frozen module sync, then `tools/release/gen_third_party_notices.py --check` |
+
+On a draft pull request the `firmware` matrix is skipped and `host` and
+`notices` still run, so review-stage pushes do not pay for three board builds.
+Marking the pull request ready for review reruns the matrix. To build a draft
+on demand, add the `ci:full` label. A push to `main` always runs the matrix.
 
 The `host` job runs a lock-consistency check, not a full lockfile gate. It
 holds no module credentials on purpose, so it cannot re-resolve module sources.
