@@ -25,10 +25,12 @@
 #include "store.h"
 #include "constants.h"
 #include "ecg_arrhythmia.h"
+#include "ecg_tensor_copy.h"
 
 /* A model narrower than the host window cannot fill it. The generated I/O
  * extents are compile-time constants, so what #36 caught at boot for
- * segmentation is a build error for both models now. */
+ * segmentation is a build error for both models now. A wider one is filled by
+ * edge replication in the copy below, same as denoise and segmentation. */
 static_assert(hkv_arrhythmia_input_0_size >= ECG_ARR_WINDOW_LEN, "AOT arr input narrower than the host window");
 // Labels are the model's classes shifted by one, ECG_ARR_INCONCLUSIVE taking 0.
 static_assert(hkv_arrhythmia_output_0_size == ECG_ARR_GSVT, "AOT arr class count does not match the label map");
@@ -74,17 +76,22 @@ ecg_arrhythmia_arena_size() {
 }
 
 uint32_t
-ecg_arrhythmia_inference(float32_t *ecgIn, float32_t threshold) {
+ecg_arrhythmia_inference(float32_t *ecgIn, float32_t threshold, uint32_t *label) {
     float32_t yVal, yMax = 0;
     uint32_t yMaxIdx = 0;
     hkv_arrhythmia_model_context_t *ctx = &ecgArrModelCtx;
 
+    *label = ECG_ARR_INCONCLUSIVE;
+
     // Copy input
-    memcpy((float32_t *)ctx->inputs[0].data, ecgIn, ECG_ARR_WINDOW_LEN * sizeof(float32_t));
+    hkv_tensor_input_f32((float32_t *)ctx->inputs[0].data, hkv_tensor_len(hkv_arrhythmia_input_0_size), ecgIn,
+                         hkv_host_len(ECG_ARR_WINDOW_LEN));
 
     // Invoke model
     int32_t runStatus = hkv_arrhythmia_model_run(ctx);
     if (runStatus != hkv_arrhythmia_status_ok) {
+        /* Status codes share the label space, so returning one here reads
+         * downstream as a rhythm class. The label stays inconclusive. */
         return (uint32_t)runStatus;
     }
 
@@ -101,6 +108,6 @@ ecg_arrhythmia_inference(float32_t *ecgIn, float32_t threshold) {
 #if EN_MODEL_VERBOSE_LOGS
     nsx_printf("yMax=%f, yMaxIdx=%d\n", yMax, yMaxIdx);
 #endif
-    yMaxIdx = yMax > threshold ? yMaxIdx + 1 : 0;
-    return yMaxIdx;
+    *label = yMax > threshold ? yMaxIdx + 1 : ECG_ARR_INCONCLUSIVE;
+    return 0;
 }

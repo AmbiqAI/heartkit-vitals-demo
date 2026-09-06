@@ -41,11 +41,12 @@ ecg_arrhythmia_arena_size();
 /**
  * @brief Run ECG arrhythmia model
  *
- * @param ecgIn ECG input
- * @param threshold Threshold
- * @return uint32_t class label
+ * @param ecgIn ECG input window, ECG_ARR_WINDOW_LEN elements
+ * @param threshold Minimum winning class score for a conclusive label
+ * @param label Out: class label, ECG_ARR_INCONCLUSIVE when the run fails or scores below threshold
+ * @return uint32_t 0 on success, the model run status otherwise
  */
 uint32_t
-ecg_arrhythmia_inference(float32_t *ecgIn, float32_t threshold);
+ecg_arrhythmia_inference(float32_t *ecgIn, float32_t threshold, uint32_t *label);
 
 #endif // __HK_ECG_ARRHYTHMIA_H

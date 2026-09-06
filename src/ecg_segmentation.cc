@@ -37,6 +37,8 @@ static_assert(hkv_segmentation_input_0_size >= ECG_SEG_WINDOW_LEN, "AOT seg inpu
 static_assert(hkv_segmentation_output_0_size >= ECG_SEG_WINDOW_LEN * ECG_SEG_NUM_CLASS,
               "AOT seg output narrower than the host window");
 static_assert(hkv_segmentation_output_0_size % ECG_SEG_NUM_CLASS == 0, "AOT seg output is not a whole number of frames");
+static_assert(hkv_segmentation_output_0_size == hkv_segmentation_input_0_size * ECG_SEG_NUM_CLASS,
+              "AOT seg output time axis does not match the input");
 
 // Elements, not bytes: only the descriptor table carries byte extents.
 #define SEG_TENSOR_TIME_LEN (hkv_segmentation_output_0_size / ECG_SEG_NUM_CLASS)
