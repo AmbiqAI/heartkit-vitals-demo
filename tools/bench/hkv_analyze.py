@@ -23,8 +23,10 @@ Parses the `HKV|<uptime_ms>|<seq>|<subsystem>|k=v` lines emitted by
     `den_lat_us`, `seg_lat_us` and `arr_lat_us`, in microseconds and
     unscaled, and the maximum only of their `*_lat_max_us` counterparts,
     which are already per-interval maxima and so are never averaged;
-  - the per-model TFLM arena used and configured sizes, printed once, or an
-    explicit `none` row when the capture has no `model` line;
+  - the per-model arena used and configured sizes, printed once, or an
+    explicit `none` row when the capture has no `model` line. Denoise is a
+    TFLM measurement against a hand-sized budget; the AOT pairs are one
+    planned number reported twice -- see `docs/developer.md`;
   - attempted ECG, PPG and CPU packet rates from the `tio` subsystem, as a
     rate over the window rather than a raw total.
 
