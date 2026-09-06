@@ -1,10 +1,12 @@
 # Design record: helia-aot numeric parity for segmentation and arrhythmia
 
-Status: proposed, pending owner approval (2026-09-06)
+Status: accepted by the owner (2026-09-06)
 Scope: AOT-compiled ECG segmentation and arrhythmia modules, issue #37
 Inputs: host golden generation, on-device parity runs, and a per-op dump bisect
-against a LiteRT all-tensor reference. Tooling is on branches `37-aot-golden`
-(`tools/aot/make_golden.py`) and `37-aot-parity` (`tools/aot/parity/`), not `main`.
+against a LiteRT all-tensor reference. The tooling is on `main`:
+`tools/aot/make_golden.py` and `tools/aot/parity/` with
+`tools/aot/parity_report.py` merged in #77 and #80, and the segmentation and
+arrhythmia AOT adapters merged in #81.
 
 ## 1. Purpose
 
@@ -29,7 +31,9 @@ On-device runner (`tools/aot/parity/main.c`, target `hkv_aot_parity`):
 - `HKV_PARITY_DUMP_OPS` dumps every operator output for segmentation case 0,
   compared on host against a LiteRT all-tensor dump.
 
-Reproduction artifacts (scratchpad): `parity-final.log`, `parity-run2.log`
+Reproduction artifacts are session artifacts from the scratchpad and are not
+committed to this repository. The names are kept here so the figures below can
+be traced to the run that produced them: `parity-final.log`, `parity-run2.log`
 (the 5.8 M cycle figure in section 6), `parity-run3.log` (the gate run of
 section 5), `opdump-seg-case0.log`, `compare_ops.py`, `sim_ops.py`,
 `sim_conv_rounding.py`, `analyze_mean.py`, `aot-eval/golden-*.npz`,
