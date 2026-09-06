@@ -5,6 +5,10 @@
   "stimulus_path": "assets/ecg_stimulus.csv",
   "stimulus_sha256": "18861f4c5c02e53d1b7ce1f1911d87d516d0d5bae89e41981dfee39832a82c3f",
   "sample_rate_hz": 100,
+  "runtime": {
+    "ai_edge_litert": "2.2.0",
+    "op_resolver": "builtin_without_default_delegates"
+  },
   "num_cases": 8,
   "stimulus_stride": 1250,
   "raw_samples_per_case": 668,
@@ -95,7 +99,7 @@
       "input_clipped_samples": 0,
       "argmax_class": 0,
       "argmax_name": "SR",
-      "argmax_score": 0.84375,
+      "argmax_score": 0.8515625,
       "firmware_label": 1
     },
     {
@@ -106,7 +110,7 @@
       "input_clipped_samples": 0,
       "argmax_class": 0,
       "argmax_name": "SR",
-      "argmax_score": 0.83203125,
+      "argmax_score": 0.828125,
       "firmware_label": 1
     },
     {
@@ -117,7 +121,7 @@
       "input_clipped_samples": 0,
       "argmax_class": 2,
       "argmax_name": "AFIB",
-      "argmax_score": 0.79296875,
+      "argmax_score": 0.80859375,
       "firmware_label": 3
     },
     {
@@ -128,7 +132,7 @@
       "input_clipped_samples": 0,
       "argmax_class": 2,
       "argmax_name": "AFIB",
-      "argmax_score": 0.62890625,
+      "argmax_score": 0.609375,
       "firmware_label": 3
     },
     {
@@ -150,7 +154,7 @@
       "input_clipped_samples": 0,
       "argmax_class": 1,
       "argmax_name": "SB",
-      "argmax_score": 0.734375,
+      "argmax_score": 0.73828125,
       "firmware_label": 2
     },
     {

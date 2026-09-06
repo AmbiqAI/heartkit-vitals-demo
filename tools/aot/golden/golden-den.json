@@ -5,6 +5,10 @@
   "stimulus_path": "assets/ecg_stimulus.csv",
   "stimulus_sha256": "18861f4c5c02e53d1b7ce1f1911d87d516d0d5bae89e41981dfee39832a82c3f",
   "sample_rate_hz": 100,
+  "runtime": {
+    "ai_edge_litert": "2.2.0",
+    "op_resolver": "builtin_without_default_delegates"
+  },
   "num_cases": 8,
   "stimulus_stride": 1250,
   "raw_samples_per_case": 256,

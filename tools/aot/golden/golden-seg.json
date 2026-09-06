@@ -5,6 +5,10 @@
   "stimulus_path": "assets/ecg_stimulus.csv",
   "stimulus_sha256": "18861f4c5c02e53d1b7ce1f1911d87d516d0d5bae89e41981dfee39832a82c3f",
   "sample_rate_hz": 100,
+  "runtime": {
+    "ai_edge_litert": "2.2.0",
+    "op_resolver": "builtin_without_default_delegates"
+  },
   "num_cases": 8,
   "stimulus_stride": 1250,
   "raw_samples_per_case": 462,
@@ -95,8 +99,8 @@
       "stimulus_end": 462,
       "input_clipped_samples": 0,
       "argmax_class_counts": {
-        "NONE": 148,
-        "P-WAVE": 28,
+        "NONE": 147,
+        "P-WAVE": 29,
         "QRS": 26,
         "T-WAVE": 54
       },
@@ -110,10 +114,10 @@
       "stimulus_end": 1712,
       "input_clipped_samples": 0,
       "argmax_class_counts": {
-        "NONE": 158,
+        "NONE": 159,
         "P-WAVE": 32,
         "QRS": 27,
-        "T-WAVE": 39
+        "T-WAVE": 38
       },
       "argmax_class_modal": 0,
       "argmax_name_modal": "NONE"
@@ -125,10 +129,10 @@
       "stimulus_end": 2962,
       "input_clipped_samples": 0,
       "argmax_class_counts": {
-        "NONE": 138,
-        "P-WAVE": 3,
-        "QRS": 40,
-        "T-WAVE": 75
+        "NONE": 139,
+        "P-WAVE": 4,
+        "QRS": 39,
+        "T-WAVE": 74
       },
       "argmax_class_modal": 0,
       "argmax_name_modal": "NONE"
@@ -142,8 +146,8 @@
       "argmax_class_counts": {
         "NONE": 161,
         "P-WAVE": 22,
-        "QRS": 31,
-        "T-WAVE": 42
+        "QRS": 30,
+        "T-WAVE": 43
       },
       "argmax_class_modal": 0,
       "argmax_name_modal": "NONE"
@@ -155,10 +159,10 @@
       "stimulus_end": 5462,
       "input_clipped_samples": 0,
       "argmax_class_counts": {
-        "NONE": 139,
+        "NONE": 138,
         "P-WAVE": 18,
-        "QRS": 49,
-        "T-WAVE": 50
+        "QRS": 48,
+        "T-WAVE": 52
       },
       "argmax_class_modal": 0,
       "argmax_name_modal": "NONE"
@@ -170,10 +174,10 @@
       "stimulus_end": 6712,
       "input_clipped_samples": 0,
       "argmax_class_counts": {
-        "NONE": 173,
+        "NONE": 174,
         "P-WAVE": 20,
         "QRS": 20,
-        "T-WAVE": 43
+        "T-WAVE": 42
       },
       "argmax_class_modal": 0,
       "argmax_name_modal": "NONE"
@@ -185,8 +189,8 @@
       "stimulus_end": 7962,
       "input_clipped_samples": 0,
       "argmax_class_counts": {
-        "NONE": 185,
-        "P-WAVE": 16,
+        "NONE": 186,
+        "P-WAVE": 15,
         "QRS": 17,
         "T-WAVE": 38
       },
@@ -200,9 +204,9 @@
       "stimulus_end": 9212,
       "input_clipped_samples": 0,
       "argmax_class_counts": {
-        "NONE": 118,
-        "P-WAVE": 4,
-        "QRS": 67,
+        "NONE": 120,
+        "P-WAVE": 3,
+        "QRS": 66,
         "T-WAVE": 67
       },
       "argmax_class_modal": 0,
