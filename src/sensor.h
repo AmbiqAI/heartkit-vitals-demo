@@ -49,8 +49,8 @@ err_code_t sensor_stop(void);
  * Must be called from the sensor task on every wake, notified or not: the
  * chiplib stops the measurement on a failed FIFO read, so the INT line goes
  * quiet and nothing else would drive the recovery. At most one attempt per
- * AS7058_RESTART_INTERVAL_MS; abandons after AS7058_RESTART_MAX_FAILURES
- * consecutive failures. See #67.
+ * AS7058_RESTART_INTERVAL_MS; after AS7058_RESTART_MAX_FAILURES consecutive
+ * failures it keeps trying once per AS7058_RESTART_BACKOFF_MS. See #67.
  */
 void sensor_service_recovery(void);
 
