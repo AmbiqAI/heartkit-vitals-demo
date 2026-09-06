@@ -279,10 +279,44 @@ is written into the release notes before anything is published.
    clock ratio should sit near 1.0; a ratio far off means the capture or the
    timebase is wrong and the figures cannot be read.
 4. Run the transport counter capture above.
-5. Record the result in the release notes, then publish. Publication is
-   manual until a reviewed helper lands. See #39.
+5. Record the result in the release notes, then publish with
+   `tools/release/publish.sh`. Publication stays a manual step, run by hand
+   after the gate above.
 
 An empty capture is a stop-and-report condition. See `tools/bench/README.md`.
+
+### Publishing
+
+The publish helper prints its plan and stops. `--yes` carries the plan out;
+`--dry-run` prints it and mutates nothing even alongside `--yes`.
+
+```bash
+DEST="$HOME/Library/CloudStorage/OneDrive-AmbiqMicroInc/AITG - Documents/Demos/vital-sign-monitoring/firmware/v500"
+tools/release/publish.sh --tag v5.0.0 --notes RELEASE-NOTES-v5.0.0.md --dest "$DEST" --dry-run
+tools/release/publish.sh --tag v5.0.0 --notes RELEASE-NOTES-v5.0.0.md --dest "$DEST" --yes
+```
+
+The plan names the release and its draft state, the assets to upload, the
+files to copy, the files to delete from the drop folder, and the checksums to
+verify. Each of these stops the run:
+
+- The GitHub release must still be a draft. Replacing the assets of a release
+  people may already have downloaded needs `--allow-published`.
+- The destination is canonicalised and must be an existing directory named for
+  the release slug, at least two levels below `$HOME`. A trailing slash, a
+  missing path component, `$HOME` itself and anything outside `$HOME` are
+  refused.
+- The drop is verified against `dist/<slug>/SHA256SUMS`, plus the archive
+  digests, before and after the copy. A missing checksum file fails.
+
+The drop folder is replaced by a staged swap: the new contents are assembled
+in a sibling directory, the live folder is renamed to a backup, and the
+staging directory takes its place. `FAE-RUNBOOK.md` is carried across from the
+destination. Any failure restores the backup and names it in the message, and
+the backup is removed only after the destination verifies. See #62.
+
+`tools/release/test_publish.sh` covers these paths against a fake `gh` and
+runs from `scripts/ci-local.sh tests`.
 
 ## Clean Working State
 

@@ -11,7 +11,7 @@
 #
 # Usage:
 #   scripts/ci-local.sh            # host tests + frozen sync + firmware build
-#   scripts/ci-local.sh tests      # host tests only
+#   scripts/ci-local.sh tests      # host tests and release helper tests only
 #   scripts/ci-local.sh frozen     # frozen module sync check only
 #   scripts/ci-local.sh build      # firmware build only
 #
@@ -42,6 +42,14 @@ run_host_tests() {
     cmake -S tests -B build/host
     cmake --build build/host
     ctest --test-dir build/host --output-on-failure
+}
+
+# The release helpers are bash, not C, so they sit outside the CTest project.
+# They run here because a publish helper that guards a shared drop folder is
+# only as good as the tests for its guards. See #62.
+run_release_tests() {
+    echo "==> release helper tests"
+    tools/release/test_publish.sh
 }
 
 # nsx.lock is YAML, so it is read with a YAML parser rather than by matching
@@ -153,11 +161,12 @@ run_firmware_build() {
 }
 
 case "$TARGET" in
-    tests) run_host_tests ;;
+    tests) run_host_tests; run_release_tests ;;
     frozen) check_frozen_sync ;;
     build) run_firmware_build ;;
     all)
         run_host_tests
+        run_release_tests
         check_frozen_sync
         run_firmware_build
         ;;
