@@ -1,0 +1,183 @@
+{
+  "model": "arr",
+  "model_path": "assets/arrhythmia.tflite",
+  "model_sha256": "a1855af0e0b2a346d773e0d36ff8c8b986c51db4aed99a6066c9da9f23f12eab",
+  "stimulus_path": "assets/ecg_stimulus.csv",
+  "stimulus_sha256": "18861f4c5c02e53d1b7ce1f1911d87d516d0d5bae89e41981dfee39832a82c3f",
+  "sample_rate_hz": 100,
+  "runtime": {
+    "ai_edge_litert": "2.2.0",
+    "op_resolver": "builtin_without_default_delegates"
+  },
+  "num_cases": 8,
+  "stimulus_stride": 1250,
+  "raw_samples_per_case": 668,
+  "layout": "one case per npz, keys input_N/output_N, model tensor shape and dtype",
+  "firmware": {
+    "ecg_sos": [
+      [
+        0.2467691808982006,
+        0.4935383617964012,
+        0.2467691808982006,
+        -0.4141296048598937,
+        -0.36229096617676754
+      ],
+      [
+        1.0,
+        0.0,
+        -1.0,
+        0.8213745394235588,
+        0.14232107570294283
+      ],
+      [
+        1.0,
+        -2.0,
+        1.0,
+        1.9684516644108876,
+        -0.9694342914476478
+      ]
+    ],
+    "constants": {
+      "NORM_STD_EPS": 0.001,
+      "ECG_TARGET_RATE": 100,
+      "ECG_DEN_WINDOW_LEN": 256,
+      "ECG_DEN_PAD_LEN": 25,
+      "ECG_SEG_WINDOW_LEN": 256,
+      "ECG_SEG_PAD_LEN": 25,
+      "ECG_ARR_WINDOW_LEN": 500,
+      "ECG_ARR_THRESHOLD": 0.4,
+      "ECG_DEN_VALID_LEN": 206,
+      "ECG_SEG_VALID_LEN": 206
+    },
+    "source": {
+      "ecg_sos": "src/store.c ecgSos",
+      "NORM_STD_EPS": "src/constants.h",
+      "ECG_TARGET_RATE": "src/constants.h",
+      "ECG_DEN_WINDOW_LEN": "src/constants.h",
+      "ECG_DEN_PAD_LEN": "src/constants.h",
+      "ECG_SEG_WINDOW_LEN": "src/constants.h",
+      "ECG_SEG_PAD_LEN": "src/constants.h",
+      "ECG_ARR_WINDOW_LEN": "src/constants.h",
+      "ECG_ARR_THRESHOLD": "src/constants.h",
+      "ECG_DEN_VALID_LEN": "src/constants.h (ECG_DEN_WINDOW_LEN - 2 * ECG_DEN_PAD_LEN)",
+      "ECG_SEG_VALID_LEN": "src/constants.h (ECG_SEG_WINDOW_LEN - 2 * ECG_SEG_PAD_LEN)"
+    }
+  },
+  "tensors": {
+    "input_0": {
+      "name": "serving_default_input:0",
+      "shape": [
+        1,
+        500,
+        1
+      ],
+      "dtype": "float32",
+      "quantization": {
+        "scale": 0.0,
+        "zero_point": 0
+      }
+    },
+    "output_0": {
+      "name": "StatefulPartitionedCall_1:0",
+      "shape": [
+        1,
+        4
+      ],
+      "dtype": "float32",
+      "quantization": {
+        "scale": 0.0,
+        "zero_point": 0
+      }
+    }
+  },
+  "cases": [
+    {
+      "case": 0,
+      "path": "golden-arr.npz",
+      "stimulus_start": 0,
+      "stimulus_end": 668,
+      "input_clipped_samples": 0,
+      "argmax_class": 0,
+      "argmax_name": "SR",
+      "argmax_score": 0.8515625,
+      "firmware_label": 1
+    },
+    {
+      "case": 1,
+      "path": "golden-arr_case01.npz",
+      "stimulus_start": 1250,
+      "stimulus_end": 1918,
+      "input_clipped_samples": 0,
+      "argmax_class": 0,
+      "argmax_name": "SR",
+      "argmax_score": 0.828125,
+      "firmware_label": 1
+    },
+    {
+      "case": 2,
+      "path": "golden-arr_case02.npz",
+      "stimulus_start": 2500,
+      "stimulus_end": 3168,
+      "input_clipped_samples": 0,
+      "argmax_class": 2,
+      "argmax_name": "AFIB",
+      "argmax_score": 0.80859375,
+      "firmware_label": 3
+    },
+    {
+      "case": 3,
+      "path": "golden-arr_case03.npz",
+      "stimulus_start": 3750,
+      "stimulus_end": 4418,
+      "input_clipped_samples": 0,
+      "argmax_class": 2,
+      "argmax_name": "AFIB",
+      "argmax_score": 0.609375,
+      "firmware_label": 3
+    },
+    {
+      "case": 4,
+      "path": "golden-arr_case04.npz",
+      "stimulus_start": 5000,
+      "stimulus_end": 5668,
+      "input_clipped_samples": 0,
+      "argmax_class": 2,
+      "argmax_name": "AFIB",
+      "argmax_score": 0.92578125,
+      "firmware_label": 3
+    },
+    {
+      "case": 5,
+      "path": "golden-arr_case05.npz",
+      "stimulus_start": 6250,
+      "stimulus_end": 6918,
+      "input_clipped_samples": 0,
+      "argmax_class": 1,
+      "argmax_name": "SB",
+      "argmax_score": 0.73828125,
+      "firmware_label": 2
+    },
+    {
+      "case": 6,
+      "path": "golden-arr_case06.npz",
+      "stimulus_start": 7500,
+      "stimulus_end": 8168,
+      "input_clipped_samples": 0,
+      "argmax_class": 1,
+      "argmax_name": "SB",
+      "argmax_score": 0.92578125,
+      "firmware_label": 2
+    },
+    {
+      "case": 7,
+      "path": "golden-arr_case07.npz",
+      "stimulus_start": 8750,
+      "stimulus_end": 9418,
+      "input_clipped_samples": 0,
+      "argmax_class": 2,
+      "argmax_name": "AFIB",
+      "argmax_score": 0.84375,
+      "firmware_label": 3
+    }
+  ]
+}

@@ -21,83 +21,66 @@
 #include "pk_hrv.h"
 // NSX runtime
 #include "nsx_core.h"
-// TFLM
-#include "tensorflow/lite/micro/kernels/micro_ops.h"
-#include "tensorflow/lite/micro/micro_interpreter.h"
-#include "tensorflow/lite/micro/micro_mutable_op_resolver.h"
-#include "tensorflow/lite/micro/micro_profiler.h"
-#include "tensorflow/lite/micro/system_setup.h"
-#include "tensorflow/lite/micro/tflite_bridge/micro_error_reporter.h"
-#include "tensorflow/lite/schema/schema_generated.h"
+// heliaAOT
+#include "hkv_segmentation_model.h"
 // Locals
 #include "constants.h"
 #include "store.h"
-#include "ecg_segmentation_flatbuffer.h"
 #include "ecg_segmentation.h"
 #include "ecg_tensor_copy.h"
 
+/* A model narrower than the host window cannot fill it. The generated I/O
+ * extents are compile-time constants, so what #36 caught at boot is now a
+ * build error. The output is flat [TIME * CLASSES], not TFLM's [1, TIME,
+ * CLASSES]. */
+static_assert(hkv_segmentation_input_0_size >= ECG_SEG_WINDOW_LEN, "AOT seg input narrower than the host window");
+static_assert(hkv_segmentation_output_0_size >= ECG_SEG_WINDOW_LEN * ECG_SEG_NUM_CLASS,
+              "AOT seg output narrower than the host window");
+static_assert(hkv_segmentation_output_0_size % ECG_SEG_NUM_CLASS == 0, "AOT seg output is not a whole number of frames");
+static_assert(hkv_segmentation_output_0_size == hkv_segmentation_input_0_size * ECG_SEG_NUM_CLASS,
+              "AOT seg output time axis does not match the input");
 
-static constexpr int segTensorArenaSize = 1024 * ECG_SEG_MODEL_SIZE_KB;
-AM_SHARED_RW alignas(16) static uint8_t segTensorArena[segTensorArenaSize];
-tf_model_context_t ecgSegModelCtx = {
-    .arenaSize = segTensorArenaSize,
-    .arena = segTensorArena,
-    .buffer = ecg_segmentation_flatbuffer,
-    .model = nullptr,
-    .input = nullptr,
-    .output = nullptr,
-    .interpreter = nullptr,
-};
+// Elements, not bytes: only the descriptor table carries byte extents.
+#define SEG_TENSOR_TIME_LEN (hkv_segmentation_output_0_size / ECG_SEG_NUM_CLASS)
+
+static hkv_segmentation_model_context_t ecgSegModelCtx = {.callback = nullptr};
+
+/* The I/O descriptor carries no dtype, so element width is the descriptor's
+ * byte extent over the I/O element count. int8 here; a regeneration that
+ * changes it would silently reinterpret the arena. */
+static size_t
+seg_elem_width(hkv_segmentation_tensor_ident_t id, size_t elems) {
+    return elems > 0 ? hkv_segmentation_tensor_descriptors[id].size / elems : 0;
+}
 
 uint32_t
 ecg_segmentation_init() {
+    hkv_segmentation_model_context_t *ctx = &ecgSegModelCtx;
 
-    size_t bytesUsed;
-    TfLiteStatus allocateStatus;
-    tf_model_context_t *ctx = &ecgSegModelCtx;
-
-    // Initialize TFLM backend
-    tflm_init_model(ctx);
-
-    // Load model
-    ctx->model = tflite::GetModel(ctx->buffer);
-    if (ctx->model->version() != TFLITE_SCHEMA_VERSION) {
-        TF_LITE_REPORT_ERROR(ctx->reporter, "Schema mismatch: given=%d != expected=%d.", ctx->model->version(), TFLITE_SCHEMA_VERSION);
+    int32_t status = hkv_segmentation_model_init(ctx);
+    if (status != hkv_segmentation_status_ok) {
+        nsx_printf("[SEG] Model init failed: %d\n", (int)status);
         return 1;
     }
 
-    // Initialize interpreter
-    if (ctx->interpreter != nullptr) { ctx->interpreter->Reset(); }
-    static tflite::MicroInterpreter static_interpreter(ctx->model, *(ctx->resolver), ctx->arena, ctx->arenaSize, nullptr, ctx->profiler);
-    ctx->interpreter = &static_interpreter;
-
-    // Allocate tensors
-    allocateStatus = ctx->interpreter->AllocateTensors();
-    if (allocateStatus != kTfLiteOk) {
-        TF_LITE_REPORT_ERROR(ctx->reporter, "AllocateTensors() failed");
+    if ((seg_elem_width(ctx->inputs[0].id, hkv_segmentation_input_0_size) != sizeof(int8_t)) ||
+        (seg_elem_width(ctx->outputs[0].id, hkv_segmentation_output_0_size) != sizeof(int8_t))) {
+        nsx_printf("[SEG] Unexpected tensor element width\n");
         return 1;
     }
 
-    // Check arena size
-    bytesUsed = ctx->interpreter->arena_used_bytes();
-    ctx->arenaUsed = bytesUsed;
-    nsx_printf("[SEG] Arena used: %d bytes\n", bytesUsed);
-    if (bytesUsed > ctx->arenaSize) {
-        TF_LITE_REPORT_ERROR(ctx->reporter, "Arena mismatch: given=%d < expected=%d bytes.", ctx->arenaSize, bytesUsed);
-        return 1;
-    }
-
-    // Store input and output pointers (assume single input/output tensor)
-    ctx->input = ctx->interpreter->input(0);
-    ctx->output = ctx->interpreter->output(0);
-
-    // A model narrower than the host window cannot fill it. See #36.
-    if ((ctx->input->dims->data[1] < ECG_SEG_WINDOW_LEN) || (ctx->output->dims->data[1] < ECG_SEG_WINDOW_LEN)) {
-        TF_LITE_REPORT_ERROR(ctx->reporter, "Window mismatch: given=(%d, %d) < expected=%d.", ctx->input->dims->data[1],
-                             ctx->output->dims->data[1], ECG_SEG_WINDOW_LEN);
-        return 1;
-    }
+    nsx_printf("[SEG] Arena used: %d bytes\n", (int)ecg_segmentation_arena_used());
     return 0;
+}
+
+size_t
+ecg_segmentation_arena_used() {
+    return hkv_segmentation_arena_sram_size;
+}
+
+size_t
+ecg_segmentation_arena_size() {
+    return hkv_segmentation_arena_sram_size;
 }
 
 uint32_t
@@ -139,28 +122,20 @@ ecg_physiokit_segmentation_inference(float32_t *data, uint16_t *segMask, uint32_
 uint32_t
 ecg_segmentation_inference(float32_t *data, uint16_t *segMask, uint32_t padLen, float32_t threshold, float32_t *qos) {
     float32_t avgQos = 0;
-    tf_model_context_t *ctx = &ecgSegModelCtx;
+    hkv_segmentation_model_context_t *ctx = &ecgSegModelCtx;
 
     // Copy input and quantize
-    if (ctx->input->quantization.type == kTfLiteAffineQuantization) {
-        hkv_tensor_input_i8(ctx->input->data.int8, hkv_tensor_len(ctx->input->dims->data[1]), data,
-                            hkv_host_len(ECG_SEG_WINDOW_LEN), ctx->input->params.scale, ctx->input->params.zero_point);
-    } else {
-        hkv_tensor_input_f32(ctx->input->data.f, hkv_tensor_len(ctx->input->dims->data[1]), data,
-                             hkv_host_len(ECG_SEG_WINDOW_LEN));
-    }
+    hkv_tensor_input_i8(ctx->inputs[0].data, hkv_tensor_len(hkv_segmentation_input_0_size), data,
+                        hkv_host_len(ECG_SEG_WINDOW_LEN), ctx->inputs[0].scale, ctx->inputs[0].zero_point);
 
     // Invoke model
-    TfLiteStatus invokeStatus = ctx->interpreter->Invoke();
-    if (invokeStatus != kTfLiteOk) { return invokeStatus; }
+    int32_t runStatus = hkv_segmentation_model_run(ctx);
+    if (runStatus != hkv_segmentation_status_ok) { return (uint32_t)runStatus; }
 
-    // Extract output and segmentation mask ([BATCH x TIME x CLASSES])
-    bool isQuantized = ctx->output->quantization.type == kTfLiteAffineQuantization;
-    avgQos = hkv_seg_output_mask(segMask, hkv_host_len(ECG_SEG_WINDOW_LEN),
-                                 isQuantized ? ctx->output->data.int8 : nullptr,
-                                 isQuantized ? nullptr : ctx->output->data.f,
-                                 hkv_tensor_len(ctx->output->dims->data[1]), ctx->output->dims->data[2], (int)padLen,
-                                 threshold, ctx->output->params.scale, ctx->output->params.zero_point);
+    // Extract output and segmentation mask ([TIME x CLASSES])
+    avgQos = hkv_seg_output_mask(segMask, hkv_host_len(ECG_SEG_WINDOW_LEN), ctx->outputs[0].data, nullptr,
+                                 hkv_tensor_len(SEG_TENSOR_TIME_LEN), ECG_SEG_NUM_CLASS, (int)padLen, threshold,
+                                 ctx->outputs[0].scale, ctx->outputs[0].zero_point);
     *qos = 100*avgQos;
 
     // if (avgQos < ECG_QOS_BAD_AVG_THRESH) {

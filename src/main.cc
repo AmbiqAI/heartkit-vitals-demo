@@ -1599,6 +1599,7 @@ EcgProcessTask(void *pvParameters)
         // ECG ARRHYTHMIA + METRICS
         ///////////////////////////////////////////////////////////////////
         else if (MIN(ringbuffer_len(&rbEcgMet), ringbuffer_len(&rbEcgMaskMet)) >= ECG_MET_WINDOW_LEN) {
+            uint32_t arrErr = 0;
             tickStart = dwt_cycles();
             ringbuffer_peek(&rbEcgMet, ecgMetData, ECG_MET_WINDOW_LEN);
             ringbuffer_peek(&rbEcgMaskMet, ecgMaskMetData, ECG_MET_WINDOW_LEN);
@@ -1610,9 +1611,11 @@ EcgProcessTask(void *pvParameters)
                 ecgMetResults.arrhythmiaLabel =
                     ecgMetResults.hr < 40 ? ECG_ARR_SB : ecgMetResults.hr > 100 ? ECG_ARR_GSVT : ECG_ARR_SR;
             } else if (appState.arrMode == ArrhythmiaModeAi) {
+                uint32_t arrLabel = ECG_ARR_INCONCLUSIVE;
                 modelStart = dwt_cycles();
-                ecgMetResults.arrhythmiaLabel = ecg_arrhythmia_inference(ecgMetData, ECG_ARR_THRESHOLD);
+                arrErr = ecg_arrhythmia_inference(ecgMetData, ECG_ARR_THRESHOLD, &arrLabel);
                 modelLatUs = dwt_delta_us(modelStart);
+                ecgMetResults.arrhythmiaLabel = (float32_t)arrLabel;
             } else {
                 ecgMetResults.arrhythmiaLabel = 0;
             }
@@ -1635,6 +1638,10 @@ EcgProcessTask(void *pvParameters)
             send_ecg_metrics();
             if (err != 0) {
                 hkv_count(HKV_CNT_PIPE_ERR_ECG_MET);
+            }
+            if (arrErr != 0) {
+                hkv_count(HKV_CNT_PIPE_ERR_ECG_ARR);
+                HKV_TRACE_KV("ecg", "arr_err", arrErr);
             }
             HKV_TRACE_KV("ecg", "met_err", err);
         } else {
@@ -2731,10 +2738,10 @@ main(void)
     hkv_log_begin("model");
     hkv_log_u32("den_arena_used", (uint32_t)ecgDenModelCtx.arenaUsed);
     hkv_log_u32("den_arena_size", (uint32_t)ecgDenModelCtx.arenaSize);
-    hkv_log_u32("seg_arena_used", (uint32_t)ecgSegModelCtx.arenaUsed);
-    hkv_log_u32("seg_arena_size", (uint32_t)ecgSegModelCtx.arenaSize);
-    hkv_log_u32("arr_arena_used", (uint32_t)ecgArrModelCtx.arenaUsed);
-    hkv_log_u32("arr_arena_size", (uint32_t)ecgArrModelCtx.arenaSize);
+    hkv_log_u32("seg_arena_used", (uint32_t)ecg_segmentation_arena_used());
+    hkv_log_u32("seg_arena_size", (uint32_t)ecg_segmentation_arena_size());
+    hkv_log_u32("arr_arena_used", (uint32_t)ecg_arrhythmia_arena_used());
+    hkv_log_u32("arr_arena_size", (uint32_t)ecg_arrhythmia_arena_size());
     hkv_log_end();
 
     nsx_freertos_start();

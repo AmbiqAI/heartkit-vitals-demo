@@ -351,7 +351,8 @@ extern "C" {
  * for a bring-up session; do not ship it on.
  *
  * Nothing is lost by leaving it off. Every value a trace line carried is also
- * counted (err_den/err_seg/err_met/err_ppgmet on the `pipe` report line), so a
+ * counted (err_den/err_seg/err_arr/err_met/err_ppgmet on the `pipe` report
+ * line), so a
  * persistently failing stage cannot hide behind a plausible-looking silence --
  * which is what made the old default dangerous rather than merely wasteful. */
 #ifndef EN_APP_TRACE
@@ -422,6 +423,9 @@ extern "C" {
 // ECG Segmentation Configuration
 ///////////////////////////////////////////////////////////////////////////////
 
+/* Only the TFLM reference in the parity runner still allocates this arena: the
+ * firmware runs segmentation on the heliaAOT module, whose arena is planned at
+ * generation time. See tools/aot/parity/tflm_ref.cc. */
 #define ECG_SEG_MODEL_SIZE_KB (145)
 #define ECG_SEG_THRESHOLD (0.5)
 #define ECG_SEG_NUM_CLASS (4) // 2
@@ -442,6 +446,7 @@ extern "C" {
 // ECG Arrhythmia Configuration
 ///////////////////////////////////////////////////////////////////////////////
 
+/* Parity-runner only; see the note on ECG_SEG_MODEL_SIZE_KB. */
 #define ECG_ARR_MODEL_SIZE_KB (40)
 #define ECG_ARR_THRESHOLD (0.4)
 #define ECG_ARR_WINDOW_LEN (500)

@@ -13,3 +13,7 @@ nsx-pmu-armv8m/
 nsx-sensors/
 nsx-tileio/
 nsx-tooling/
+
+# Vendored modules (committed in this app) are NOT ignored:
+# hkv_arrhythmia_aot/  (kept in git)
+# hkv_segmentation_aot/  (kept in git)

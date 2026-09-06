@@ -102,6 +102,13 @@ def main(argv: list[str]) -> int:
         commits = pinned.get(rel, set())
         digests = hashes.get(rel, set())
 
+        if not commits and digests:
+            # `kind: vendored` module, committed in this repo. There is no
+            # upstream commit to pin; the lock pins the directory content and
+            # `nsx lock --check` is what detects drift.
+            lines.append(f"  {rel:<28} in-tree, {next(iter(digests)) if len(digests) == 1 else 'unknown'}")
+            continue
+
         if not commits:
             warnings.append(f"{rel} is on disk but not pinned in nsx.lock for {board}")
             lines.append(f"  {rel:<28} NOT IN LOCK")
@@ -135,7 +142,7 @@ def main(argv: list[str]) -> int:
             # independently. `nsx configure --frozen` is what detects drift here.
             lines.append(f"  {rel:<28} vendored, pin {commit[:12]}, {digest}")
 
-    missing = sorted(set(pinned) - {f"modules/{p.name}" for p in on_disk})
+    missing = sorted((set(pinned) | set(hashes)) - {f"modules/{p.name}" for p in on_disk})
     for rel in missing:
         refusals.append(f"{rel} is pinned in nsx.lock but missing from disk")
 

@@ -16,7 +16,9 @@ LVGL is not built into this firmware, so the GPL-3.0 text carried in the AmbiqSu
 | --- | --- | --- |
 | `modules/helia-dsp` | https://github.com/AmbiqAI/helia-dsp.git | `9c18599bf7a7` |
 | `modules/helia-rt` | https://github.com/AmbiqAI/helia-rt.git | `helia-rt-v1.16.0 (c1b97f4a49ab)` |
-| `modules/ns-cmsis-nn` | https://github.com/AmbiqAI/ns-cmsis-nn.git | `v7.29.2 (631726420b04)` |
+| `modules/hkv_arrhythmia_aot` | committed in this repository (`hkv_arrhythmia_aot`) | n/a |
+| `modules/hkv_segmentation_aot` | committed in this repository (`hkv_segmentation_aot`) | n/a |
+| `modules/ns-cmsis-nn` | https://github.com/AmbiqAI/ns-cmsis-nn.git | `v7.31.0 (9884d5fccab8)` |
 | `modules/nsx-ambiq-sdk` | https://github.com/AmbiqAI/nsx-ambiq-sdk.git | `v5.2.24 (a9f4ec25a162)` |
 | `modules/nsx-as7058` | https://github.com/AmbiqAI/nsx-as7058.git | `c70db89ae561` |
 | `modules/nsx-physiokit` | https://github.com/AmbiqAI/nsx-physiokit.git | `17ac957fab6f` |
@@ -1513,10 +1515,108 @@ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND 
    limitations under the License.
 ```
 
+### `modules/hkv_arrhythmia_aot`
+
+- Component path: `modules/hkv_arrhythmia_aot`
+- Committed in this repository as `hkv_arrhythmia_aot` (`modules/hkv_arrhythmia_aot`)
+- Declared license: not declared in an `nsx-module.yaml`; see the text below.
+
+#### `modules/hkv_arrhythmia_aot/LICENSE`
+
+```
+heliaAOT License Agreement
+==========================================
+
+Copyright (c) 2026 Ambiq AI. All rights reserved.
+
+1. License Grant
+   Ambiq ("Licensor") hereby grants you a non-exclusive, non-transferable, worldwide,
+   royalty-free license to use, reproduce, modify and distribute the generated
+   AOT C module ("Software") **solely** on Ambiq hardware products that incorporate
+   Ambiq sub-threshold power optimized technology ("Ambiq Hardware").
+
+2. Restrictions
+   - The Software may **only** be deployed, executed or otherwise used on Ambiq Hardware.
+   - Any use of the Software on non-Ambiq hardware is strictly prohibited.
+   - You may not reverse-engineer, decompile, or otherwise attempt to extract
+     the source code of the Software, except to the extent expressly permitted
+     by applicable law.
+   - You may not sublicense, rent, lease or lend the Software.
+
+3. Ownership
+   The Software is and shall remain the exclusive property of Licensor. All
+   rights not expressly granted herein are reserved by Licensor.
+
+4. Warranty Disclaimer
+   THE SOFTWARE IS PROVIDED “AS IS” AND LICENSOR DISCLAIMS ALL WARRANTIES,
+   EXPRESS OR IMPLIED, INCLUDING, WITHOUT LIMITATION, ANY IMPLIED WARRANTIES
+   OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, OR NON-INFRINGEMENT.
+
+5. Limitation of Liability
+   IN NO EVENT SHALL LICENSOR BE LIABLE FOR ANY INDIRECT, INCIDENTAL,
+   SPECIAL, OR CONSEQUENTIAL DAMAGES, OR DAMAGES FOR LOSS OF PROFITS,
+   REVENUE, DATA OR USE, INCURRED BY YOU OR ANY THIRD PARTY,
+   WHETHER IN AN ACTION IN CONTRACT OR TORT, ARISING FROM YOUR ACCESS TO,
+   OR USE OF, THE SOFTWARE.
+
+6. Governing Law
+   This Agreement shall be governed by and construed in accordance with the laws
+   of the State of Texas, USA, without regard to its conflict of laws principles.
+```
+
+### `modules/hkv_segmentation_aot`
+
+- Component path: `modules/hkv_segmentation_aot`
+- Committed in this repository as `hkv_segmentation_aot` (`modules/hkv_segmentation_aot`)
+- Declared license: not declared in an `nsx-module.yaml`; see the text below.
+
+#### `modules/hkv_segmentation_aot/LICENSE`
+
+```
+heliaAOT License Agreement
+==========================================
+
+Copyright (c) 2026 Ambiq AI. All rights reserved.
+
+1. License Grant
+   Ambiq ("Licensor") hereby grants you a non-exclusive, non-transferable, worldwide,
+   royalty-free license to use, reproduce, modify and distribute the generated
+   AOT C module ("Software") **solely** on Ambiq hardware products that incorporate
+   Ambiq sub-threshold power optimized technology ("Ambiq Hardware").
+
+2. Restrictions
+   - The Software may **only** be deployed, executed or otherwise used on Ambiq Hardware.
+   - Any use of the Software on non-Ambiq hardware is strictly prohibited.
+   - You may not reverse-engineer, decompile, or otherwise attempt to extract
+     the source code of the Software, except to the extent expressly permitted
+     by applicable law.
+   - You may not sublicense, rent, lease or lend the Software.
+
+3. Ownership
+   The Software is and shall remain the exclusive property of Licensor. All
+   rights not expressly granted herein are reserved by Licensor.
+
+4. Warranty Disclaimer
+   THE SOFTWARE IS PROVIDED “AS IS” AND LICENSOR DISCLAIMS ALL WARRANTIES,
+   EXPRESS OR IMPLIED, INCLUDING, WITHOUT LIMITATION, ANY IMPLIED WARRANTIES
+   OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, OR NON-INFRINGEMENT.
+
+5. Limitation of Liability
+   IN NO EVENT SHALL LICENSOR BE LIABLE FOR ANY INDIRECT, INCIDENTAL,
+   SPECIAL, OR CONSEQUENTIAL DAMAGES, OR DAMAGES FOR LOSS OF PROFITS,
+   REVENUE, DATA OR USE, INCURRED BY YOU OR ANY THIRD PARTY,
+   WHETHER IN AN ACTION IN CONTRACT OR TORT, ARISING FROM YOUR ACCESS TO,
+   OR USE OF, THE SOFTWARE.
+
+6. Governing Law
+   This Agreement shall be governed by and construed in accordance with the laws
+   of the State of Texas, USA, without regard to its conflict of laws principles.
+```
+
 ### `modules/ns-cmsis-nn`
 
 - Component path: `modules/ns-cmsis-nn`
-- Vendored from: https://github.com/AmbiqAI/ns-cmsis-nn.git at `v7.29.2 (631726420b04)` (`modules/ns-cmsis-nn`)
+- Vendored from: https://github.com/AmbiqAI/ns-cmsis-nn.git at `v7.31.0 (9884d5fccab8)` (`modules/ns-cmsis-nn`)
 - Declared license: not declared in an `nsx-module.yaml`; see the text below.
 
 #### `modules/ns-cmsis-nn/LICENSE`
@@ -1643,7 +1743,7 @@ section 4(b).
 ### `modules/ns-cmsis-nn/LICENSES`
 
 - Component path: `modules/ns-cmsis-nn/LICENSES`
-- Vendored from: https://github.com/AmbiqAI/ns-cmsis-nn.git at `v7.29.2 (631726420b04)` (`modules/ns-cmsis-nn`)
+- Vendored from: https://github.com/AmbiqAI/ns-cmsis-nn.git at `v7.31.0 (9884d5fccab8)` (`modules/ns-cmsis-nn`)
 - Declared license: not declared in an `nsx-module.yaml`; see the text below.
 
 #### `modules/ns-cmsis-nn/LICENSES/Apache-2.0.txt`

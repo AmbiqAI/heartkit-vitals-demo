@@ -63,13 +63,16 @@ metric packets are received.
 
 ### Transport counters
 
-Capture the transport counters for three minutes with the TileIO dashboard
-open and streaming, so the host is actually draining the queue:
+Capture the transport counters for three minutes with a host draining the
+queue. Preferred path, no browser needed:
 
 ```bash
-python3 tools/bench/swo_capture.py 180 /tmp/bench-usb.log --app-dir . --board apollo510b_evb
+python3 tools/bench/usb_bench.py --speed lp --seconds 180 --log /tmp/bench-usb.log --app-dir . --board apollo510b_evb
 python3 tools/bench/hkv_compare.py /tmp/bench-usb.log
 ```
+
+Alternatively, open the TileIO dashboard and leave it streaming, then run
+`tools/bench/swo_capture.py 180 /tmp/bench-usb.log` directly.
 
 The counters that matter are `ecg_retry`, `ecg_drop` and `stall` from the
 `tiousb` line, and `qdrop` and `qdepth` from the `tio` line. `hkv_compare.py`
@@ -78,8 +81,8 @@ second half, `qdrop` as a whole-capture delta, and `qdepth` as a distribution,
 because the firmware counters are cumulative and a drop that only starts once
 buffers fill does not show in a whole-window average.
 
-Pass in this steady-state case, with the dashboard visible and the host
-draining, is zero drops and zero stalls in both halves of the capture. Any
+Pass in this steady-state case, with a host draining the stream, is zero
+drops and zero stalls in both halves of the capture. Any
 non-zero drop or stall here is a transport regression, tracked on #56. Under
 an induced stall, counted drops past the hold watermark are designed
 behavior; see `docs/design/streaming-pipeline.md` section 7 for the full
@@ -138,10 +141,13 @@ the `*_ips` rates.
 | `arr_lat_max_us` | `cpu` | Arrhythmia model invoke duration, maximum within the report interval |
 | `den_arena_used` | `model` | Denoise TFLM arena bytes reported by `arena_used_bytes()` |
 | `den_arena_size` | `model` | Denoise TFLM arena bytes configured |
-| `seg_arena_used` | `model` | Segmentation TFLM arena bytes reported by `arena_used_bytes()` |
-| `seg_arena_size` | `model` | Segmentation TFLM arena bytes configured |
-| `arr_arena_used` | `model` | Arrhythmia TFLM arena bytes reported by `arena_used_bytes()` |
-| `arr_arena_size` | `model` | Arrhythmia TFLM arena bytes configured |
+| `seg_arena_used` | `model` | Segmentation heliaAOT scratch arena bytes |
+| `seg_arena_size` | `model` | Segmentation heliaAOT scratch arena bytes, equal to used |
+| `arr_arena_used` | `model` | Arrhythmia heliaAOT scratch arena bytes |
+| `arr_arena_size` | `model` | Arrhythmia heliaAOT scratch arena bytes, equal to used |
+
+The denoise pair is a measurement against a hand-sized budget; the AOT pairs are
+one planned number reported twice. See "Model arenas" below.
 
 The maxima are reset after every `cpu` line and again on a `speed_mode` change,
 so each report describes its own interval at one operating point rather than
@@ -179,6 +185,27 @@ vendored by `nsx sync` and hash-locked in `nsx.lock`, and the AS7058 OSAL takes
 its transport as a function-pointer config (`as7058_osal_configure`), which is
 the supported substitution point.
 
+### Model arenas
+
+The three ECG models do not share a runtime. Denoise is a TFLite flatbuffer
+executed by the TFLM interpreter, so its `[DEN] Arena used` boot line is the
+interpreter's own `arena_used_bytes()` against the arena `ECG_DEN_MODEL_SIZE_KB`
+reserves: used is the measurement and size is the budget, and the gap between
+them is headroom that has to be sized by hand.
+
+Segmentation and arrhythmia run as heliaAOT modules
+(`modules/hkv_segmentation_aot`, `modules/hkv_arrhythmia_aot`). Their memory is
+planned when the module is generated, so `ecg_segmentation_arena_used()` and
+`ecg_segmentation_arena_size()` return the same number, the generated
+`hkv_segmentation_arena_sram_size`: the scratch arena is exact-fit and there is
+no headroom to size. A model that no longer fits fails to generate, not to boot.
+
+That number counts scratch only. The weights sit in a separate const arena
+(`hkv_*_arena_const_mram_size`) that the kernels read in place from MRAM, so it
+costs `.rodata` rather than SRAM and is not part of the arena figures. The
+scratch arenas are placed in `.shared` by `tools/aot/hkv_aot_attributes.h`,
+which is the section the TFLM arenas use through `AM_SHARED_RW`.
+
 ## Continuous Integration
 
 `.github/workflows/ci.yml` runs on every pull request and on pushes to `main`.
@@ -190,6 +217,11 @@ green run mean the same thing.
 | `host` | `ubuntu-latest` | `scripts/ci-local.sh tests`, `shellcheck scripts/*.sh`, a lock-consistency check that compares the manifest hash only |
 | `firmware` | `ubuntu-latest`, matrix over `apollo510b_evb`, `apollo510_evb`, `apollo330mP_evb` | frozen module sync, `scripts/ci-local.sh frozen`, per-board `nsx configure --frozen` and `nsx build`, uploads `firmware.bin` per board |
 | `notices` | `macos-latest` | frozen module sync, then `tools/release/gen_third_party_notices.py --check` |
+
+On a draft pull request the `firmware` matrix is skipped and `host` and
+`notices` still run, so review-stage pushes do not pay for three board builds.
+Marking the pull request ready for review reruns the matrix. To build a draft
+on demand, add the `ci:full` label. A push to `main` always runs the matrix.
 
 The `host` job runs a lock-consistency check, not a full lockfile gate. It
 holds no module credentials on purpose, so it cannot re-resolve module sources.

@@ -257,6 +257,7 @@ typedef enum {
     X(HKV_CNT_PIPE_MET_RUNS,     "pipe",   "met_runs",     HKV_EMIT_TOTAL)                         \
     X(HKV_CNT_PIPE_ERR_ECG_DEN,  "pipe",   "err_den",      HKV_EMIT_TOTAL)                         \
     X(HKV_CNT_PIPE_ERR_ECG_SEG,  "pipe",   "err_seg",      HKV_EMIT_TOTAL)                         \
+    X(HKV_CNT_PIPE_ERR_ECG_ARR,  "pipe",   "err_arr",      HKV_EMIT_TOTAL)                         \
     X(HKV_CNT_PIPE_ERR_ECG_MET,  "pipe",   "err_met",      HKV_EMIT_TOTAL)                         \
     X(HKV_CNT_PIPE_ERR_PPG_MET,  "pipe",   "err_ppgmet",   HKV_EMIT_TOTAL)                         \
     /* --- cpu: run-time-stats collection health --------------------------- */                    \

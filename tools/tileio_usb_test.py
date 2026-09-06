@@ -68,6 +68,17 @@ CRC_POLY = 0x1021
 SLOT_NAMES = {0: "ECG", 1: "PPG", 2: "CPU"}
 TYPE_NAMES = {0: "signal", 1: "metrics", 2: "uio"}
 
+# Byte offsets inside the eight-byte UIO state, from TIO_UIO_*_IDX in
+# src/constants.h.
+UIO_STATE_LEN = 8
+UIO_SPEED_MODE_IDX = 4
+UIO_DEN_MODE_IDX = 5
+UIO_SEG_MODE_IDX = 6
+UIO_ARR_MODE_IDX = 7
+
+SPEED_MODES = {"lp": 0, "hp": 1}  # set_speed_mode(), src/main.cc
+AI_MODES = {"off": 0, "dsp": 1, "ai": 2}  # enum DenoiseMode, src/constants.h
+
 ECG_METRICS_FMT = "<11f"  # hr, hrv, denoiseCossim, arrLabel, denoiseIps, segmentIps,
                           # arrhythmiaIps, qos, denoiseuIpspw, segmentuIpspw, arrhythmiaIpspw
 PPG_METRICS_FMT = "<3f"   # pr, spo2, qos
@@ -122,6 +133,62 @@ def unpack_packet(packet: bytes):
     return slot, slot_type, data
 
 
+def drain_packets(rx_buf):
+    """Yield each complete packet in rx_buf as (slot, slot_type, data), or None
+    for a frame that failed start/stop/CRC validation. Consumed bytes are
+    removed from rx_buf; a partial tail is left for the next read."""
+    while len(rx_buf) >= PACKET_LEN:
+        if rx_buf[0] != START_VAL:
+            del rx_buf[0]
+            continue
+        parsed = unpack_packet(bytes(rx_buf[:PACKET_LEN]))
+        if parsed is None:
+            del rx_buf[0]
+            yield None
+            continue
+        del rx_buf[:PACKET_LEN]
+        yield parsed
+
+
+def apply_uio_overrides(dev, ep_in, ep_out, rx_buf, overrides, timeout_ms, wait_s=3.0):
+    """Read-modify-write the device's eight-byte UIO state.
+
+    apply_pending_uio_state() in src/main.cc applies every byte of a UIO write,
+    so a single control can only be changed by echoing the rest of the state
+    back unchanged -- exactly what the dashboard does with its held state. The
+    device sends its current state in reply to the zero-length request the
+    caller already wrote. See #37.
+
+    Returns (state written, device bytes read); the state is None if no echo
+    arrived in wait_s or the link failed.
+    """
+    state = None
+    rx_bytes = 0
+    deadline = time.monotonic() + wait_s
+    while state is None and time.monotonic() < deadline:
+        try:
+            chunk = dev.read(ep_in.bEndpointAddress, PACKET_LEN * 4, timeout=timeout_ms)
+        except usb.core.USBTimeoutError:
+            continue
+        except usb.core.USBError as exc:
+            print(f"USB read error during handshake: {exc}", file=sys.stderr)
+            return None, rx_bytes
+        rx_buf.extend(chunk)
+        rx_bytes += len(chunk)
+        for parsed in drain_packets(rx_buf):
+            if parsed is None:
+                continue
+            _, slot_type, data = parsed
+            if slot_type == 2 and len(data) == UIO_STATE_LEN:
+                state = bytearray(data)
+    if state is None:
+        return None, rx_bytes
+    for idx, value in overrides.items():
+        state[idx] = value
+    ep_out.write(pack_packet(0, 2, bytes(state)), timeout=timeout_ms)
+    return bytes(state), rx_bytes
+
+
 def find_vendor_endpoints(dev):
     """Return (interface_number, ep_out, ep_in) for the vendor class interface."""
     for cfg in dev:
@@ -169,11 +236,31 @@ def main():
                          help="don't send the wake-up packet first (device will likely stay silent)")
     parser.add_argument("--uio-state", metavar="HEX", default=None,
                         help="send an eight-byte UIO state after wake-up, for example 0600000000020202 for live input")
+    parser.add_argument("--speed", choices=sorted(SPEED_MODES), default=None,
+                        help="set speed mode after the handshake (default: leave the stored mode)")
+    parser.add_argument("--den", "--denoise", dest="den", choices=sorted(AI_MODES), default=None,
+                        help="set denoise mode after the handshake")
+    parser.add_argument("--seg", "--segmentation", dest="seg", choices=sorted(AI_MODES), default=None,
+                        help="set segmentation mode after the handshake")
+    parser.add_argument("--arr", "--arrhythmia", dest="arr", choices=sorted(AI_MODES), default=None,
+                        help="set arrhythmia mode after the handshake")
     parser.add_argument("--timeout-ms", type=int, default=2000, help="bulk read timeout in ms")
     parser.add_argument("--raw", action="store_true", help="print every packet's raw slot/type/data")
     parser.add_argument("--ppg-stats", action="store_true",
                         help="summarize PPG signal range, clip-rail hits, and sample-to-sample steps")
     args = parser.parse_args()
+
+    overrides = {}
+    if args.speed is not None:
+        overrides[UIO_SPEED_MODE_IDX] = SPEED_MODES[args.speed]
+    for value, idx in ((args.den, UIO_DEN_MODE_IDX), (args.seg, UIO_SEG_MODE_IDX),
+                       (args.arr, UIO_ARR_MODE_IDX)):
+        if value is not None:
+            overrides[idx] = AI_MODES[value]
+    if overrides and args.no_kick:
+        parser.error("--speed/--den/--seg/--arr need the handshake; drop --no-kick")
+    if overrides and args.uio_state is not None:
+        parser.error("--uio-state already writes the whole state; drop --speed/--den/--seg/--arr")
 
     if args.list_devices:
         for dev in usb.core.find(find_all=True):
@@ -215,6 +302,7 @@ def main():
 
     usb.util.claim_interface(dev, intf_num)
     try:
+        rx_buf = bytearray()
         if not args.no_kick:
             # Wake up TileIO TX and request its current state. A zero-length
             # UIO frame is a request; an eight-byte all-zero frame would
@@ -231,10 +319,19 @@ def main():
                 parser.error("--uio-state must encode exactly eight bytes")
             ep_out.write(pack_packet(0, 2, state), timeout=args.timeout_ms)
             print(f"sent UIO state update: {state.hex()}")
+        handshake_bytes = 0
+        if overrides:
+            written, handshake_bytes = apply_uio_overrides(
+                dev, ep_in, ep_out, rx_buf, overrides, args.timeout_ms)
+            if written is None:
+                print("error: no UIO state echo from device; nothing was changed", file=sys.stderr)
+                return 1
+            print(f"sent UIO state update: {written.hex()}")
 
-        rx_buf = bytearray()
         packet_count = 0
+        byte_count = handshake_bytes
         bad_count = 0
+        read_failed = False
         slot_counts = {}
         ppg_samples = [[], []]
         start = time.monotonic()
@@ -244,25 +341,19 @@ def main():
             try:
                 chunk = dev.read(ep_in.bEndpointAddress, PACKET_LEN * 4, timeout=args.timeout_ms)
                 rx_buf.extend(chunk)
+                byte_count += len(chunk)
             except usb.core.USBTimeoutError:
                 print(f"  (no data for {args.timeout_ms} ms)")
                 continue
             except usb.core.USBError as exc:
                 print(f"USB read error: {exc}", file=sys.stderr)
+                read_failed = True
                 break
 
-            # Resync on the start byte, then parse complete fixed-length packets.
-            while len(rx_buf) >= PACKET_LEN:
-                if rx_buf[0] != START_VAL:
-                    del rx_buf[0]
-                    continue
-                packet = bytes(rx_buf[:PACKET_LEN])
-                parsed = unpack_packet(packet)
+            for parsed in drain_packets(rx_buf):
                 if parsed is None:
                     bad_count += 1
-                    del rx_buf[0]
                     continue
-                del rx_buf[:PACKET_LEN]
 
                 slot, slot_type, data = parsed
                 packet_count += 1
@@ -283,6 +374,7 @@ def main():
                     print(f"#{packet_count} uio echo: {data.hex()}")
                 # Signal (type 0) frames arrive at high rate -- summarized in the footer only.
 
+        elapsed = time.monotonic() - start
         print(f"\ndone: packets={packet_count} bad={bad_count}")
         for (slot, slot_type), count in sorted(slot_counts.items()):
             print(f"  {SLOT_NAMES.get(slot, slot)}/{TYPE_NAMES.get(slot_type, slot_type)}: {count}")
@@ -298,11 +390,15 @@ def main():
                 print(f"  PPG {name}: n={len(samples)} range=[{min(samples)}, {max(samples)}] "
                       f"rail_hits={rail_hits} ({100.0 * rail_hits / len(samples):.1f}%) "
                       f"mean_step={mean_step:.1f} max_step={max_step}")
+        # Machine-readable footer: tools/bench/usb_bench.py gates on packets,
+        # crc_errors, and duration.
+        print(f"summary: packets={packet_count} bytes={byte_count} "
+              f"crc_errors={bad_count} duration={elapsed:.1f}s")
     finally:
         usb.util.release_interface(dev, intf_num)
         usb.util.dispose_resources(dev)
 
-    return 0
+    return 1 if read_failed else 0
 
 
 if __name__ == "__main__":

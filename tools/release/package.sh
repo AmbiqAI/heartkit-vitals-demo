@@ -886,7 +886,8 @@ chmod 644 "${PKG_ROOT}/RELEASE.md"
 write_build_info "${PKG_ROOT}/BUILD-INFO.txt" "${BOARD_DIRS[@]}"
 
 # THIRD-PARTY-NOTICES.md. The binaries in this drop link BSD-3-Clause, MIT,
-# Apache-2.0, Ambiq Apollo SDK License, AmbiqSuite EULA and ams-OSRAM code,
+# Apache-2.0, Ambiq Apollo SDK License, AmbiqSuite EULA, the heliaAOT License
+# Agreement (generated modules, Ambiq hardware only) and ams-OSRAM code,
 # and every one of those requires its notice to accompany the binary. It is
 # generated from the modules on disk rather than copied from the repo so the
 # text always matches the tree the images were built from.

@@ -40,6 +40,14 @@ target_include_directories(app_freertos_config INTERFACE
 )
 add_library(nsx::freertos_config ALIAS app_freertos_config)
 
+# The generated AOT modules leave their PUT_IN_* placement macros as no-ops and
+# expose this hook so the consumer picks the section. Must be set before the
+# bootstrap add_subdirectory()s the modules. See tools/aot/hkv_aot_attributes.h.
+set(HKV_SEGMENTATION_AOT_ATTRIBUTES_HEADER
+    "${CMAKE_CURRENT_LIST_DIR}/tools/aot/hkv_aot_attributes.h")
+set(HKV_ARRHYTHMIA_AOT_ATTRIBUTES_HEADER
+    "${CMAKE_CURRENT_LIST_DIR}/tools/aot/hkv_aot_attributes.h")
+
 nsx_bootstrap_app(
     APP_ROOT "${CMAKE_CURRENT_LIST_DIR}"
     BOARD "${NSX_BOARD}"
@@ -121,7 +129,11 @@ target_link_libraries(heartkit-vitals-demo PRIVATE
     nsx::as7058_i2c
     nsx::as7058_spi
     nsx::physiokit
+    # Denoise is still a flatbuffer through the TFLM interpreter; segmentation
+    # and arrhythmia are the generated modules below.
     nsx::helia_rt
+    nsx::hkv_segmentation_aot
+    nsx::hkv_arrhythmia_aot
     nsx::tileio_usb
 )
 
@@ -133,3 +145,68 @@ if(NSX_BOARD STREQUAL "apollo510b_evb")
 endif()
 
 nsx_finalize_app(heartkit-vitals-demo)
+
+# Bare-metal golden parity runner for the two heliaAOT modules. Off by default
+# because it is a second image for the same board, not a firmware feature: it
+# has no scheduler, no USB and no sensors, and the generated `_test_case_run()`
+# it calls resets DWT->CYCCNT, which the firmware's latency counters use.
+# See AmbiqAI/heartkit-vitals-demo#37 and tools/aot/README.md for the build
+# command (`nsx` has no -D passthrough, so the cache entry is set directly).
+option(HKV_BUILD_AOT_PARITY "Build the on-device heliaAOT golden parity runner" OFF)
+
+# Declared unconditionally so that -D on a cache with the parity image off is a
+# visible setting rather than a silent no-op on the next configure.
+option(HKV_PARITY_TFLM "Also run the parity cases through the TFLM runtime" ON)
+option(HKV_PARITY_DUMP_OPS "Dump every segmentation operator output over SWO" OFF)
+
+# The dump replaces the timed pass, so the TFLM reference has nothing to
+# compare against; linking it would only cost arena space. Shadows the cache
+# entry for this configure instead of rewriting the user's setting.
+if(HKV_PARITY_DUMP_OPS AND HKV_PARITY_TFLM)
+    message(STATUS "HKV_PARITY_DUMP_OPS is ON: forcing HKV_PARITY_TFLM OFF for this build")
+    set(HKV_PARITY_TFLM OFF)
+endif()
+
+if(HKV_BUILD_AOT_PARITY)
+    add_executable(hkv_aot_parity
+        tools/aot/parity/main.c
+        tools/aot/parity/golden_seg_cases.c
+        tools/aot/parity/golden_arr_cases.c
+    )
+    target_include_directories(hkv_aot_parity PRIVATE
+        ${CMAKE_CURRENT_LIST_DIR}/src
+        ${CMAKE_CURRENT_LIST_DIR}/tools/aot/parity
+    )
+    target_link_libraries(hkv_aot_parity PRIVATE
+        nsx::board
+        nsx::runtime_core
+        nsx::power
+        nsx::hkv_segmentation_aot
+        nsx::hkv_arrhythmia_aot
+    )
+    # The gate reference: the same flatbuffers through TFLM in this same image,
+    # so an AOT/TFLM difference cannot be blamed on the host runtime or on a
+    # different operating point. src/tflm.cc is linked verbatim to keep the op
+    # resolver identical to the firmware's; the model wrappers next to it are
+    # not, because they pull store.h and the FreeRTOS-scheduled app state --
+    # tools/aot/parity/tflm_ref.cc mirrors their init and invoke instead.
+    if(HKV_PARITY_TFLM)
+        target_sources(hkv_aot_parity PRIVATE
+            tools/aot/parity/tflm_ref.cc
+            src/tflm.cc
+        )
+        target_compile_definitions(hkv_aot_parity PRIVATE HKV_PARITY_TFLM=1)
+        # helia_dsp for arm_math.h, which src/tflm.h includes. The firmware
+        # picks it up transitively through nsx::physiokit; this image has no
+        # reason to link the physiology layer.
+        target_link_libraries(hkv_aot_parity PRIVATE nsx::helia_rt nsx::helia_dsp)
+    endif()
+
+    # Localisation aid: replaces the timed pass with a per-op output dump over
+    # SWO. Separate option so the default parity image is unchanged.
+    if(HKV_PARITY_DUMP_OPS)
+        target_compile_definitions(hkv_aot_parity PRIVATE HKV_PARITY_DUMP_OPS=1)
+    endif()
+
+    nsx_finalize_app(hkv_aot_parity)
+endif()
