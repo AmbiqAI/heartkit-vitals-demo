@@ -18,6 +18,9 @@
 #include "arm_math.h"
 #include "tflm.h"
 
+/* Arena figures are read from here for the memory baseline. See #37. */
+extern tf_model_context_t ecgSegModelCtx;
+
 /**
  * @brief Initialize ECG segmentation model
  *

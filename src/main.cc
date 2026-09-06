@@ -1420,6 +1420,7 @@ EcgProcessTask(void *pvParameters)
     (void)pvParameters;
     uint32_t err = 0;
     uint32_t tickStart;
+    uint32_t latUs;
     size_t numSamples;
     TickType_t pumpLastWake = xTaskGetTickCount();
 
@@ -1481,7 +1482,10 @@ EcgProcessTask(void *pvParameters)
             ringbuffer_push(&rbEcgSeg, &ecgDenInout[ECG_DEN_PAD_LEN], ECG_DEN_VALID_LEN);
             ringbuffer_seek(&rbEcgDen, ECG_DEN_VALID_LEN);
 
-            ecgMetResults.denoiseIps = ips_from_delta_us(dwt_delta_us(tickStart));
+            latUs = dwt_delta_us(tickStart);
+            ecgMetResults.denoiseIps = ips_from_delta_us(latUs);
+            ecgMetResults.denoiseLatUs = latUs;
+            ecgMetResults.denoiseLatMaxUs = MAX(ecgMetResults.denoiseLatMaxUs, latUs);
             /* Publish the run counter AFTER the duration it belongs to, never
              * before. CpuProcessTask runs in a different task and pairs this
              * stage's runsDelta with its *Ips to derive inference duty; with
@@ -1504,13 +1508,13 @@ EcgProcessTask(void *pvParameters)
              * "memory" clobber is what forces that. Same pattern in the
              * segmentation and metrics branches; do not remove it to "tidy up".
              *
-             * READING THE DISASSEMBLY -- CHECK THE FIELD OFFSET. Each branch
-             * stores TWO floats into ecgMetResults: the *Ips field (+16 den,
-             * +20 seg, +24 arr) and the *uIpspw field (+32, +36, +40). Only
-             * the *Ips store is ordering-critical. The *uIpspw store is
-             * expected to sit after the counter and its position means
-             * nothing. Comparing the counter against the +40 store instead of
-             * the +24 store makes a correct metrics site look inverted. */
+             * READING THE DISASSEMBLY -- CHECK THE FIELD OFFSET. Only the
+             * *Ips store (+16 den, +20 seg, +24 arr) is ordering-critical.
+             * The *uIpspw store (+32, +36, +40) and the *LatUs / *LatMaxUs
+             * stores are read by the reporter, not by the duty derivation,
+             * so their position relative to the counter means nothing.
+             * Comparing the counter against the +40 store instead of the +24
+             * store makes a correct metrics site look inverted. */
             __asm volatile("" ::: "memory");
             hkv_count(HKV_CNT_PIPE_DEN_RUNS);
             /* DASHBOARD CHANGE: the uIps/W divisor is now the sourced
@@ -1561,7 +1565,10 @@ EcgProcessTask(void *pvParameters)
 
             ringbuffer_seek(&rbEcgSeg, ECG_SEG_VALID_LEN);
 
-            ecgMetResults.segmentIps = ips_from_delta_us(dwt_delta_us(tickStart));
+            latUs = dwt_delta_us(tickStart);
+            ecgMetResults.segmentIps = ips_from_delta_us(latUs);
+            ecgMetResults.segmentLatUs = latUs;
+            ecgMetResults.segmentLatMaxUs = MAX(ecgMetResults.segmentLatMaxUs, latUs);
             /* Counter after duration, barrier required -- see the denoise
              * branch for why source order alone does not bind the compiler. */
             __asm volatile("" ::: "memory");
@@ -1597,7 +1604,10 @@ EcgProcessTask(void *pvParameters)
             ringbuffer_seek(&rbEcgMet, ECG_MET_VALID_LEN);
             ringbuffer_seek(&rbEcgMaskMet, ECG_MET_VALID_LEN);
 
-            ecgMetResults.arrhythmiaIps = ips_from_delta_us(dwt_delta_us(tickStart));
+            latUs = dwt_delta_us(tickStart);
+            ecgMetResults.arrhythmiaIps = ips_from_delta_us(latUs);
+            ecgMetResults.arrhythmiaLatUs = latUs;
+            ecgMetResults.arrhythmiaLatMaxUs = MAX(ecgMetResults.arrhythmiaLatMaxUs, latUs);
             /* Counter after duration, barrier required -- see the denoise
              * branch. This is the site where GCC was observed sinking the
              * store past the volatile increment. */
@@ -2474,6 +2484,14 @@ report_extra_cpu(void)
     hkv_log_fx2("batt_inf", 100.0f * appMetResults.battInferenceFrac);
     hkv_log_fx2("batt_pwr", appMetResults.battAvgPowerMw);
     hkv_log_fx2("avg_ips", appMetResults.avgAiIps);
+    /* Per-model inference duration, last run and since-boot maximum, in us.
+     * Measured, not derived from the *Ips rates. See #37. */
+    hkv_log_u32("den_lat_us", ecgMetResults.denoiseLatUs);
+    hkv_log_u32("seg_lat_us", ecgMetResults.segmentLatUs);
+    hkv_log_u32("arr_lat_us", ecgMetResults.arrhythmiaLatUs);
+    hkv_log_u32("den_lat_max_us", ecgMetResults.denoiseLatMaxUs);
+    hkv_log_u32("seg_lat_max_us", ecgMetResults.segmentLatMaxUs);
+    hkv_log_u32("arr_lat_max_us", ecgMetResults.arrhythmiaLatMaxUs);
     /* Measured and projected, never blended (issue #8): `util` above is the
      * measured figure cpu_proj is stated against, and cpu_proj applies the
      * per-stage duty factors (telemetry.h) with capture at 1.0. The coarse
@@ -2683,6 +2701,17 @@ main(void)
      * that does not begin with this is a capture whose build is unknown, and
      * every conclusion drawn from it is provisional. */
     hkv_log_boot();
+
+    /* Constant after AllocateTensors, so once is enough; emitted after the
+     * boot line to keep that line first in a capture. */
+    hkv_log_begin("model");
+    hkv_log_u32("den_arena_used", (uint32_t)ecgDenModelCtx.arenaUsed);
+    hkv_log_u32("den_arena_size", (uint32_t)ecgDenModelCtx.arenaSize);
+    hkv_log_u32("seg_arena_used", (uint32_t)ecgSegModelCtx.arenaUsed);
+    hkv_log_u32("seg_arena_size", (uint32_t)ecgSegModelCtx.arenaSize);
+    hkv_log_u32("arr_arena_used", (uint32_t)ecgArrModelCtx.arenaUsed);
+    hkv_log_u32("arr_arena_size", (uint32_t)ecgArrModelCtx.arenaSize);
+    hkv_log_end();
 
     nsx_freertos_start();
 

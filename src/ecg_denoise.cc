@@ -71,6 +71,7 @@ ecg_denoise_init() {
 
     // Check arena size
     bytesUsed = ctx->interpreter->arena_used_bytes();
+    ctx->arenaUsed = bytesUsed;
     nsx_printf("[DEN] Arena used: %d bytes\n", bytesUsed);
     if (bytesUsed > ctx->arenaSize) {
         TF_LITE_REPORT_ERROR(ctx->reporter, "Arena mismatch: given=%d < expected=%d bytes.", ctx->arenaSize, bytesUsed);

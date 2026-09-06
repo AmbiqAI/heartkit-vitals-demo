@@ -19,6 +19,10 @@ Parses the `HKV|<uptime_ms>|<seq>|<subsystem>|k=v` lines emitted by
   - the same for `cpu_proj_x100`, which is stated against the measured
     `util_x100` above and never blended with it, and for the per-component
     breakdown -- see `docs/developer.md`;
+  - settled mean and maximum of the per-model inference latencies
+    `den_lat_us`, `seg_lat_us` and `arr_lat_us` and their `*_max_us`
+    counterparts, in microseconds and unscaled;
+  - the per-model TFLM arena used and configured sizes, printed once;
   - attempted ECG, PPG and CPU packet rates from the `tio` subsystem, as a
     rate over the window rather than a raw total.
 
@@ -54,6 +58,24 @@ MEAN_KEYS = [
     "cpu_inf_x100",
     "cpu_tx_x100",
 ]
+# Plain microseconds, not hundredths, so these take their own mean/max pass.
+# Baseline for the TFLM/AOT comparison. See #37.
+LATENCY_KEYS = [
+    "den_lat_us",
+    "seg_lat_us",
+    "arr_lat_us",
+    "den_lat_max_us",
+    "seg_lat_max_us",
+    "arr_lat_max_us",
+]
+ARENA_KEYS = [
+    "den_arena_used",
+    "den_arena_size",
+    "seg_arena_used",
+    "seg_arena_size",
+    "arr_arena_used",
+    "arr_arena_size",
+]
 PACKET_PREFIXES = ["ecg", "ppg", "cpu"]
 
 # tio counters are cumulative, so rates come from a pair of lines about 30 s apart. See #39.
@@ -77,16 +99,36 @@ def load(path):
     return rows
 
 
-def settled_mean(rows, key, subsystem, skip):
-    values = [
+def _values(rows, key, subsystem, skip):
+    return [
         int(value)
         for row in rows
         if row[2] == subsystem
         for value in re.findall(key + r"=(\d+)", row[3])
     ][skip:]
+
+
+def settled_mean(rows, key, subsystem, skip):
+    values = _values(rows, key, subsystem, skip)
     if not values:
         return None, 0
     return round(sum(values) / len(values) / 100, 2), len(values)
+
+
+def settled_mean_max(rows, key, subsystem, skip):
+    """Mean, max and count of an unscaled integer key."""
+    values = _values(rows, key, subsystem, skip)
+    if not values:
+        return None, None, 0
+    return round(sum(values) / len(values), 1), max(values), len(values)
+
+
+def first_value(rows, key):
+    for row in rows:
+        found = re.findall(key + r"=(\d+)", row[3])
+        if found:
+            return int(found[0])
+    return None
 
 
 def report(path, label, skip):
@@ -115,6 +157,14 @@ def report(path, label, skip):
 
     for key in MEAN_KEYS:
         print(f"[{label}] {key:16s} {settled_mean(rows, key, 'cpu', skip)}")
+
+    for key in LATENCY_KEYS:
+        print(f"[{label}] {key:16s} {settled_mean_max(rows, key, 'cpu', skip)}")
+
+    arena = [(key, first_value(rows, key)) for key in ARENA_KEYS]
+    for key, value in arena:
+        if value is not None:
+            print(f"[{label}] {key:16s} {value} bytes")
 
     tio = [row for row in rows if row[2] == "tio"]
     if len(tio) > 2:
