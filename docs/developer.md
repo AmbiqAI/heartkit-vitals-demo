@@ -145,6 +145,27 @@ vendored by `nsx sync` and hash-locked in `nsx.lock`, and the AS7058 OSAL takes
 its transport as a function-pointer config (`as7058_osal_configure`), which is
 the supported substitution point.
 
+### Model arenas
+
+The three ECG models do not share a runtime. Denoise is a TFLite flatbuffer
+executed by the TFLM interpreter, so its `[DEN] Arena used` boot line is the
+interpreter's own `arena_used_bytes()` against the arena `ECG_DEN_MODEL_SIZE_KB`
+reserves: used is the measurement and size is the budget, and the gap between
+them is headroom that has to be sized by hand.
+
+Segmentation and arrhythmia run as heliaAOT modules
+(`modules/hkv_segmentation_aot`, `modules/hkv_arrhythmia_aot`). Their memory is
+planned when the module is generated, so `ecg_segmentation_arena_used()` and
+`ecg_segmentation_arena_size()` return the same number, the generated
+`hkv_segmentation_arena_sram_size`: the scratch arena is exact-fit and there is
+no headroom to size. A model that no longer fits fails to generate, not to boot.
+
+That number counts scratch only. The weights sit in a separate const arena
+(`hkv_*_arena_const_mram_size`) that the kernels read in place from MRAM, so it
+costs `.rodata` rather than SRAM and is not part of the arena figures. The
+scratch arenas are placed in `.shared` by `tools/aot/hkv_aot_attributes.h`,
+which is the section the TFLM arenas use through `AM_SHARED_RW`.
+
 ## Continuous Integration
 
 `.github/workflows/ci.yml` runs on every pull request and on pushes to `main`.

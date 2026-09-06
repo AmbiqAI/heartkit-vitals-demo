@@ -3,7 +3,7 @@
 /**
  * @file ecg_arrhythmia.h
  * @author Adam Page (adam.page@ambiq.com)
- * @brief TFLM ECG Arrhythmia model
+ * @brief heliaAOT ECG Arrhythmia model
  * @version 1.0
  * @date 2023-12-13
  *
@@ -14,9 +14,9 @@
 #ifndef __HK_ECG_ARRHYTHMIA_H
 #define __HK_ECG_ARRHYTHMIA_H
 
+#include <stddef.h>
 #include <stdint.h>
 #include "arm_math.h"
-#include "tflm.h"
 
 
 /**
@@ -26,6 +26,17 @@
  */
 uint32_t
 ecg_arrhythmia_init();
+
+/**
+ * @brief Scratch arena bytes the arrhythmia model occupies.
+ *
+ * Exact-fit like the segmentation arena; see ecg_segmentation.h.
+ */
+size_t
+ecg_arrhythmia_arena_used();
+
+size_t
+ecg_arrhythmia_arena_size();
 
 /**
  * @brief Run ECG arrhythmia model

@@ -129,7 +129,11 @@ target_link_libraries(heartkit-vitals-demo PRIVATE
     nsx::as7058_i2c
     nsx::as7058_spi
     nsx::physiokit
+    # Denoise is still a flatbuffer through the TFLM interpreter; segmentation
+    # and arrhythmia are the generated modules below.
     nsx::helia_rt
+    nsx::hkv_segmentation_aot
+    nsx::hkv_arrhythmia_aot
     nsx::tileio_usb
 )
 
@@ -139,18 +143,6 @@ if(NSX_BOARD STREQUAL "apollo510b_evb")
         nsx::tileio_ble
     )
 endif()
-
-# The heliaAOT model modules are generated and vendored ahead of the adapters
-# that will call them, so nothing links them yet. Force them into the default
-# build so a regeneration that no longer compiles fails here rather than in the
-# PR that switches segmentation and arrhythmia over.
-# `nsx build` names the app target, not `all`, so the dependency hangs off the
-# app rather than a custom ALL target.
-foreach(_aot_module hkv_segmentation_aot hkv_arrhythmia_aot)
-    if(TARGET ${_aot_module})
-        add_dependencies(heartkit-vitals-demo ${_aot_module})
-    endif()
-endforeach()
 
 nsx_finalize_app(heartkit-vitals-demo)
 
