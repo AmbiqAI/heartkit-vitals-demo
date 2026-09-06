@@ -570,6 +570,11 @@ set_speed_mode(uint8_t mode)
          * fast (or slow) by the clock ratio, and every dwt_delta_us() is
          * scaled by a stale SystemCoreClock. Issue #25. */
         timebase_sync_to_core_clock();
+        /* Samples taken at the previous operating point do not describe this
+         * one, and the max would otherwise carry them for a whole interval. */
+        ecgMetResults.denoiseLatMaxUs = 0;
+        ecgMetResults.segmentLatMaxUs = 0;
+        ecgMetResults.arrhythmiaLatMaxUs = 0;
         hkv_log_begin("app");
         hkv_log_u32("speed_mode", appState.speedMode);
         hkv_log_end();
@@ -1420,6 +1425,11 @@ EcgProcessTask(void *pvParameters)
     (void)pvParameters;
     uint32_t err = 0;
     uint32_t tickStart;
+    /* Bracket the model invoke alone. tickStart spans the whole stage (peeks,
+     * DSP filter, metrics) and feeds *Ips; the *_lat_us fields must not carry
+     * that. Zero in a DSP-mode stage means "no model ran", not "no time". #37 */
+    uint32_t modelStart;
+    uint32_t modelLatUs;
     size_t numSamples;
     TickType_t pumpLastWake = xTaskGetTickCount();
 
@@ -1463,8 +1473,11 @@ EcgProcessTask(void *pvParameters)
             if (appState.denoiseMode == DenoiseModeDsp || appState.denoiseMode == DenoiseModeAi) {
                 err = pk_apply_biquad_filtfilt_f32(&ecgFilterCtx, ecgDenInout, ecgDenInout, ECG_DEN_WINDOW_LEN, ecgDenScratch);
             }
+            modelLatUs = 0;
             if (appState.denoiseMode == DenoiseModeAi) {
+                modelStart = dwt_cycles();
                 err = ecg_denoise_inference(ecgDenInout, ecgDenInout, 0, ECG_DEN_THRESHOLD);
+                modelLatUs = dwt_delta_us(modelStart);
             } else {
                 err = 0;
             }
@@ -1482,6 +1495,8 @@ EcgProcessTask(void *pvParameters)
             ringbuffer_seek(&rbEcgDen, ECG_DEN_VALID_LEN);
 
             ecgMetResults.denoiseIps = ips_from_delta_us(dwt_delta_us(tickStart));
+            ecgMetResults.denoiseLatUs = modelLatUs;
+            ecgMetResults.denoiseLatMaxUs = MAX(ecgMetResults.denoiseLatMaxUs, modelLatUs);
             /* Publish the run counter AFTER the duration it belongs to, never
              * before. CpuProcessTask runs in a different task and pairs this
              * stage's runsDelta with its *Ips to derive inference duty; with
@@ -1504,13 +1519,13 @@ EcgProcessTask(void *pvParameters)
              * "memory" clobber is what forces that. Same pattern in the
              * segmentation and metrics branches; do not remove it to "tidy up".
              *
-             * READING THE DISASSEMBLY -- CHECK THE FIELD OFFSET. Each branch
-             * stores TWO floats into ecgMetResults: the *Ips field (+16 den,
-             * +20 seg, +24 arr) and the *uIpspw field (+32, +36, +40). Only
-             * the *Ips store is ordering-critical. The *uIpspw store is
-             * expected to sit after the counter and its position means
-             * nothing. Comparing the counter against the +40 store instead of
-             * the +24 store makes a correct metrics site look inverted. */
+             * READING THE DISASSEMBLY -- CHECK THE FIELD OFFSET. Only the
+             * *Ips store (+16 den, +20 seg, +24 arr) is ordering-critical.
+             * The *uIpspw store (+32, +36, +40) and the *LatUs / *LatMaxUs
+             * stores are read by the reporter, not by the duty derivation,
+             * so their position relative to the counter means nothing.
+             * Comparing the counter against the +40 store instead of the +24
+             * store makes a correct metrics site look inverted. */
             __asm volatile("" ::: "memory");
             hkv_count(HKV_CNT_PIPE_DEN_RUNS);
             /* DASHBOARD CHANGE: the uIps/W divisor is now the sourced
@@ -1536,6 +1551,7 @@ EcgProcessTask(void *pvParameters)
             tickStart = dwt_cycles();
             ringbuffer_peek(&rbEcgSeg, ecgSegInout, ECG_SEG_WINDOW_LEN);
 
+            modelLatUs = 0;
             if (appState.segMode == SegmentationModeDsp) {
                 /* Use the shared physiokit DSP segmentation (same as legacy)
                  * rather than an inline reimplementation: it also stamps the
@@ -1544,7 +1560,9 @@ EcgProcessTask(void *pvParameters)
                  * mode). */
                 err = ecg_physiokit_segmentation_inference(ecgSegInout, ecgSegMask, 0, &ecgMetResults.qos);
             } else if (appState.segMode == SegmentationModeAi) {
+                modelStart = dwt_cycles();
                 err = ecg_segmentation_inference(ecgSegInout, ecgSegMask, 0, ECG_SEG_THRESHOLD, &ecgMetResults.qos);
+                modelLatUs = dwt_delta_us(modelStart);
             } else {
                 err = 0;
                 for (size_t i = 0; i < ECG_SEG_WINDOW_LEN; i++) {
@@ -1562,6 +1580,8 @@ EcgProcessTask(void *pvParameters)
             ringbuffer_seek(&rbEcgSeg, ECG_SEG_VALID_LEN);
 
             ecgMetResults.segmentIps = ips_from_delta_us(dwt_delta_us(tickStart));
+            ecgMetResults.segmentLatUs = modelLatUs;
+            ecgMetResults.segmentLatMaxUs = MAX(ecgMetResults.segmentLatMaxUs, modelLatUs);
             /* Counter after duration, barrier required -- see the denoise
              * branch for why source order alone does not bind the compiler. */
             __asm volatile("" ::: "memory");
@@ -1586,12 +1606,15 @@ EcgProcessTask(void *pvParameters)
 
             err = metrics_capture_ecg(&metricsCfg, ecgMetData, ecgMaskMetData, ECG_MET_WINDOW_LEN, &ecgMetResults);
 
+            modelLatUs = 0;
             if (appState.arrMode == ArrhythmiaModeDsp) {
                 ecgMetResults.arrhythmiaLabel =
                     ecgMetResults.hr < 40 ? ECG_ARR_SB : ecgMetResults.hr > 100 ? ECG_ARR_GSVT : ECG_ARR_SR;
             } else if (appState.arrMode == ArrhythmiaModeAi) {
                 uint32_t arrLabel = ECG_ARR_INCONCLUSIVE;
+                modelStart = dwt_cycles();
                 arrErr = ecg_arrhythmia_inference(ecgMetData, ECG_ARR_THRESHOLD, &arrLabel);
+                modelLatUs = dwt_delta_us(modelStart);
                 ecgMetResults.arrhythmiaLabel = (float32_t)arrLabel;
             } else {
                 ecgMetResults.arrhythmiaLabel = 0;
@@ -1601,6 +1624,8 @@ EcgProcessTask(void *pvParameters)
             ringbuffer_seek(&rbEcgMaskMet, ECG_MET_VALID_LEN);
 
             ecgMetResults.arrhythmiaIps = ips_from_delta_us(dwt_delta_us(tickStart));
+            ecgMetResults.arrhythmiaLatUs = modelLatUs;
+            ecgMetResults.arrhythmiaLatMaxUs = MAX(ecgMetResults.arrhythmiaLatMaxUs, modelLatUs);
             /* Counter after duration, barrier required -- see the denoise
              * branch. This is the site where GCC was observed sinking the
              * store past the volatile increment. */
@@ -2481,6 +2506,23 @@ report_extra_cpu(void)
     hkv_log_fx2("batt_inf", 100.0f * appMetResults.battInferenceFrac);
     hkv_log_fx2("batt_pwr", appMetResults.battAvgPowerMw);
     hkv_log_fx2("avg_ips", appMetResults.avgAiIps);
+    /* Model invoke duration, last run and maximum within THIS report interval,
+     * in us. Measured, not derived from the *Ips rates. Zero means no invoke
+     * COMPLETED in the interval: the stage is in DSP or off mode, or it is in
+     * AI mode but its cadence is slower than the report rotation, which is the
+     * common case. Read HKV_CNT_PIPE_*_RUNS to tell the two apart. See #37. */
+    hkv_log_u32("den_lat_us", ecgMetResults.denoiseLatUs);
+    hkv_log_u32("seg_lat_us", ecgMetResults.segmentLatUs);
+    hkv_log_u32("arr_lat_us", ecgMetResults.arrhythmiaLatUs);
+    hkv_log_u32("den_lat_max_us", ecgMetResults.denoiseLatMaxUs);
+    hkv_log_u32("seg_lat_max_us", ecgMetResults.segmentLatMaxUs);
+    hkv_log_u32("arr_lat_max_us", ecgMetResults.arrhythmiaLatMaxUs);
+    /* Interval-scoped, so the window restarts here. A since-boot max would
+     * latch a sample taken under the other operating point and keep reporting
+     * it after a perf-mode switch (set_speed_mode also clears these). */
+    ecgMetResults.denoiseLatMaxUs = 0;
+    ecgMetResults.segmentLatMaxUs = 0;
+    ecgMetResults.arrhythmiaLatMaxUs = 0;
     /* Measured and projected, never blended (issue #8): `util` above is the
      * measured figure cpu_proj is stated against, and cpu_proj applies the
      * per-stage duty factors (telemetry.h) with capture at 1.0. The coarse
@@ -2690,6 +2732,17 @@ main(void)
      * that does not begin with this is a capture whose build is unknown, and
      * every conclusion drawn from it is provisional. */
     hkv_log_boot();
+
+    /* Constant after AllocateTensors, so once is enough; emitted after the
+     * boot line to keep that line first in a capture. */
+    hkv_log_begin("model");
+    hkv_log_u32("den_arena_used", (uint32_t)ecgDenModelCtx.arenaUsed);
+    hkv_log_u32("den_arena_size", (uint32_t)ecgDenModelCtx.arenaSize);
+    hkv_log_u32("seg_arena_used", (uint32_t)ecg_segmentation_arena_used());
+    hkv_log_u32("seg_arena_size", (uint32_t)ecg_segmentation_arena_size());
+    hkv_log_u32("arr_arena_used", (uint32_t)ecg_arrhythmia_arena_used());
+    hkv_log_u32("arr_arena_size", (uint32_t)ecg_arrhythmia_arena_size());
+    hkv_log_end();
 
     nsx_freertos_start();
 

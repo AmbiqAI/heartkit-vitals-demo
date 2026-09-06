@@ -19,6 +19,14 @@ Parses the `HKV|<uptime_ms>|<seq>|<subsystem>|k=v` lines emitted by
   - the same for `cpu_proj_x100`, which is stated against the measured
     `util_x100` above and never blended with it, and for the per-component
     breakdown -- see `docs/developer.md`;
+  - settled mean and maximum of the per-model invoke latencies
+    `den_lat_us`, `seg_lat_us` and `arr_lat_us`, in microseconds and
+    unscaled, and the maximum only of their `*_lat_max_us` counterparts,
+    which are already per-interval maxima and so are never averaged;
+  - the per-model arena used and configured sizes, printed once, or an
+    explicit `none` row when the capture has no `model` line. Denoise is a
+    TFLM measurement against a hand-sized budget; the AOT pairs are one
+    planned number reported twice -- see `docs/developer.md`;
   - attempted ECG, PPG and CPU packet rates from the `tio` subsystem, as a
     rate over the window rather than a raw total.
 
@@ -54,6 +62,28 @@ MEAN_KEYS = [
     "cpu_inf_x100",
     "cpu_tx_x100",
 ]
+# Plain microseconds, not hundredths, so these take their own mean/max pass.
+# Baseline for the TFLM/AOT comparison. See #37.
+LATENCY_KEYS = [
+    "den_lat_us",
+    "seg_lat_us",
+    "arr_lat_us",
+]
+# Already a max over the firmware's report interval; averaging one is
+# meaningless, so these get max and count only.
+LATENCY_MAX_KEYS = [
+    "den_lat_max_us",
+    "seg_lat_max_us",
+    "arr_lat_max_us",
+]
+ARENA_KEYS = [
+    "den_arena_used",
+    "den_arena_size",
+    "seg_arena_used",
+    "seg_arena_size",
+    "arr_arena_used",
+    "arr_arena_size",
+]
 PACKET_PREFIXES = ["ecg", "ppg", "cpu"]
 
 # tio counters are cumulative, so rates come from a pair of lines about 30 s apart. See #39.
@@ -77,16 +107,46 @@ def load(path):
     return rows
 
 
-def settled_mean(rows, key, subsystem, skip):
-    values = [
+def _values(rows, key, subsystem, skip):
+    return [
         int(value)
         for row in rows
         if row[2] == subsystem
         for value in re.findall(key + r"=(\d+)", row[3])
     ][skip:]
+
+
+def settled_mean(rows, key, subsystem, skip):
+    values = _values(rows, key, subsystem, skip)
     if not values:
         return None, 0
     return round(sum(values) / len(values) / 100, 2), len(values)
+
+
+def settled_mean_max(rows, key, subsystem, skip):
+    """Mean, max and count of an unscaled integer key."""
+    values = _values(rows, key, subsystem, skip)
+    if not values:
+        return None, None, 0
+    return round(sum(values) / len(values), 1), max(values), len(values)
+
+
+def settled_max(rows, key, subsystem, skip):
+    """Max and count of an unscaled integer key. Not averaged: see #37."""
+    values = _values(rows, key, subsystem, skip)
+    if not values:
+        return None, 0
+    return max(values), len(values)
+
+
+def first_value(rows, key, subsystem):
+    for row in rows:
+        if row[2] != subsystem:
+            continue
+        found = re.findall(key + r"=(\d+)", row[3])
+        if found:
+            return int(found[0])
+    return None
 
 
 def report(path, label, skip):
@@ -115,6 +175,22 @@ def report(path, label, skip):
 
     for key in MEAN_KEYS:
         print(f"[{label}] {key:16s} {settled_mean(rows, key, 'cpu', skip)}")
+
+    for key in LATENCY_KEYS:
+        print(f"[{label}] {key:16s} {settled_mean_max(rows, key, 'cpu', skip)}")
+
+    for key in LATENCY_MAX_KEYS:
+        print(f"[{label}] {key:16s} {settled_max(rows, key, 'cpu', skip)}")
+
+    has_model = any(row[2] == "model" for row in rows)
+    for key in ARENA_KEYS:
+        value = first_value(rows, key, "model")
+        if value is not None:
+            print(f"[{label}] {key:16s} {value} bytes")
+        elif has_model:
+            print(f"[{label}] {key:16s} none (key not on the model line)")
+        else:
+            print(f"[{label}] {key:16s} none (model line not in capture)")
 
     tio = [row for row in rows if row[2] == "tio"]
     if len(tio) > 2:

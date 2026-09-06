@@ -18,7 +18,6 @@
 #include <stdint.h>
 #include "arm_math.h"
 
-
 /**
  * @brief Initialize ECG arrhythmia model
  *

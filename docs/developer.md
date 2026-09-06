@@ -117,6 +117,43 @@ the task is blocked while the IOM moves the FIFO, so that transfer time is
 billed as idle even though the peripheral is active for a few milliseconds per
 interrupt.
 
+### Per-model inference baseline
+
+Latency fields are on the `cpu` line, once per report interval. Arena fields
+are on the `model` line, once per boot. Both are unscaled integers.
+
+The latency fields bracket the model invoke alone, not the surrounding stage:
+the ring-buffer peeks, the DSP filter and the metrics pass are excluded. A
+zero in a `*_lat_max_us` field means no model invoke completed in that report
+interval. That is the case for a stage in DSP or off mode, and routinely for a
+stage in AI mode too, because the stage cadence is slower than the report
+rotation. Use the `HKV_CNT_PIPE_*_RUNS` counters to tell an idle stage from one
+that simply had no run land in the window. Stage-wide time remains available as
+the `*_ips` rates.
+
+| Field | Line | Meaning |
+| --- | --- | --- |
+| `den_lat_us` | `cpu` | Denoise model invoke duration, last run, microseconds |
+| `seg_lat_us` | `cpu` | Segmentation model invoke duration, last run, microseconds |
+| `arr_lat_us` | `cpu` | Arrhythmia model invoke duration, last run, microseconds |
+| `den_lat_max_us` | `cpu` | Denoise model invoke duration, maximum within the report interval |
+| `seg_lat_max_us` | `cpu` | Segmentation model invoke duration, maximum within the report interval |
+| `arr_lat_max_us` | `cpu` | Arrhythmia model invoke duration, maximum within the report interval |
+| `den_arena_used` | `model` | Denoise TFLM arena bytes reported by `arena_used_bytes()` |
+| `den_arena_size` | `model` | Denoise TFLM arena bytes configured |
+| `seg_arena_used` | `model` | Segmentation heliaAOT scratch arena bytes |
+| `seg_arena_size` | `model` | Segmentation heliaAOT scratch arena bytes, equal to used |
+| `arr_arena_used` | `model` | Arrhythmia heliaAOT scratch arena bytes |
+| `arr_arena_size` | `model` | Arrhythmia heliaAOT scratch arena bytes, equal to used |
+
+The denoise pair is a measurement against a hand-sized budget; the AOT pairs are
+one planned number reported twice. See "Model arenas" below.
+
+The maxima are reset after every `cpu` line and again on a `speed_mode` change,
+so each report describes its own interval at one operating point rather than
+the whole run. They are wall clock: an invoke preempted by a higher-priority
+task carries that time, so a lone outlier is not by itself a model cost.
+
 ### Sensor bus
 
 The AS7058 FIFO read runs at 400 kHz (`AS7058_I2C_SPEED_HZ` in

@@ -41,6 +41,9 @@ typedef struct {
     TflmProfiler *profiler;
     TflmOpResolver *resolver;
     tflite::MicroInterpreter *interpreter;
+    /* arena_used_bytes() after AllocateTensors; 0 until the model is
+     * initialized. Read against arenaSize for the memory baseline. See #37. */
+    size_t arenaUsed;
 } tf_model_context_t;
 
 
