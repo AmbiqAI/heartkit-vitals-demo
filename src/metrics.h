@@ -44,7 +44,9 @@ typedef struct {
     float32_t segmentuIpspw;
     float32_t arrhythmiaIpspw;
     /* Measured model invoke duration and its maximum within the current report
-     * interval, in us; zero when the stage ran in DSP mode. The baseline the
+     * interval, in us. Zero means no invoke completed in that interval: DSP or
+     * off mode, or AI mode whose cadence is slower than the report rotation
+     * (HKV_CNT_PIPE_*_RUNS disambiguates). The baseline the
      * TFLM/AOT comparison is stated against; appended so the TileIO metrics
      * packet offsets are untouched. See #37. */
     uint32_t denoiseLatUs;

@@ -1425,7 +1425,6 @@ EcgProcessTask(void *pvParameters)
     (void)pvParameters;
     uint32_t err = 0;
     uint32_t tickStart;
-    uint32_t latUs;
     /* Bracket the model invoke alone. tickStart spans the whole stage (peeks,
      * DSP filter, metrics) and feeds *Ips; the *_lat_us fields must not carry
      * that. Zero in a DSP-mode stage means "no model ran", not "no time". #37 */
@@ -1495,8 +1494,7 @@ EcgProcessTask(void *pvParameters)
             ringbuffer_push(&rbEcgSeg, &ecgDenInout[ECG_DEN_PAD_LEN], ECG_DEN_VALID_LEN);
             ringbuffer_seek(&rbEcgDen, ECG_DEN_VALID_LEN);
 
-            latUs = dwt_delta_us(tickStart);
-            ecgMetResults.denoiseIps = ips_from_delta_us(latUs);
+            ecgMetResults.denoiseIps = ips_from_delta_us(dwt_delta_us(tickStart));
             ecgMetResults.denoiseLatUs = modelLatUs;
             ecgMetResults.denoiseLatMaxUs = MAX(ecgMetResults.denoiseLatMaxUs, modelLatUs);
             /* Publish the run counter AFTER the duration it belongs to, never
@@ -1581,8 +1579,7 @@ EcgProcessTask(void *pvParameters)
 
             ringbuffer_seek(&rbEcgSeg, ECG_SEG_VALID_LEN);
 
-            latUs = dwt_delta_us(tickStart);
-            ecgMetResults.segmentIps = ips_from_delta_us(latUs);
+            ecgMetResults.segmentIps = ips_from_delta_us(dwt_delta_us(tickStart));
             ecgMetResults.segmentLatUs = modelLatUs;
             ecgMetResults.segmentLatMaxUs = MAX(ecgMetResults.segmentLatMaxUs, modelLatUs);
             /* Counter after duration, barrier required -- see the denoise
@@ -1623,8 +1620,7 @@ EcgProcessTask(void *pvParameters)
             ringbuffer_seek(&rbEcgMet, ECG_MET_VALID_LEN);
             ringbuffer_seek(&rbEcgMaskMet, ECG_MET_VALID_LEN);
 
-            latUs = dwt_delta_us(tickStart);
-            ecgMetResults.arrhythmiaIps = ips_from_delta_us(latUs);
+            ecgMetResults.arrhythmiaIps = ips_from_delta_us(dwt_delta_us(tickStart));
             ecgMetResults.arrhythmiaLatUs = modelLatUs;
             ecgMetResults.arrhythmiaLatMaxUs = MAX(ecgMetResults.arrhythmiaLatMaxUs, modelLatUs);
             /* Counter after duration, barrier required -- see the denoise
@@ -2504,8 +2500,10 @@ report_extra_cpu(void)
     hkv_log_fx2("batt_pwr", appMetResults.battAvgPowerMw);
     hkv_log_fx2("avg_ips", appMetResults.avgAiIps);
     /* Model invoke duration, last run and maximum within THIS report interval,
-     * in us. Measured, not derived from the *Ips rates. Zero means no model ran
-     * in the interval (stage in DSP mode). See #37. */
+     * in us. Measured, not derived from the *Ips rates. Zero means no invoke
+     * COMPLETED in the interval: the stage is in DSP or off mode, or it is in
+     * AI mode but its cadence is slower than the report rotation, which is the
+     * common case. Read HKV_CNT_PIPE_*_RUNS to tell the two apart. See #37. */
     hkv_log_u32("den_lat_us", ecgMetResults.denoiseLatUs);
     hkv_log_u32("seg_lat_us", ecgMetResults.segmentLatUs);
     hkv_log_u32("arr_lat_us", ecgMetResults.arrhythmiaLatUs);

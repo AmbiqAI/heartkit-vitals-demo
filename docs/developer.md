@@ -121,9 +121,12 @@ are on the `model` line, once per boot. Both are unscaled integers.
 
 The latency fields bracket the model invoke alone, not the surrounding stage:
 the ring-buffer peeks, the DSP filter and the metrics pass are excluded. A
-stage running in DSP mode contributes no model invoke, so both of its fields
-read 0 for that report. Stage-wide time remains available as the `*_ips`
-rates.
+zero in a `*_lat_max_us` field means no model invoke completed in that report
+interval. That is the case for a stage in DSP or off mode, and routinely for a
+stage in AI mode too, because the stage cadence is slower than the report
+rotation. Use the `HKV_CNT_PIPE_*_RUNS` counters to tell an idle stage from one
+that simply had no run land in the window. Stage-wide time remains available as
+the `*_ips` rates.
 
 | Field | Line | Meaning |
 | --- | --- | --- |
