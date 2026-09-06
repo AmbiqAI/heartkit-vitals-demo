@@ -30,7 +30,7 @@
     }],
 
     "sampling_rate": 100,
-    "frame_size": 250,
+    "frame_size": 256,
 
     "samples_per_patient": 5,
     "val_samples_per_patient": 10,
