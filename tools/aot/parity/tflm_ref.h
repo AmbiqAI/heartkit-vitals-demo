@@ -5,7 +5,8 @@
  * @brief TFLM reference path for the parity runner.
  *
  * Same runtime, resolver, flatbuffers, arena sizes and placement the firmware
- * uses, driven from the parity runner's bare-metal main(). See #37.
+ * uses, driven from the parity runner's bare-metal main().
+ * See AmbiqAI/heartkit-vitals-demo#37.
  */
 #ifndef __HKV_PARITY_TFLM_REF_H
 #define __HKV_PARITY_TFLM_REF_H

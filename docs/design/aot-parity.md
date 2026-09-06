@@ -29,11 +29,16 @@ On-device runner (`tools/aot/parity/main.c`, target `hkv_aot_parity`):
 - `HKV_PARITY_DUMP_OPS` dumps every operator output for segmentation case 0,
   compared on host against a LiteRT all-tensor dump.
 
-Reproduction artifacts (scratchpad): `parity-final.log`, `opdump-seg-case0.log`,
-`compare_ops.py`, `sim_ops.py`, `analyze_mean.py`, `aot-eval/golden-*.npz`,
+Reproduction artifacts (scratchpad): `parity-final.log`, `parity-run2.log`
+(the 5.8 M cycle figure in section 6), `parity-run3.log` (the gate run of
+section 5), `opdump-seg-case0.log`, `compare_ops.py`, `sim_ops.py`,
+`sim_conv_rounding.py`, `analyze_mean.py`, `aot-eval/golden-*.npz`,
 `aot-eval/golden-arr.xnnpack.npz`, `aot-eval/diag/seg_case0_ref.{npz,json}`.
 
 ## 3. Findings, segmentation case 0 (31 ops)
+
+Per-op numbers are from `opdump-seg-case0.log`; the whole-model figures below
+the table are from `parity-final.log`.
 
 | Op class | Result | Cause |
 |---|---|---|
@@ -41,7 +46,7 @@ Reproduction artifacts (scratchpad): `parity-final.log`, `opdump-seg-case0.log`,
 | CONV 1x1 (op 3) | 1 of 4096 elements off by 1 LSB | LiteRT's 1x1 path rounds once; CMSIS-NN requantize double-rounds |
 | DEPTHWISE_CONV | exact | LiteRT double-rounds here too |
 | MEAN | 6 of 16 channels differ | LiteRT requantizes the raw sum then adds a folded bias; `arm_mean_s8` subtracts `input_zp * N` first |
-| SOFTMAX output | 6 to 13 LSB over the 8 cases | 1 LSB residuals compounded by three squeeze-and-excite MUL gates |
+| SOFTMAX output | 6 to 12 LSB over the 8 cases | 1 LSB residuals compounded by three squeeze-and-excite MUL gates |
 
 The op-3 element is index 594: accumulator 6631, multiplier 1834215273, shift -6,
 true fraction 0.4952, exactly where single and double rounding separate. MEAN is a
@@ -54,7 +59,7 @@ agree on all 8 cases; two cases exceed the 0.008 probability band.
 
 ## 4. Why LiteRT is not the bar
 
-The shipped TFLM firmware (`nsx-helia-rt` 1.16.0, backend `helia`, `nsx.yml:42`)
+The shipped TFLM firmware (`nsx-helia-rt` 1.16.0, backend `helia`, `nsx.lock:279`)
 calls the same ns-cmsis-nn kernels for every op in these two models:
 `arm_mean_s8`, `arm_convolve_wrapper_s8`, `arm_depthwise_conv_wrapper_s8`,
 `arm_mul_s8`, `arm_minimum_s8`, `arm_relu_s8`, `arm_softmax_s8`
@@ -70,7 +75,7 @@ firmware label, probabilities within 0.008. Status: **met. Measured 8/8 on both
 models at both operating points (`parity-run3.log`, `HKV_PARITY_TFLM=ON`):
 segmentation is bit-exact against TFLM, max 0 LSB with an identical mask on
 every case; arrhythmia agrees on argmax and firmware label with a maximum
-probability difference of 0.0078, one int8 LSB of the 1/256 output scale.**
+probability difference of 0.0078, two int8 LSB of the 1/256 output scale.**
 
 That result is the direct confirmation of section 4: the whole LiteRT delta in
 section 3 is a LiteRT-versus-TFLM kernel difference that the product already
@@ -87,8 +92,8 @@ Both references are emitted by the same runner, tagged `ref=` per line, and
 ## 6. Timing and layout
 
 DWT cycles are comparable only when the runner applies the firmware power
-configuration. Without it segmentation read 13.7 M cycles against 5.8 M with it:
-a reporting error, not a regression.
+configuration. Without it segmentation read 13.7 M cycles against 5.8 M with it
+(`parity-run2.log`): a reporting error, not a regression.
 
 Mean cycles per run, both runtimes in the same image at the same operating point
 (`parity-run3.log`):
@@ -118,3 +123,8 @@ and multi-arena are later measured optimizations, not part of the parity run.
 - The generated `hkv_segmentation_test_case_run()` self-check returns rc=1 while
   all 8 golden cases pass against TFLM. The generator's own bundled vector is
   the suspect, not the module; not chased here.
+- The generated context reports its `size` field as bytes while the value is in
+  elements. A helia-aot documentation or field-naming fix, not a demo-side one.
+- Filed upstream from this work: AmbiqAI/helia-aot#388 and
+  AmbiqAI/ns-cmsis-nn#468 (the MEAN and requantize rounding forms above), and
+  AmbiqAI/helia-aot#389 (float MUL broadcast).

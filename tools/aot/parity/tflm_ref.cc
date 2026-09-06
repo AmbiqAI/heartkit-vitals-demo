@@ -65,14 +65,16 @@ hkv_tflm_ref_init(void) {
  * has no default constructor, so each model needs its own function-static. */
 static int32_t
 finish_model(tf_model_context_t *ctx, tflite::MicroInterpreter *interpreter, const char *tag) {
+    /* ctx->interpreter is what the run functions test for readiness, so it is
+     * published only once the tensors behind it exist. */
+    if (interpreter->AllocateTensors() != kTfLiteOk) { return 2; }
+
+    nsx_printf("HKV|parity|tflm_arena model=%s used=%u given=%u\r\n", tag, (unsigned)interpreter->arena_used_bytes(),
+               (unsigned)ctx->arenaSize);
+
+    ctx->input = interpreter->input(0);
+    ctx->output = interpreter->output(0);
     ctx->interpreter = interpreter;
-    if (ctx->interpreter->AllocateTensors() != kTfLiteOk) { return 2; }
-
-    nsx_printf("HKV|parity|tflm_arena model=%s used=%u given=%u\r\n", tag,
-               (unsigned)ctx->interpreter->arena_used_bytes(), (unsigned)ctx->arenaSize);
-
-    ctx->input = ctx->interpreter->input(0);
-    ctx->output = ctx->interpreter->output(0);
     return 0;
 }
 

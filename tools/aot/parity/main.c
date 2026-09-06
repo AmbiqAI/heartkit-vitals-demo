@@ -53,7 +53,7 @@
 #define SEG_TIME_LEN (GOLDEN_SEG_OUTPUT_LEN / ECG_SEG_NUM_CLASS)
 #define ARR_NUM_CLASS (GOLDEN_ARR_OUTPUT_LEN)
 
-/* Pass rule agreed on #37: segmentation must be within one output LSB and
+/* Agreed pass rule: segmentation must be within one output LSB and
  * produce a byte-identical thresholded mask; arrhythmia must agree on argmax
  * and stay within ~2 LSB of the int8 1/256 probability scale it was distilled
  * from. */
@@ -115,7 +115,8 @@ static int32_t tflmArrInitRc = -1;
  * scheduler, so making SystemCoreClock truthful is the whole job. The HAL query
  * is the read side of the mode select nsx_power_* performs; the two frequencies
  * come from the HAL's own macros. Without this, cycles/us conversions and the
- * reported clk_hz keep the boot value after the HP switch. Issue #25. */
+ * reported clk_hz keep the boot value after the HP switch.
+ * See AmbiqAI/heartkit-vitals-demo#25. */
 static void
 sync_core_clock(void)
 {
@@ -144,8 +145,7 @@ static hkv_arrhythmia_model_context_t arrCtx = {.callback = NULL};
 #if defined(HKV_PARITY_DUMP_OPS)
 /* Per-op output dump, opt-in at compile time. Off by default: it emits ~70 KB of
  * hex over SWO per pass and replaces the timed parity pass entirely. Used to
- * localise the segmentation divergence against a LiteRT builtin-kernel dump.
- * See AmbiqAI/heartkit-vitals-demo#37. */
+ * localise the segmentation divergence against a LiteRT builtin-kernel dump. */
 
 /* op id -> its output tensor. The enum value is not the LiteRT tensor index
  * (the generator interns extra requant slots), so the LiteRT index is carried
@@ -289,7 +289,7 @@ argmax_f32(const float *v, int n)
  * model output, not of what it is being held against. */
 static void
 compare_seg(case_result_t *r, const int8_t *actual, const int8_t *ref, int32_t rc, uint32_t cycles,
-            uint32_t refCycles, float scale, int32_t zp)
+            uint32_t refCycles, float scale, int32_t zp, float refScale, int32_t refZp)
 {
     int maxLsb = 0;
     for (int i = 0; i < GOLDEN_SEG_OUTPUT_LEN; i++) {
@@ -311,14 +311,15 @@ compare_seg(case_result_t *r, const int8_t *actual, const int8_t *ref, int32_t r
     }
 
     /* Mask equality is the property the firmware actually ships: a sub-LSB
-     * output difference that straddles ECG_SEG_THRESHOLD still changes what
-     * the host sees. */
+     * output difference that straddles ECG_SEG_THRESHOLD still changes what the
+     * host sees. Each side is thresholded with its own quantization, so the
+     * comparison stays valid if the reference ever reports a different scale. */
     memset(maskActual, 0, sizeof(maskActual));
     memset(maskRef, 0, sizeof(maskRef));
     hkv_seg_output_mask(maskActual, hkv_host_len(SEG_TIME_LEN), actual, NULL, hkv_tensor_len(SEG_TIME_LEN),
                         ECG_SEG_NUM_CLASS, ECG_SEG_PAD_LEN, ECG_SEG_THRESHOLD, scale, zp);
     hkv_seg_output_mask(maskRef, hkv_host_len(SEG_TIME_LEN), ref, NULL, hkv_tensor_len(SEG_TIME_LEN),
-                        ECG_SEG_NUM_CLASS, ECG_SEG_PAD_LEN, ECG_SEG_THRESHOLD, scale, zp);
+                        ECG_SEG_NUM_CLASS, ECG_SEG_PAD_LEN, ECG_SEG_THRESHOLD, refScale, refZp);
     int maskEq = memcmp(maskActual, maskRef, sizeof(maskActual)) == 0;
 
     r->rc = rc;
@@ -381,19 +382,25 @@ run_seg_case(run_mode_t mode, int caseIdx)
     uint32_t cycles = DWT->CYCCNT - t0;
     memcpy(aotSegOut, out, GOLDEN_SEG_OUTPUT_LEN);
 
-    compare_seg(&segRes[mode][REF_GOLDEN][caseIdx], aotSegOut, golden_seg_outputs[caseIdx], rc, cycles, 0, scale, zp);
+    /* The golden fixture is the same output tensor captured on host, so it
+     * carries the same quantization on both sides. */
+    compare_seg(&segRes[mode][REF_GOLDEN][caseIdx], aotSegOut, golden_seg_outputs[caseIdx], rc, cycles, 0, scale, zp,
+                scale, zp);
 
 #if defined(HKV_PARITY_TFLM)
-    uint32_t refCycles = 0;
-    float refScale = scale;
-    int32_t refZp = zp;
-    memset(tflmSegOut, 0, sizeof(tflmSegOut));
-    int32_t refRc = hkv_tflm_ref_seg_run(golden_seg_inputs[caseIdx], GOLDEN_SEG_INPUT_LEN, tflmSegOut,
-                                         GOLDEN_SEG_OUTPUT_LEN, &refCycles, &refScale, &refZp);
-    /* A failure on either side has to surface as a failing case, so the AOT rc
-     * wins and the reference rc only fills in when the AOT side was clean. */
-    compare_seg(&segRes[mode][REF_TFLM][caseIdx], aotSegOut, tflmSegOut, rc != hkv_segmentation_status_ok ? rc : refRc,
-                cycles, refCycles, refScale, refZp);
+    if (tflmSegInitRc == 0) {
+        uint32_t refCycles = 0;
+        float refScale = scale;
+        int32_t refZp = zp;
+        memset(tflmSegOut, 0, sizeof(tflmSegOut));
+        int32_t refRc = hkv_tflm_ref_seg_run(golden_seg_inputs[caseIdx], GOLDEN_SEG_INPUT_LEN, tflmSegOut,
+                                             GOLDEN_SEG_OUTPUT_LEN, &refCycles, &refScale, &refZp);
+        /* A failure on either side has to surface as a failing case, so the AOT
+         * rc wins and the reference rc only fills in when the AOT side was
+         * clean. */
+        compare_seg(&segRes[mode][REF_TFLM][caseIdx], aotSegOut, tflmSegOut,
+                    rc != hkv_segmentation_status_ok ? rc : refRc, cycles, refCycles, scale, zp, refScale, refZp);
+    }
 #endif
 
     for (int ref = REF_FIRST; ref < REF_COUNT; ref++) { segPassCount[mode][ref] += segRes[mode][ref][caseIdx].pass; }
@@ -415,12 +422,14 @@ run_arr_case(run_mode_t mode, int caseIdx)
     compare_arr(&arrRes[mode][REF_GOLDEN][caseIdx], aotArrOut, golden_arr_outputs[caseIdx], rc, cycles, 0);
 
 #if defined(HKV_PARITY_TFLM)
-    uint32_t refCycles = 0;
-    memset(tflmArrOut, 0, sizeof(tflmArrOut));
-    int32_t refRc = hkv_tflm_ref_arr_run(golden_arr_inputs[caseIdx], GOLDEN_ARR_INPUT_LEN, tflmArrOut, ARR_NUM_CLASS,
-                                         &refCycles);
-    compare_arr(&arrRes[mode][REF_TFLM][caseIdx], aotArrOut, tflmArrOut, rc != hkv_arrhythmia_status_ok ? rc : refRc,
-                cycles, refCycles);
+    if (tflmArrInitRc == 0) {
+        uint32_t refCycles = 0;
+        memset(tflmArrOut, 0, sizeof(tflmArrOut));
+        int32_t refRc = hkv_tflm_ref_arr_run(golden_arr_inputs[caseIdx], GOLDEN_ARR_INPUT_LEN, tflmArrOut,
+                                             ARR_NUM_CLASS, &refCycles);
+        compare_arr(&arrRes[mode][REF_TFLM][caseIdx], aotArrOut, tflmArrOut,
+                    rc != hkv_arrhythmia_status_ok ? rc : refRc, cycles, refCycles);
+    }
 #endif
 
     for (int ref = REF_FIRST; ref < REF_COUNT; ref++) { arrPassCount[mode][ref] += arrRes[mode][ref][caseIdx].pass; }
@@ -432,6 +441,19 @@ mean_u32(const uint32_t *v, int n)
     uint32_t sum = 0;
     for (int i = 0; i < n; i++) { sum += v[i]; }
     return n > 0 ? sum / (uint32_t)n : 0;
+}
+
+/* 0 tells the report the reference could not run at all, so it fails on the
+ * missing evidence instead of on the zeroed rows it would otherwise see. */
+static int
+ref_evaluated(ref_t ref)
+{
+#if defined(HKV_PARITY_TFLM)
+    if (ref == REF_TFLM) { return (tflmSegInitRc == 0) && (tflmArrInitRc == 0); }
+#else
+    (void)ref;
+#endif
+    return 1;
 }
 
 static void
@@ -465,9 +487,9 @@ print_mode_ref(run_mode_t mode, ref_t ref)
     }
 
     nsx_printf("HKV|parity|summary mode=%s ref=%s seg_pass=%d/%d arr_pass=%d/%d seg_init_rc=%u arr_init_rc=%u "
-               "clk_hz=%u\r\n",
+               "evaluated=%d clk_hz=%u\r\n",
                name, refName, segPassCount[mode][ref], GOLDEN_SEG_NUM_CASES, arrPassCount[mode][ref],
-               GOLDEN_ARR_NUM_CASES, (unsigned)segInitRc[mode], (unsigned)arrInitRc[mode],
+               GOLDEN_ARR_NUM_CASES, (unsigned)segInitRc[mode], (unsigned)arrInitRc[mode], ref_evaluated(ref),
                (unsigned)modeClockHz[mode]);
 }
 
@@ -587,10 +609,12 @@ main(void)
 #if defined(HKV_PARITY_TFLM)
     /* Before the AOT self-checks so an AllocateTensors() failure is reported
      * even if a self-check hangs, and once for both modes: the interpreter and
-     * its arena are mode independent. */
-    tflmSegInitRc = hkv_tflm_ref_init();
-    if (tflmSegInitRc == 0) { tflmSegInitRc = hkv_tflm_ref_seg_init(); }
-    tflmArrInitRc = hkv_tflm_ref_arr_init();
+     * its arena are mode independent. A model whose init failed is not compared
+     * at all; the summary marks the reference unevaluated so the report fails
+     * rather than reading eight silent mismatches as an AOT defect. */
+    int32_t tflmRc = hkv_tflm_ref_init();
+    tflmSegInitRc = tflmRc == 0 ? hkv_tflm_ref_seg_init() : tflmRc;
+    tflmArrInitRc = tflmRc == 0 ? hkv_tflm_ref_arr_init() : tflmRc;
 #endif
 
     segSelf = hkv_segmentation_test_case_init();

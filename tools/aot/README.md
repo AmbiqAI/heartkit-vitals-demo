@@ -56,8 +56,8 @@ tensor shapes and quantization, and the firmware constants the stimulus was
 preprocessed with. `den` fixtures are
 included for completeness; denoise stays on TFLM.
 
-The generator, `tools/aot/make_golden.py`, lands with PR #77 — until then,
-regenerate goldens from that branch.
+`golden/` is committed here. The generator that produces it,
+`tools/aot/make_golden.py`, lands with AmbiqAI/heartkit-vitals-demo#77.
 
 Tolerances: segmentation 1 (int8 output, 1 LSB); arrhythmia 0.008 (float32
 softmax, about 2 LSB of the int8 1/256 probability scale).

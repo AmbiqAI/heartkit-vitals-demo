@@ -15,8 +15,10 @@ flatbuffer run through TFLM on the same device, so a mismatch is attributable
 to the AOT compiler. The `ref=golden` table is the host LiteRT capture and is
 informational: it also carries LiteRT-vs-TFLM kernel differences.
 
-Exits 1 if a tflm case failed, if the tflm table is absent, or if `PARITY_DONE`
-is missing: a capture that was cut short must not read as a pass.
+Exits 1 if a tflm case failed, if the tflm table is absent or short of the
+expected case count, if a tflm summary reports fewer passes than cases, or if
+`PARITY_DONE` is missing: a capture that was cut short, or one that lost the
+one line carrying a failure, must not read as a pass.
 See AmbiqAI/heartkit-vitals-demo#37.
 """
 
@@ -37,6 +39,12 @@ COLUMNS = ["mode", "case", "max_lsb", "max_abs", "argmax_pct", "valid_pct", "mas
 GATE_REF = "tflm"
 REFS = (GATE_REF, "golden")
 
+# Must match GOLDEN_SEG_NUM_CASES / GOLDEN_ARR_NUM_CASES in
+# tools/aot/parity/golden_*_cases.h. SWO drops lines silently, so a table is
+# only trustworthy at full height: the summary denominators are cross-checked
+# against these and the row count against cases x modes.
+NUM_CASES = {"seg": 8, "arr": 8}
+
 
 def kv(text):
     out = {}
@@ -45,6 +53,17 @@ def kv(text):
             key, _, value = token.partition("=")
             out[key] = value
     return out
+
+
+def frac(text):
+    """`8/8` -> (8, 8); None if the token is missing or malformed."""
+    num, sep, den = text.partition("/")
+    if not sep:
+        return None
+    try:
+        return int(num), int(den)
+    except ValueError:
+        return None
 
 
 def main():
@@ -108,6 +127,14 @@ def main():
                 failures.append("no ref=tflm cases in capture (was HKV_PARITY_TFLM built?)")
             continue
 
+        ref_summaries = [s for s in summaries if s.get("ref") == ref]
+        # One summary per mode per ref. Fall back to the modes seen on the rows
+        # so a capture that lost a summary is still height-checked.
+        modes = sorted({s["mode"] for s in ref_summaries if "mode" in s})
+        if not modes:
+            modes = sorted({r["mode"] for m in ("seg", "arr") for r in rows_by_model[m] if "mode" in r})
+            sink.append(f"{ref}: no summary line")
+
         print(f"## ref={ref} ({'gate' if gate else 'informational'})\n")
         for model in ("seg", "arr"):
             rows = rows_by_model[model]
@@ -123,9 +150,26 @@ def main():
                 if row.get("pass") != "1":
                     sink.append(f"{ref} {model} {row.get('mode', '?')} case {row.get('case', '?')} failed")
             print()
+            want = NUM_CASES[model] * len(modes)
+            if len(rows) != want:
+                sink.append(f"{ref} {model}: {len(rows)} case rows, expected {want} "
+                            f"({NUM_CASES[model]} cases x {len(modes)} modes) -- lossy capture")
 
-        for summary in (s for s in summaries if s.get("ref") == ref):
+        for summary in ref_summaries:
             print("**summary**: " + " ".join(f"{k}={v}" for k, v in summary.items()))
+            mode = summary.get("mode", "?")
+            if summary.get("evaluated") == "0":
+                sink.append(f"{ref} {mode}: reference not evaluated (init failed)")
+            for model in ("seg", "arr"):
+                counts = frac(summary.get(f"{model}_pass", ""))
+                if counts is None:
+                    sink.append(f"{ref} {model} {mode}: summary has no {model}_pass count")
+                    continue
+                passed, of = counts
+                if of != NUM_CASES[model]:
+                    sink.append(f"{ref} {model} {mode}: summary counts {of} cases, expected {NUM_CASES[model]}")
+                if passed != of:
+                    sink.append(f"{ref} {model} {mode}: {passed}/{of} cases passed")
         print()
 
     if run["cycles"]:
