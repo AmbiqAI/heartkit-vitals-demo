@@ -48,8 +48,9 @@ single-input.
 
 `--out` must end in `.npz` and is case 0, so it can be passed to
 `--test.golden-data` unchanged. Cases 1..N-1 are written beside it as
-`<stem>_caseNN.npz`. A `<stem>.json` sidecar records the model sha256, case
-count, stimulus window indices, per-tensor shapes, dtypes and quantization
+`<stem>_caseNN.npz`. A `<stem>.json` sidecar records the model and stimulus
+paths (relative to the repo root when they live inside it), the model sha256,
+case count, stimulus window indices, per-tensor shapes, dtypes and quantization
 parameters, the filter coefficients and window constants mirrored from the
 firmware with the file each came from, and the argmax class (arrhythmia) or
 per-class sample histogram (segmentation) for every case.

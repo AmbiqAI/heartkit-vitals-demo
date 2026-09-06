@@ -169,6 +169,20 @@ MODELS = {
 }
 
 
+def repo_relative(path: Path | str) -> str:
+    """Sidecar spelling of a path: relative to the repo when it lives inside it.
+
+    A golden set is checked against a different clone than the one that made it,
+    so an absolute path from the generating checkout is provenance nobody else
+    can resolve. Paths outside the repo are kept as typed.
+    """
+    given = Path(path)
+    try:
+        return str(given.resolve().relative_to(REPO_ROOT))
+    except ValueError:
+        return str(given)
+
+
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -434,9 +448,9 @@ def generate(args: argparse.Namespace) -> int:
 
     meta = {
         "model": args.model,
-        "model_path": str(tflite_path.relative_to(REPO_ROOT)),
+        "model_path": repo_relative(tflite_path),
         "model_sha256": sha256_file(tflite_path),
-        "stimulus_path": str(stimulus_path),
+        "stimulus_path": repo_relative(args.stimulus),
         "stimulus_sha256": sha256_file(stimulus_path),
         "sample_rate_hz": ECG_TARGET_RATE,
         "num_cases": args.cases,
