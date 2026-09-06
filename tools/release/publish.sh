@@ -168,12 +168,15 @@ DEST_NAME="$(basename "$DEST")"
 STAGING="${DEST_PARENT}/.${DEST_NAME}.staging"
 BACKUP="${DEST_PARENT}/.${DEST_NAME}.backup"
 
-# A leftover backup is the only surviving copy of a destination an earlier run
-# failed to restore. Checked here rather than at the swap, so the stop lands
-# before anything is uploaded. See #70.
-[ ! -e "$BACKUP" ] || die "a backup from an earlier run is in the way: ${BACKUP}"
+# A leftover backup is either the only surviving copy of a destination an
+# earlier run failed to restore, or the remains of one a successful run was
+# interrupted while deleting. Checked here rather than at the swap, so the stop
+# lands before anything is uploaded. See #70.
+[ ! -e "$BACKUP" ] || die "a backup from an earlier run is in the way: ${BACKUP}
+it holds either the previous destination (an earlier run could not restore it)
+or a partly deleted backup left by a run that published successfully; compare it
+against ${DEST} and remove it by hand before publishing again"
 
-BACKUP_LIVE=0
 STAGING_LIVE=0
 PUBLISH_DONE=0
 CLEANUP_DONE=0
@@ -215,7 +218,10 @@ on_exit() {
   # The exit status is deliberately not consulted: bash reports rc=0 to the
   # EXIT trap when a signal ends the run, and a half-finished swap has to be
   # undone either way. See #70.
-  if [ "$PUBLISH_DONE" -eq 0 ] && [ "$BACKUP_LIVE" -eq 1 ]; then
+  # Keyed on the backup directory rather than a flag, so an interrupt landing
+  # inside the rename that creates it still restores. The pre-flight check
+  # guarantees any backup present here was made by this run. See #70.
+  if [ "$PUBLISH_DONE" -eq 0 ] && [ -d "$BACKUP" ]; then
     warn "publish failed mid-swap; restoring the previous destination from ${BACKUP}"
     rm -rf "${DEST:?}" || true
     if [ ! -e "$DEST" ] && mv "$BACKUP" "$DEST"; then
@@ -373,14 +379,12 @@ cp -p "${ZIPS[@]}" "$STAGING/"
 verify_sums "$STAGING" "$ALL_SUMS" "staging directory"
 
 mv "$DEST" "$BACKUP"
-BACKUP_LIVE=1
 mv "$STAGING" "$DEST"
 
 verify_sums "$DEST" "$ALL_SUMS" "destination"
 
 PUBLISH_DONE=1
 rm -rf "$BACKUP"
-BACKUP_LIVE=0
 
 note "published ${TAG} to ${DEST}"
 ls "$DEST"
