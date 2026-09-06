@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, Ambiq
+#
+# heliaAOT conversion of the ECG arrhythmia model. Regenerate with
+# tools/aot/convert.sh; paths are relative to the repo root.
+#
+#   helia-aot 0.19.0
+#   assets/arrhythmia.tflite
+#     sha256 a1855af0e0b2a346d773e0d36ff8c8b986c51db4aed99a6066c9da9f23f12eab
+#     (matches model_sha256 in tools/aot/golden/golden-arr.json)
+model:
+  path: assets/arrhythmia.tflite
+  subgraph: 0
+  name: hkv_arrhythmia
+module:
+  path: modules
+  type: nsx
+  name: hkv_arrhythmia_aot
+  prefix: hkv_arrhythmia
+platform:
+  name: apollo510b_evb
+memory:
+  # Weights stay cold in MRAM (XIP .rodata); only the scratch arena is RAM,
+  # which the apollo510b linker script places in MCU_TCM via .bss.
+  tensors:
+  - type: CONSTANT
+    attributes:
+      memory: MRAM
+test:
+  enabled: true
+  golden_data: tools/aot/golden/golden-arr.npz
+  # float32 softmax output; about 2 LSB of the int8 1/256 probability scale.
+  tolerance: 0.008

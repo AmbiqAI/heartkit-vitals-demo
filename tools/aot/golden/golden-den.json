@@ -1,0 +1,148 @@
+{
+  "model": "den",
+  "model_path": "assets/denoise.tflite",
+  "model_sha256": "e94a5788163e436d63750cb9dd462932cc281863d5d42d0c4851fd85a1b89d0a",
+  "stimulus_path": "/Users/adam.page/Ambiq/demos/heartkit-vitals-demo/.claude/worktrees/37-golden/assets/ecg_stimulus.csv",
+  "stimulus_sha256": "18861f4c5c02e53d1b7ce1f1911d87d516d0d5bae89e41981dfee39832a82c3f",
+  "sample_rate_hz": 100,
+  "num_cases": 8,
+  "stimulus_stride": 1250,
+  "raw_samples_per_case": 256,
+  "layout": "one case per npz, keys input_N/output_N, model tensor shape and dtype",
+  "firmware": {
+    "ecg_sos": [
+      [
+        0.2467691808982006,
+        0.4935383617964012,
+        0.2467691808982006,
+        -0.4141296048598937,
+        -0.36229096617676754
+      ],
+      [
+        1.0,
+        0.0,
+        -1.0,
+        0.8213745394235588,
+        0.14232107570294283
+      ],
+      [
+        1.0,
+        -2.0,
+        1.0,
+        1.9684516644108876,
+        -0.9694342914476478
+      ]
+    ],
+    "constants": {
+      "NORM_STD_EPS": 0.001,
+      "ECG_TARGET_RATE": 100,
+      "ECG_DEN_WINDOW_LEN": 256,
+      "ECG_DEN_PAD_LEN": 25,
+      "ECG_SEG_WINDOW_LEN": 256,
+      "ECG_SEG_PAD_LEN": 25,
+      "ECG_ARR_WINDOW_LEN": 500,
+      "ECG_ARR_THRESHOLD": 0.4,
+      "ECG_DEN_VALID_LEN": 206,
+      "ECG_SEG_VALID_LEN": 206
+    },
+    "source": {
+      "ecg_sos": "src/store.c ecgSos",
+      "NORM_STD_EPS": "src/constants.h",
+      "ECG_TARGET_RATE": "src/constants.h",
+      "ECG_DEN_WINDOW_LEN": "src/constants.h",
+      "ECG_DEN_PAD_LEN": "src/constants.h",
+      "ECG_SEG_WINDOW_LEN": "src/constants.h",
+      "ECG_SEG_PAD_LEN": "src/constants.h",
+      "ECG_ARR_WINDOW_LEN": "src/constants.h",
+      "ECG_ARR_THRESHOLD": "src/constants.h",
+      "ECG_DEN_VALID_LEN": "src/constants.h (ECG_DEN_WINDOW_LEN - 2 * ECG_DEN_PAD_LEN)",
+      "ECG_SEG_VALID_LEN": "src/constants.h (ECG_SEG_WINDOW_LEN - 2 * ECG_SEG_PAD_LEN)"
+    }
+  },
+  "tensors": {
+    "input_0": {
+      "name": "serving_default_args_0:0",
+      "shape": [
+        1,
+        256,
+        1
+      ],
+      "dtype": "float32",
+      "quantization": {
+        "scale": 0.0,
+        "zero_point": 0
+      }
+    },
+    "output_0": {
+      "name": "StatefulPartitionedCall:0",
+      "shape": [
+        1,
+        256,
+        1
+      ],
+      "dtype": "float32",
+      "quantization": {
+        "scale": 0.0,
+        "zero_point": 0
+      }
+    }
+  },
+  "cases": [
+    {
+      "case": 0,
+      "path": "golden-den.npz",
+      "stimulus_start": 0,
+      "stimulus_end": 256,
+      "input_clipped_samples": 0
+    },
+    {
+      "case": 1,
+      "path": "golden-den_case01.npz",
+      "stimulus_start": 1250,
+      "stimulus_end": 1506,
+      "input_clipped_samples": 0
+    },
+    {
+      "case": 2,
+      "path": "golden-den_case02.npz",
+      "stimulus_start": 2500,
+      "stimulus_end": 2756,
+      "input_clipped_samples": 0
+    },
+    {
+      "case": 3,
+      "path": "golden-den_case03.npz",
+      "stimulus_start": 3750,
+      "stimulus_end": 4006,
+      "input_clipped_samples": 0
+    },
+    {
+      "case": 4,
+      "path": "golden-den_case04.npz",
+      "stimulus_start": 5000,
+      "stimulus_end": 5256,
+      "input_clipped_samples": 0
+    },
+    {
+      "case": 5,
+      "path": "golden-den_case05.npz",
+      "stimulus_start": 6250,
+      "stimulus_end": 6506,
+      "input_clipped_samples": 0
+    },
+    {
+      "case": 6,
+      "path": "golden-den_case06.npz",
+      "stimulus_start": 7500,
+      "stimulus_end": 7756,
+      "input_clipped_samples": 0
+    },
+    {
+      "case": 7,
+      "path": "golden-den_case07.npz",
+      "stimulus_start": 8750,
+      "stimulus_end": 9006,
+      "input_clipped_samples": 0
+    }
+  ]
+}

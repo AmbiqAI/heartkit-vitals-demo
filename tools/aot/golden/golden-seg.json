@@ -1,0 +1,212 @@
+{
+  "model": "seg",
+  "model_path": "assets/segmentation.tflite",
+  "model_sha256": "93c4493a1d09e1818abaffd74973d807b9e6830e5a03217b2c777abe1032e6fe",
+  "stimulus_path": "/Users/adam.page/Ambiq/demos/heartkit-vitals-demo/.claude/worktrees/37-golden/assets/ecg_stimulus.csv",
+  "stimulus_sha256": "18861f4c5c02e53d1b7ce1f1911d87d516d0d5bae89e41981dfee39832a82c3f",
+  "sample_rate_hz": 100,
+  "num_cases": 8,
+  "stimulus_stride": 1250,
+  "raw_samples_per_case": 462,
+  "layout": "one case per npz, keys input_N/output_N, model tensor shape and dtype",
+  "firmware": {
+    "ecg_sos": [
+      [
+        0.2467691808982006,
+        0.4935383617964012,
+        0.2467691808982006,
+        -0.4141296048598937,
+        -0.36229096617676754
+      ],
+      [
+        1.0,
+        0.0,
+        -1.0,
+        0.8213745394235588,
+        0.14232107570294283
+      ],
+      [
+        1.0,
+        -2.0,
+        1.0,
+        1.9684516644108876,
+        -0.9694342914476478
+      ]
+    ],
+    "constants": {
+      "NORM_STD_EPS": 0.001,
+      "ECG_TARGET_RATE": 100,
+      "ECG_DEN_WINDOW_LEN": 256,
+      "ECG_DEN_PAD_LEN": 25,
+      "ECG_SEG_WINDOW_LEN": 256,
+      "ECG_SEG_PAD_LEN": 25,
+      "ECG_ARR_WINDOW_LEN": 500,
+      "ECG_ARR_THRESHOLD": 0.4,
+      "ECG_DEN_VALID_LEN": 206,
+      "ECG_SEG_VALID_LEN": 206
+    },
+    "source": {
+      "ecg_sos": "src/store.c ecgSos",
+      "NORM_STD_EPS": "src/constants.h",
+      "ECG_TARGET_RATE": "src/constants.h",
+      "ECG_DEN_WINDOW_LEN": "src/constants.h",
+      "ECG_DEN_PAD_LEN": "src/constants.h",
+      "ECG_SEG_WINDOW_LEN": "src/constants.h",
+      "ECG_SEG_PAD_LEN": "src/constants.h",
+      "ECG_ARR_WINDOW_LEN": "src/constants.h",
+      "ECG_ARR_THRESHOLD": "src/constants.h",
+      "ECG_DEN_VALID_LEN": "src/constants.h (ECG_DEN_WINDOW_LEN - 2 * ECG_DEN_PAD_LEN)",
+      "ECG_SEG_VALID_LEN": "src/constants.h (ECG_SEG_WINDOW_LEN - 2 * ECG_SEG_PAD_LEN)"
+    }
+  },
+  "tensors": {
+    "input_0": {
+      "name": "serving_default_args_0:0",
+      "shape": [
+        1,
+        256,
+        1
+      ],
+      "dtype": "int8",
+      "quantization": {
+        "scale": 0.07215825468301773,
+        "zero_point": -13
+      }
+    },
+    "output_0": {
+      "name": "StatefulPartitionedCall:0",
+      "shape": [
+        1,
+        256,
+        4
+      ],
+      "dtype": "int8",
+      "quantization": {
+        "scale": 0.00390625,
+        "zero_point": -128
+      }
+    }
+  },
+  "cases": [
+    {
+      "case": 0,
+      "path": "golden-seg.npz",
+      "stimulus_start": 0,
+      "stimulus_end": 462,
+      "input_clipped_samples": 0,
+      "argmax_class_counts": {
+        "NONE": 148,
+        "P-WAVE": 28,
+        "QRS": 26,
+        "T-WAVE": 54
+      },
+      "argmax_class_modal": 0,
+      "argmax_name_modal": "NONE"
+    },
+    {
+      "case": 1,
+      "path": "golden-seg_case01.npz",
+      "stimulus_start": 1250,
+      "stimulus_end": 1712,
+      "input_clipped_samples": 0,
+      "argmax_class_counts": {
+        "NONE": 158,
+        "P-WAVE": 32,
+        "QRS": 27,
+        "T-WAVE": 39
+      },
+      "argmax_class_modal": 0,
+      "argmax_name_modal": "NONE"
+    },
+    {
+      "case": 2,
+      "path": "golden-seg_case02.npz",
+      "stimulus_start": 2500,
+      "stimulus_end": 2962,
+      "input_clipped_samples": 0,
+      "argmax_class_counts": {
+        "NONE": 138,
+        "P-WAVE": 3,
+        "QRS": 40,
+        "T-WAVE": 75
+      },
+      "argmax_class_modal": 0,
+      "argmax_name_modal": "NONE"
+    },
+    {
+      "case": 3,
+      "path": "golden-seg_case03.npz",
+      "stimulus_start": 3750,
+      "stimulus_end": 4212,
+      "input_clipped_samples": 0,
+      "argmax_class_counts": {
+        "NONE": 161,
+        "P-WAVE": 22,
+        "QRS": 31,
+        "T-WAVE": 42
+      },
+      "argmax_class_modal": 0,
+      "argmax_name_modal": "NONE"
+    },
+    {
+      "case": 4,
+      "path": "golden-seg_case04.npz",
+      "stimulus_start": 5000,
+      "stimulus_end": 5462,
+      "input_clipped_samples": 0,
+      "argmax_class_counts": {
+        "NONE": 139,
+        "P-WAVE": 18,
+        "QRS": 49,
+        "T-WAVE": 50
+      },
+      "argmax_class_modal": 0,
+      "argmax_name_modal": "NONE"
+    },
+    {
+      "case": 5,
+      "path": "golden-seg_case05.npz",
+      "stimulus_start": 6250,
+      "stimulus_end": 6712,
+      "input_clipped_samples": 0,
+      "argmax_class_counts": {
+        "NONE": 173,
+        "P-WAVE": 20,
+        "QRS": 20,
+        "T-WAVE": 43
+      },
+      "argmax_class_modal": 0,
+      "argmax_name_modal": "NONE"
+    },
+    {
+      "case": 6,
+      "path": "golden-seg_case06.npz",
+      "stimulus_start": 7500,
+      "stimulus_end": 7962,
+      "input_clipped_samples": 0,
+      "argmax_class_counts": {
+        "NONE": 185,
+        "P-WAVE": 16,
+        "QRS": 17,
+        "T-WAVE": 38
+      },
+      "argmax_class_modal": 0,
+      "argmax_name_modal": "NONE"
+    },
+    {
+      "case": 7,
+      "path": "golden-seg_case07.npz",
+      "stimulus_start": 8750,
+      "stimulus_end": 9212,
+      "input_clipped_samples": 0,
+      "argmax_class_counts": {
+        "NONE": 118,
+        "P-WAVE": 4,
+        "QRS": 67,
+        "T-WAVE": 67
+      },
+      "argmax_class_modal": 0,
+      "argmax_name_modal": "NONE"
+    }
+  ]
+}

@@ -132,4 +132,12 @@ if(NSX_BOARD STREQUAL "apollo510b_evb")
     )
 endif()
 
+# The heliaAOT model modules are generated and vendored ahead of the adapters
+# that will call them, so nothing links them yet. Force them into the default
+# build so a regeneration that no longer compiles fails here rather than in the
+# PR that switches segmentation and arrhythmia over. See AmbiqAI/heartkit-vitals-demo#37.
+# `nsx build` names the app target, not `all`, so the dependency hangs off the
+# app rather than a custom ALL target.
+add_dependencies(heartkit-vitals-demo hkv_segmentation_aot hkv_arrhythmia_aot)
+
 nsx_finalize_app(heartkit-vitals-demo)

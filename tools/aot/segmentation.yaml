@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, Ambiq
+#
+# heliaAOT conversion of the ECG segmentation model. Regenerate with
+# tools/aot/convert.sh; paths are relative to the repo root.
+#
+#   helia-aot 0.19.0
+#   assets/segmentation.tflite
+#     sha256 93c4493a1d09e1818abaffd74973d807b9e6830e5a03217b2c777abe1032e6fe
+#     (matches model_sha256 in tools/aot/golden/golden-seg.json)
+model:
+  path: assets/segmentation.tflite
+  subgraph: 0
+  name: hkv_segmentation
+module:
+  path: modules
+  type: nsx
+  name: hkv_segmentation_aot
+  prefix: hkv_segmentation
+platform:
+  name: apollo510b_evb
+memory:
+  # Weights stay cold in MRAM (XIP .rodata); only the scratch arena is RAM,
+  # which the apollo510b linker script places in MCU_TCM via .bss.
+  tensors:
+  - type: CONSTANT
+    attributes:
+      memory: MRAM
+test:
+  enabled: true
+  golden_data: tools/aot/golden/golden-seg.npz
+  # int8 output, 1/256 scale: 1 LSB.
+  tolerance: 1
