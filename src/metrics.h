@@ -43,9 +43,10 @@ typedef struct {
     float32_t denoiseuIpspw;
     float32_t segmentuIpspw;
     float32_t arrhythmiaIpspw;
-    /* Measured inference duration and its since-boot maximum, in us. The
-     * baseline the TFLM/AOT comparison is stated against; appended so the
-     * TileIO metrics packet offsets are untouched. See #37. */
+    /* Measured model invoke duration and its maximum within the current report
+     * interval, in us; zero when the stage ran in DSP mode. The baseline the
+     * TFLM/AOT comparison is stated against; appended so the TileIO metrics
+     * packet offsets are untouched. See #37. */
     uint32_t denoiseLatUs;
     uint32_t segmentLatUs;
     uint32_t arrhythmiaLatUs;

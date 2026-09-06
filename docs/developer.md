@@ -119,20 +119,31 @@ interrupt.
 Latency fields are on the `cpu` line, once per report interval. Arena fields
 are on the `model` line, once per boot. Both are unscaled integers.
 
+The latency fields bracket the model invoke alone, not the surrounding stage:
+the ring-buffer peeks, the DSP filter and the metrics pass are excluded. A
+stage running in DSP mode contributes no model invoke, so both of its fields
+read 0 for that report. Stage-wide time remains available as the `*_ips`
+rates.
+
 | Field | Line | Meaning |
 | --- | --- | --- |
-| `den_lat_us` | `cpu` | Denoise inference duration, last run, microseconds |
-| `seg_lat_us` | `cpu` | Segmentation inference duration, last run, microseconds |
-| `arr_lat_us` | `cpu` | Arrhythmia inference duration, last run, microseconds |
-| `den_lat_max_us` | `cpu` | Denoise inference duration, maximum since boot |
-| `seg_lat_max_us` | `cpu` | Segmentation inference duration, maximum since boot |
-| `arr_lat_max_us` | `cpu` | Arrhythmia inference duration, maximum since boot |
+| `den_lat_us` | `cpu` | Denoise model invoke duration, last run, microseconds |
+| `seg_lat_us` | `cpu` | Segmentation model invoke duration, last run, microseconds |
+| `arr_lat_us` | `cpu` | Arrhythmia model invoke duration, last run, microseconds |
+| `den_lat_max_us` | `cpu` | Denoise model invoke duration, maximum within the report interval |
+| `seg_lat_max_us` | `cpu` | Segmentation model invoke duration, maximum within the report interval |
+| `arr_lat_max_us` | `cpu` | Arrhythmia model invoke duration, maximum within the report interval |
 | `den_arena_used` | `model` | Denoise TFLM arena bytes reported by `arena_used_bytes()` |
 | `den_arena_size` | `model` | Denoise TFLM arena bytes configured |
 | `seg_arena_used` | `model` | Segmentation TFLM arena bytes reported by `arena_used_bytes()` |
 | `seg_arena_size` | `model` | Segmentation TFLM arena bytes configured |
 | `arr_arena_used` | `model` | Arrhythmia TFLM arena bytes reported by `arena_used_bytes()` |
 | `arr_arena_size` | `model` | Arrhythmia TFLM arena bytes configured |
+
+The maxima are reset after every `cpu` line and again on a `speed_mode` change,
+so each report describes its own interval at one operating point rather than
+the whole run. They are wall clock: an invoke preempted by a higher-priority
+task carries that time, so a lone outlier is not by itself a model cost.
 
 ### Sensor bus
 
