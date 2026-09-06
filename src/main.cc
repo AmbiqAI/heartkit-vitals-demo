@@ -1616,6 +1616,7 @@ EcgProcessTask(void *pvParameters)
             }
             if (arrErr != 0) {
                 hkv_count(HKV_CNT_PIPE_ERR_ECG_ARR);
+                HKV_TRACE_KV("ecg", "arr_err", arrErr);
             }
             HKV_TRACE_KV("ecg", "met_err", err);
         } else {

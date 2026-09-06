@@ -50,7 +50,7 @@ frozen`) catch hand edits to the committed trees.
 `golden/` holds the reference input/output pairs used by the generated
 `--test.enabled` case: eight cases per model. Only `golden-<m>.npz` (case 0)
 feeds the generated on-device test case; `golden-<m>_caseNN.npz` are consumed
-by the host parity runner (branch 37-aot-parity). Each model also has a
+by the host parity runner. Each model also has a
 `golden-<m>.json` sidecar carrying the model sha256, the stimulus sha256,
 tensor shapes and quantization, and the firmware constants the stimulus was
 preprocessed with. `den` fixtures are

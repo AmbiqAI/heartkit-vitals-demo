@@ -351,7 +351,8 @@ extern "C" {
  * for a bring-up session; do not ship it on.
  *
  * Nothing is lost by leaving it off. Every value a trace line carried is also
- * counted (err_den/err_seg/err_met/err_ppgmet on the `pipe` report line), so a
+ * counted (err_den/err_seg/err_arr/err_met/err_ppgmet on the `pipe` report
+ * line), so a
  * persistently failing stage cannot hide behind a plausible-looking silence --
  * which is what made the old default dangerous rather than merely wasteful. */
 #ifndef EN_APP_TRACE

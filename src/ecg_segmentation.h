@@ -30,9 +30,9 @@ ecg_segmentation_init();
  * @brief Scratch arena bytes the segmentation model occupies.
  *
  * The AOT arena is planned at build time and is exact-fit, so used and size
- * are the same number; the pair is kept so the telemetry keys stay uniform
- * with the TFLM-backed denoise model. Model constants are not counted: they
- * are executed in place from MRAM.
+ * return the same number. Both are kept: the boot line prints used, the arena
+ * telemetry logs the pair -- see AmbiqAI/heartkit-vitals-demo#75. Model
+ * constants are not counted: they are executed in place from MRAM.
  */
 size_t
 ecg_segmentation_arena_used();
