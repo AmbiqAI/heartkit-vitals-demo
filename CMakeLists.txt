@@ -175,6 +175,7 @@ if(HKV_BUILD_AOT_PARITY)
     target_link_libraries(hkv_aot_parity PRIVATE
         nsx::board
         nsx::runtime_core
+        nsx::power
         nsx::hkv_segmentation_aot
         nsx::hkv_arrhythmia_aot
     )

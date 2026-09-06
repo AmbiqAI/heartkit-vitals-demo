@@ -5,14 +5,14 @@
 // Model: arrhythmia (assets/arrhythmia.tflite)
 // model_sha256: a1855af0e0b2a346d773e0d36ff8c8b986c51db4aed99a6066c9da9f23f12eab
 // Cases (8), each npz listed with its sha256:
-//   0: golden-arr.npz eb4e2eb8a61f39298d28a23ebd8920be90245733323aeaffdadaea4a5d91f0f8
-//   1: golden-arr_case01.npz 49fe7e42084ef492f0bcd97ec3f3975bca85ace47da13963e817b31770ad1b67
-//   2: golden-arr_case02.npz 2d97e91f8349927d13a83842bb8ddf862c2d47527f36419e59d7ac46ad7722e2
-//   3: golden-arr_case03.npz 5c9a60f089fb65a800dff7d32d1b3e8869002cd3d268322fe836934861624723
-//   4: golden-arr_case04.npz 94bb328494418be20c38ea0a8cd14f17847d98cdd932b3545e77b51e65cb9a23
-//   5: golden-arr_case05.npz 93f1f3926ded4c80531cc68ccc85073cc038863abd0217df2c7cc9015cea2ff0
-//   6: golden-arr_case06.npz 6d06146be604a16c12180b8d016a46825cb9aaa3ac8745d94d5c77e55d1deaa1
-//   7: golden-arr_case07.npz 34536bf9b9ea3325bb22f8f07fd1916c3adf2460c3753e1623ef54b924bc7ed8
+//   0: golden-arr.npz 6c4744fc7ff561cca034b1f61210a44ddefcf2394812aaf74f8959f61319ba7c
+//   1: golden-arr_case01.npz 5d442a818c6e646a9dca2182b73689c9db2b849ea766d906f66fb56809cc2d97
+//   2: golden-arr_case02.npz e0c001b812567814288be7403e96ecbafa7f13724326d517e00b5a61323bfec6
+//   3: golden-arr_case03.npz 3d252c14ecbfbae43273a83a0011235b855aaeb4e7333bba0cd279101406eed7
+//   4: golden-arr_case04.npz ef78ce319473798efd480f5a95c86a47a986e1fd7943a968d049977a8b22aea3
+//   5: golden-arr_case05.npz 0fd49353125157860134e3c8dd68d92874c190d9a35b98e7dc9c7f22721f3d17
+//   6: golden-arr_case06.npz a5dca10f6e67925c3cefcb36f99a4fa0d9829ed60e493d2aa1556bf85079980c
+//   7: golden-arr_case07.npz e2b46eafe534c109ce43d525c77826169f95e026e76c1a73f703899eb02e6b49
 
 #ifndef __HKV_GOLDEN_ARR_CASES_H
 #define __HKV_GOLDEN_ARR_CASES_H

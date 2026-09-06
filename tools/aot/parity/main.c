@@ -7,10 +7,15 @@
  *
  * Separate bare-metal executable, not a mode of the firmware: the generated
  * `_test_case_run()` zeroes DWT->CYCCNT and may claim the PMU, which the
- * firmware's own latency instrumentation depends on. Boot is the minimum the
- * firmware's main() does before the scheduler starts (core init, then ITM/SWO
- * before any perf-mode switch) and nothing else -- no power configure, so every
- * cycle count here is at the boot clock reported in the summary line.
+ * firmware's own latency instrumentation depends on. Boot mirrors what the
+ * firmware's main() does before the scheduler starts -- core init, ITM/SWO
+ * before any perf-mode switch, then nsx_power_configure() with the same
+ * nsx_power_config_t the firmware uses (src/store.c nsxPwrCfg) -- so the cycle
+ * counts are taken at the operating points the firmware actually runs at.
+ *
+ * The whole pass runs twice: once at NSX_POWER_PERF_LOW and once at
+ * NSX_POWER_PERF_HIGH, switched the way set_speed_mode() does it. Every line
+ * carries mode=lp|hp and the summary carries the clk_hz it was measured at.
  *
  * See AmbiqAI/heartkit-vitals-demo#37.
  */
@@ -21,6 +26,7 @@
 #include "am_mcu_apollo.h"
 
 #include "nsx_core.h"
+#include "nsx_power.h"
 
 #include "hkv_arrhythmia_model.h"
 #include "hkv_arrhythmia_test_case.h"
@@ -59,8 +65,44 @@ typedef struct {
     int label;
 } case_result_t;
 
-static case_result_t segRes[GOLDEN_SEG_NUM_CASES];
-static case_result_t arrRes[GOLDEN_ARR_NUM_CASES];
+typedef enum { MODE_LP = 0, MODE_HP = 1, MODE_COUNT = 2 } run_mode_t;
+
+static const char *const modeNames[MODE_COUNT] = {"lp", "hp"};
+
+static case_result_t segRes[MODE_COUNT][GOLDEN_SEG_NUM_CASES];
+static case_result_t arrRes[MODE_COUNT][GOLDEN_ARR_NUM_CASES];
+static uint32_t modeClockHz[MODE_COUNT];
+static uint32_t segInitRc[MODE_COUNT];
+static uint32_t arrInitRc[MODE_COUNT];
+static int segPassCount[MODE_COUNT];
+static int arrPassCount[MODE_COUNT];
+
+/* Same mapping src/timebase.c uses, minus the FreeRTOS half: this runner has no
+ * scheduler, so making SystemCoreClock truthful is the whole job. The HAL query
+ * is the read side of the mode select nsx_power_* performs; the two frequencies
+ * come from the HAL's own macros. Without this, cycles/us conversions and the
+ * reported clk_hz keep the boot value after the HP switch. Issue #25. */
+static void
+sync_core_clock(void)
+{
+#if defined(AM_PART_APOLLO510B) || defined(AM_PART_APOLLO510)
+    am_hal_pwrctrl_mcu_mode_e eMode;
+
+    if (am_hal_pwrctrl_mcu_mode_status(&eMode) != AM_HAL_STATUS_SUCCESS) { return; }
+    switch (eMode) {
+    case AM_HAL_PWRCTRL_MCU_MODE_LOW_POWER:
+        SystemCoreClock = (uint32_t)AM_HAL_CLKGEN_FREQ_MAX_HZ;
+        break;
+    case AM_HAL_PWRCTRL_MCU_MODE_HIGH_PERFORMANCE:
+        SystemCoreClock = (uint32_t)AM_HAL_CLKGEN_FREQ_HP250_HZ;
+        break;
+    default:
+        break;
+    }
+#else
+    SystemCoreClockUpdate();
+#endif
+}
 
 static hkv_segmentation_model_context_t segCtx = {.callback = NULL};
 static hkv_arrhythmia_model_context_t arrCtx = {.callback = NULL};
@@ -119,7 +161,7 @@ argmax_f32(const float *v, int n)
 }
 
 static int
-run_seg_case(int caseIdx)
+run_seg_case(run_mode_t mode, int caseIdx)
 {
     const int8_t *golden = golden_seg_outputs[caseIdx];
     int8_t *in = segCtx.inputs[0].data;
@@ -163,7 +205,7 @@ run_seg_case(int caseIdx)
                         ECG_SEG_NUM_CLASS, ECG_SEG_PAD_LEN, ECG_SEG_THRESHOLD, scale, zp);
     int maskEq = memcmp(maskActual, maskGolden, sizeof(maskActual)) == 0;
 
-    case_result_t *r = &segRes[caseIdx];
+    case_result_t *r = &segRes[mode][caseIdx];
     r->rc = rc;
     r->maxLsb = maxLsb;
     r->maxAbs = (float)maxLsb * scale;
@@ -177,7 +219,7 @@ run_seg_case(int caseIdx)
 }
 
 static int
-run_arr_case(int caseIdx)
+run_arr_case(run_mode_t mode, int caseIdx)
 {
     const float *golden = golden_arr_outputs[caseIdx];
     float *in = (float *)arrCtx.inputs[0].data;
@@ -206,7 +248,7 @@ run_arr_case(int caseIdx)
     int gLabel = golden[gIdx] > ECG_ARR_THRESHOLD ? gIdx + 1 : ECG_ARR_INCONCLUSIVE;
     int labelEq = (aLabel == gLabel);
 
-    case_result_t *r = &arrRes[caseIdx];
+    case_result_t *r = &arrRes[mode][caseIdx];
     r->rc = rc;
     r->maxLsb = 0;
     r->maxAbs = maxAbs;
@@ -221,41 +263,70 @@ run_arr_case(int caseIdx)
 }
 
 static void
-print_report(int segPass, int arrPass, uint32_t segInitRc, uint32_t arrInitRc, int32_t segSelf, int32_t arrSelf)
+print_mode(run_mode_t mode)
 {
     char absBuf[16], allBuf[16], validBuf[16];
-
-    nsx_printf("\r\nHKV|parity|boot clk_hz=%u seg_arena=%u arr_arena=%u\r\n", (unsigned)SystemCoreClock,
-               (unsigned)hkv_segmentation_arena_dtcm_size, (unsigned)hkv_arrhythmia_arena_dtcm_size);
-    nsx_printf("HKV|parity|selfcheck model=seg rc=%d\r\n", (int)segSelf);
-    nsx_printf("HKV|parity|selfcheck model=arr rc=%d\r\n", (int)arrSelf);
+    const char *name = modeNames[mode];
 
     for (int i = 0; i < GOLDEN_SEG_NUM_CASES; i++) {
-        const case_result_t *r = &segRes[i];
+        const case_result_t *r = &segRes[mode][i];
         fmt_fixed(absBuf, r->maxAbs, 6);
         fmt_pct(allBuf, r->agreeAll, SEG_TIME_LEN);
         fmt_pct(validBuf, r->agreeValid, r->validCount);
-        nsx_printf("HKV|parity|seg case=%d rc=%d max_lsb=%d max_abs=%s argmax_pct=%s valid_pct=%s "
+        nsx_printf("HKV|parity|seg mode=%s case=%d rc=%d max_lsb=%d max_abs=%s argmax_pct=%s valid_pct=%s "
                    "mask_eq=%d cycles=%u pass=%d\r\n",
-                   i, (int)r->rc, r->maxLsb, absBuf, allBuf, validBuf, r->maskEq, (unsigned)r->cycles, r->pass);
+                   name, i, (int)r->rc, r->maxLsb, absBuf, allBuf, validBuf, r->maskEq, (unsigned)r->cycles,
+                   r->pass);
     }
     /* Same key set as the seg line so one parser handles both: for a float
      * model max_lsb is not defined, argmax_pct/valid_pct are the single-label
      * agreement, and mask_eq is the thresholded label. */
     for (int i = 0; i < GOLDEN_ARR_NUM_CASES; i++) {
-        const case_result_t *r = &arrRes[i];
+        const case_result_t *r = &arrRes[mode][i];
         fmt_fixed(absBuf, r->maxAbs, 6);
         fmt_pct(allBuf, r->agreeAll, r->validCount);
-        nsx_printf("HKV|parity|arr case=%d rc=%d max_lsb=0 max_abs=%s argmax_pct=%s valid_pct=%s "
+        nsx_printf("HKV|parity|arr mode=%s case=%d rc=%d max_lsb=0 max_abs=%s argmax_pct=%s valid_pct=%s "
                    "mask_eq=%d cycles=%u pass=%d label=%d\r\n",
-                   i, (int)r->rc, absBuf, allBuf, allBuf, r->maskEq, (unsigned)r->cycles, r->pass, r->label);
+                   name, i, (int)r->rc, absBuf, allBuf, allBuf, r->maskEq, (unsigned)r->cycles, r->pass,
+                   r->label);
     }
 
-    nsx_printf("HKV|parity|summary seg_pass=%d/%d arr_pass=%d/%d seg_init_rc=%u arr_init_rc=%u "
-               "seg_selfcheck=%d arr_selfcheck=%d clk_hz=%u\r\n",
-               segPass, GOLDEN_SEG_NUM_CASES, arrPass, GOLDEN_ARR_NUM_CASES, (unsigned)segInitRc,
-               (unsigned)arrInitRc, (int)segSelf, (int)arrSelf, (unsigned)SystemCoreClock);
+    nsx_printf("HKV|parity|summary mode=%s seg_pass=%d/%d arr_pass=%d/%d seg_init_rc=%u arr_init_rc=%u "
+               "clk_hz=%u\r\n",
+               name, segPassCount[mode], GOLDEN_SEG_NUM_CASES, arrPassCount[mode], GOLDEN_ARR_NUM_CASES,
+               (unsigned)segInitRc[mode], (unsigned)arrInitRc[mode], (unsigned)modeClockHz[mode]);
+}
+
+static void
+print_report(int32_t segSelf, int32_t arrSelf)
+{
+    nsx_printf("\r\nHKV|parity|boot clk_hz=%u seg_arena=%u arr_arena=%u\r\n", (unsigned)modeClockHz[MODE_LP],
+               (unsigned)hkv_segmentation_arena_dtcm_size, (unsigned)hkv_arrhythmia_arena_dtcm_size);
+    nsx_printf("HKV|parity|selfcheck model=seg rc=%d\r\n", (int)segSelf);
+    nsx_printf("HKV|parity|selfcheck model=arr rc=%d\r\n", (int)arrSelf);
+
+    for (int mode = 0; mode < MODE_COUNT; mode++) { print_mode((run_mode_t)mode); }
     nsx_printf("PARITY_DONE\r\n");
+}
+
+/* Numerics are recompared in both modes rather than timed only: the AOT kernels
+ * are the same code at either clock, so a difference here would mean the
+ * operating point changed the result, which is worth catching for free. */
+static void
+run_pass(run_mode_t mode)
+{
+    sync_core_clock();
+    dwt_enable();
+    modeClockHz[mode] = SystemCoreClock;
+
+    segInitRc[mode] = (uint32_t)hkv_segmentation_model_init(&segCtx);
+    if (segInitRc[mode] == hkv_segmentation_status_ok) {
+        for (int i = 0; i < GOLDEN_SEG_NUM_CASES; i++) { segPassCount[mode] += run_seg_case(mode, i); }
+    }
+    arrInitRc[mode] = (uint32_t)hkv_arrhythmia_model_init(&arrCtx);
+    if (arrInitRc[mode] == hkv_arrhythmia_status_ok) {
+        for (int i = 0; i < GOLDEN_ARR_NUM_CASES; i++) { arrPassCount[mode] += run_arr_case(mode, i); }
+    }
 }
 
 int
@@ -265,11 +336,36 @@ main(void)
         .api = &nsx_core_V1_0_0,
     };
     nsx_core_init(&coreCfg);
+
+    /* ITM/SWO BEFORE nsx_power_configure()/the perf-mode switch, for the reason
+     * src/main.cc documents: unlocking the DCU briefly powers Crypto, and that
+     * handshake hangs on a secure Apollo5 part once the CPU is on a
+     * SYSPLL-sourced high-performance clock. */
     nsx_itm_printf_enable();
+
+    /* Byte-for-byte the firmware's nsxPwrCfg (src/store.c), so the measurement
+     * sees the same powered domains and the same operating point rather than
+     * whatever the boot defaults happen to be. */
+    nsx_power_config_t pwrCfg = {
+        .api = &nsx_power_V1_0_0,
+        .perf_mode = NSX_POWER_PERF_LOW,
+        .need_audadc = false,
+        .need_ssram = true,
+        .need_crypto = true,
+        .need_ble = true,
+        .need_usb = true,
+        .need_iom = true,
+        .need_uart = false,
+        .small_tcm = false,
+        .need_tempco = false,
+        .need_itm = true,
+        .need_xtal = false,
+        .spotmgr_collapse = false,
+    };
+    nsx_power_configure(&pwrCfg);
+    sync_core_clock();
     dwt_enable();
 
-    int segPass = 0, arrPass = 0;
-    uint32_t segInitRc = 0, arrInitRc = 0;
     int32_t segSelf = -1, arrSelf = -1;
 
     /* Before the case loops: these re-init the module-global context and reset
@@ -278,23 +374,18 @@ main(void)
     if (segSelf == 0) { segSelf = hkv_segmentation_test_case_run(); }
     arrSelf = hkv_arrhythmia_test_case_init();
     if (arrSelf == 0) { arrSelf = hkv_arrhythmia_test_case_run(); }
-    dwt_enable();
 
-    segInitRc = (uint32_t)hkv_segmentation_model_init(&segCtx);
-    if (segInitRc == hkv_segmentation_status_ok) {
-        for (int i = 0; i < GOLDEN_SEG_NUM_CASES; i++) { segPass += run_seg_case(i); }
-    }
-    arrInitRc = (uint32_t)hkv_arrhythmia_model_init(&arrCtx);
-    if (arrInitRc == hkv_arrhythmia_status_ok) {
-        for (int i = 0; i < GOLDEN_ARR_NUM_CASES; i++) { arrPass += run_arr_case(i); }
-    }
+    run_pass(MODE_LP);
+
+    nsx_power_set_performance_mode(NSX_POWER_PERF_HIGH);
+    run_pass(MODE_HP);
 
     /* Measured once, reported forever. `nsx view` can only attach to this
      * secure-reset SoC, so a capture always starts mid-run and a single report
      * at boot is unobservable; a J-Link Commander reset to force one desyncs
      * the trace instead. Repeating lets any capture window see a whole pass. */
     while (1) {
-        print_report(segPass, arrPass, segInitRc, arrInitRc, segSelf, arrSelf);
+        print_report(segSelf, arrSelf);
         nsx_delay_us(10000000);
     }
 }

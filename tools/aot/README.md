@@ -70,6 +70,20 @@ against the fixture. It is not part of the firmware: it has no scheduler, USB or
 sensors, and the generated `_test_case_run()` it calls resets `DWT->CYCCNT`,
 which the firmware's own latency counters use.
 
+Boot mirrors the firmware's `main()` up to the point of inference so the cycle
+counts are comparable with the TFLM latencies the firmware reports: core init,
+ITM/SWO before any perf-mode switch, then `nsx_power_configure()` with the same
+`nsx_power_config_t` values as `src/store.c` `nsxPwrCfg`, then a
+`SystemCoreClock` fix-up equivalent to `timebase_sync_to_core_clock()` (the
+firmware version needs FreeRTOS, this one does not).
+
+The full pass runs twice: once at `NSX_POWER_PERF_LOW`, then again after
+switching to `NSX_POWER_PERF_HIGH` the way `set_speed_mode()` does. Every case
+and summary line carries `mode=lp|hp`, and each summary carries the `clk_hz`
+read from `SystemCoreClock` after that mode's switch. Numerics are recompared in
+both modes; the AOT kernels are the same code at either clock, so a mode-only
+difference would be a finding.
+
 `golden_seg_cases.c/.h` and `golden_arr_cases.c/.h` are generated and committed:
 
 ```sh
@@ -95,7 +109,8 @@ secure-reset SoC, so a capture always starts mid-run, and forcing a run with a
 J-Link Commander reset desyncs the trace and truncates it. The runner measures
 once at boot and re-emits the whole report every 10 s instead, so any capture
 window longer than about 15 s contains a complete pass. `parity_report.py`
-reports the last pass that reached `PARITY_DONE`.
+reports the last pass that reached `PARITY_DONE`, and prints one summary line
+per mode with `mode` as the first table column.
 
 Pass rule: segmentation within 1 output LSB with an identical thresholded mask;
 arrhythmia identical argmax with max absolute probability difference <= 0.008.

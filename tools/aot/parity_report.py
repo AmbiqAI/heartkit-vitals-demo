@@ -18,11 +18,11 @@ import re
 import sys
 
 BOOT_RE = re.compile(r"HKV\|parity\|boot\s+(.*)$")
-CASE_RE = re.compile(r"HKV\|parity\|(seg|arr)\s+(case=.*)$")
+CASE_RE = re.compile(r"HKV\|parity\|(seg|arr)\s+((?:mode|case)=.*)$")
 SUMMARY_RE = re.compile(r"HKV\|parity\|summary\s+(.*)$")
 SELFCHECK_RE = re.compile(r"HKV\|parity\|selfcheck\s+(.*)$")
 
-COLUMNS = ["case", "max_lsb", "max_abs", "argmax_pct", "valid_pct", "mask_eq", "cycles", "pass"]
+COLUMNS = ["mode", "case", "max_lsb", "max_abs", "argmax_pct", "valid_pct", "mask_eq", "cycles", "pass"]
 
 
 def kv(text):
@@ -45,7 +45,7 @@ def main():
     passes = []
 
     def new_pass(boot):
-        record = {"boot": boot, "cases": {"seg": [], "arr": []}, "selfchecks": [], "summary": None,
+        record = {"boot": boot, "cases": {"seg": [], "arr": []}, "selfchecks": [], "summaries": [],
                   "done": False}
         passes.append(record)
         return record
@@ -64,7 +64,7 @@ def main():
                 continue
             m = SUMMARY_RE.search(line)
             if m:
-                current["summary"] = kv(m.group(1))
+                current["summaries"].append(kv(m.group(1)))
                 continue
             m = SELFCHECK_RE.search(line)
             if m:
@@ -77,7 +77,7 @@ def main():
     complete = [p for p in passes if p["done"]]
     run = complete[-1] if complete else passes[-1]
     cases, selfchecks = run["cases"], run["selfchecks"]
-    summary, boot, done = run["summary"], run["boot"], run["done"]
+    summaries, boot, done = run["summaries"], run["boot"], run["done"]
 
     failures = []
     for model in ("seg", "arr"):
@@ -92,7 +92,7 @@ def main():
         for row in rows:
             print("| " + " | ".join(row.get(c, "-") for c in COLUMNS) + " |")
             if row.get("pass") != "1":
-                failures.append(f"{model} case {row.get('case', '?')} failed")
+                failures.append(f"{model} {row.get('mode', '?')} case {row.get('case', '?')} failed")
         print()
 
     for sc in selfchecks:
@@ -104,9 +104,9 @@ def main():
 
     if boot:
         print("**boot**: " + " ".join(f"{k}={v}" for k, v in boot.items()))
-    if summary:
+    for summary in summaries:
         print("**summary**: " + " ".join(f"{k}={v}" for k, v in summary.items()))
-    else:
+    if not summaries:
         failures.append("no summary line in capture")
 
     if not done:

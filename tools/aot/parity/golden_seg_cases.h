@@ -5,14 +5,14 @@
 // Model: segmentation (assets/segmentation.tflite)
 // model_sha256: 93c4493a1d09e1818abaffd74973d807b9e6830e5a03217b2c777abe1032e6fe
 // Cases (8), each npz listed with its sha256:
-//   0: golden-seg.npz 019bcf4daeebefa4fdc1b0ff8161be0e974f2e9604bcfb9bc8ab7fb423addc70
-//   1: golden-seg_case01.npz 0026763c319976afe5d61ab08a233a5019fefb93f5e11605ec1e13b07d0783a8
-//   2: golden-seg_case02.npz 9ab5d2ded79c95c0b5da15e41a2392ae986639502c278d097abc7fa96d3a6140
-//   3: golden-seg_case03.npz 0d904dc543ea34ac87338463b51d37b110b61e2bb1c05324792c5f9e707f31d1
-//   4: golden-seg_case04.npz 4be5f16a956f909782add9eacda41c017b73bd35611231c7409e2a8cbe4932c4
-//   5: golden-seg_case05.npz 61c5b919baa9ce7ffe784974b12d9623c0c9603aa62b4336c403fb03cf417162
-//   6: golden-seg_case06.npz 0716e45a55f8b7d8dfbdc4f62d5b3fab1a4035578f212cac8f958fa9ac21942e
-//   7: golden-seg_case07.npz da3b8d82c9fc351f11a8c8bedfb3d9b004828732429dd8b1c0a319fd73719b91
+//   0: golden-seg.npz 437aa89014c1d1b55a15c9fde5cd6403b2727c4c4de73090ce4a3d0ffd14ac8c
+//   1: golden-seg_case01.npz 7d8a2e621c36a48d738de5614dfbccc5011845a663def8d933055bed61b7130d
+//   2: golden-seg_case02.npz 20a9db78afeeb2aba4f2d616bf70a4d5d2fe083796951cdf1a6569d4d8afa9ee
+//   3: golden-seg_case03.npz d80ad07fbf0dcc0f84725fbbb02851f28891883ba962da17199fe92b3319decb
+//   4: golden-seg_case04.npz f79da2f7d03b2be721735fe4076054a8495f5e939d7b1cc088013ee4e84a536e
+//   5: golden-seg_case05.npz fbdef62bb9722d63745b2fe6891c4384af8806b9b528f2b9d12883506cac4c03
+//   6: golden-seg_case06.npz 820309795c21d0875d6f86e1ea4537b897c164697e82fa11326d091894828e30
+//   7: golden-seg_case07.npz 37089025e9a5ea351e6a1927543ae6bc572a3daa66f7b275b002ce92f9b47281
 
 #ifndef __HKV_GOLDEN_SEG_CASES_H
 #define __HKV_GOLDEN_SEG_CASES_H
