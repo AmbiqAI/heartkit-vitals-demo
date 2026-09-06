@@ -17,6 +17,13 @@
  * NSX_POWER_PERF_HIGH, switched the way set_speed_mode() does it. Every line
  * carries mode=lp|hp and the summary carries the clk_hz it was measured at.
  *
+ * Every case is compared against two references, tagged ref= on each line.
+ * ref=tflm is the gate: the same flatbuffer through the TFLM interpreter in
+ * this same image, on this same silicon, so a mismatch is attributable to the
+ * AOT compiler alone. ref=golden is the host LiteRT capture and is
+ * informational -- it also carries LiteRT-vs-TFLM kernel differences, which
+ * are not what this runner is asked to gate.
+ *
  * See AmbiqAI/heartkit-vitals-demo#37.
  */
 #include <stdint.h>
@@ -39,6 +46,10 @@
 #include "golden_arr_cases.h"
 #include "golden_seg_cases.h"
 
+#if defined(HKV_PARITY_TFLM)
+#include "tflm_ref.h"
+#endif
+
 #define SEG_TIME_LEN (GOLDEN_SEG_OUTPUT_LEN / ECG_SEG_NUM_CLASS)
 #define ARR_NUM_CLASS (GOLDEN_ARR_OUTPUT_LEN)
 
@@ -50,7 +61,7 @@
 #define ARR_MAX_ABS_ALLOWED (0.008f)
 
 static uint16_t maskActual[SEG_TIME_LEN];
-static uint16_t maskGolden[SEG_TIME_LEN];
+static uint16_t maskRef[SEG_TIME_LEN];
 
 typedef struct {
     int32_t rc;
@@ -61,21 +72,44 @@ typedef struct {
     int validCount;
     int maskEq;
     uint32_t cycles;
+    uint32_t refCycles;
     int pass;
     int label;
 } case_result_t;
 
 typedef enum { MODE_LP = 0, MODE_HP = 1, MODE_COUNT = 2 } run_mode_t;
+typedef enum { REF_TFLM = 0, REF_GOLDEN = 1, REF_COUNT = 2 } ref_t;
 
 static const char *const modeNames[MODE_COUNT] = {"lp", "hp"};
+static const char *const refNames[REF_COUNT] = {"tflm", "golden"};
 
-static case_result_t segRes[MODE_COUNT][GOLDEN_SEG_NUM_CASES];
-static case_result_t arrRes[MODE_COUNT][GOLDEN_ARR_NUM_CASES];
+/* Skips the tflm slot entirely when the reference path is compiled out, rather
+ * than emitting rows the report would then have to know are meaningless. */
+#if defined(HKV_PARITY_TFLM)
+#define REF_FIRST REF_TFLM
+#else
+#define REF_FIRST REF_GOLDEN
+#endif
+
+static case_result_t segRes[MODE_COUNT][REF_COUNT][GOLDEN_SEG_NUM_CASES];
+static case_result_t arrRes[MODE_COUNT][REF_COUNT][GOLDEN_ARR_NUM_CASES];
 static uint32_t modeClockHz[MODE_COUNT];
 static uint32_t segInitRc[MODE_COUNT];
 static uint32_t arrInitRc[MODE_COUNT];
-static int segPassCount[MODE_COUNT];
-static int arrPassCount[MODE_COUNT];
+static int segPassCount[MODE_COUNT][REF_COUNT];
+static int arrPassCount[MODE_COUNT][REF_COUNT];
+
+/* The AOT output has to be snapshotted before the TFLM invoke rather than
+ * compared in place: both runtimes are live in this image and only their arena
+ * placement, not their lifetime, is guaranteed disjoint. */
+static int8_t aotSegOut[GOLDEN_SEG_OUTPUT_LEN];
+static float aotArrOut[ARR_NUM_CLASS];
+#if defined(HKV_PARITY_TFLM)
+static int8_t tflmSegOut[GOLDEN_SEG_OUTPUT_LEN];
+static float tflmArrOut[ARR_NUM_CLASS];
+static int32_t tflmSegInitRc = -1;
+static int32_t tflmArrInitRc = -1;
+#endif
 
 /* Same mapping src/timebase.c uses, minus the FreeRTOS half: this runner has no
  * scheduler, so making SystemCoreClock truthful is the whole job. The HAL query
@@ -251,32 +285,23 @@ argmax_f32(const float *v, int n)
     return best;
 }
 
-static int
-run_seg_case(run_mode_t mode, int caseIdx)
+/* One comparison body for both references: the pass rule is a property of the
+ * model output, not of what it is being held against. */
+static void
+compare_seg(case_result_t *r, const int8_t *actual, const int8_t *ref, int32_t rc, uint32_t cycles,
+            uint32_t refCycles, float scale, int32_t zp)
 {
-    const int8_t *golden = golden_seg_outputs[caseIdx];
-    int8_t *in = segCtx.inputs[0].data;
-    const int8_t *out = segCtx.outputs[0].data;
-    float scale = segCtx.outputs[0].scale;
-    int32_t zp = segCtx.outputs[0].zero_point;
-
-    memcpy(in, golden_seg_inputs[caseIdx], GOLDEN_SEG_INPUT_LEN);
-
-    uint32_t t0 = DWT->CYCCNT;
-    int32_t rc = hkv_segmentation_model_run(&segCtx);
-    uint32_t cycles = DWT->CYCCNT - t0;
-
     int maxLsb = 0;
     for (int i = 0; i < GOLDEN_SEG_OUTPUT_LEN; i++) {
-        int d = (int)out[i] - (int)golden[i];
+        int d = (int)actual[i] - (int)ref[i];
         if (d < 0) { d = -d; }
         if (d > maxLsb) { maxLsb = d; }
     }
 
     int agreeAll = 0, agreeValid = 0, validCount = 0;
     for (int i = 0; i < SEG_TIME_LEN; i++) {
-        int a = argmax_i8(&out[i * ECG_SEG_NUM_CLASS], ECG_SEG_NUM_CLASS);
-        int g = argmax_i8(&golden[i * ECG_SEG_NUM_CLASS], ECG_SEG_NUM_CLASS);
+        int a = argmax_i8(&actual[i * ECG_SEG_NUM_CLASS], ECG_SEG_NUM_CLASS);
+        int g = argmax_i8(&ref[i * ECG_SEG_NUM_CLASS], ECG_SEG_NUM_CLASS);
         int inValid = (i >= ECG_SEG_PAD_LEN) && (i < SEG_TIME_LEN - ECG_SEG_PAD_LEN);
         if (a == g) { agreeAll++; }
         if (inValid) {
@@ -289,14 +314,13 @@ run_seg_case(run_mode_t mode, int caseIdx)
      * output difference that straddles ECG_SEG_THRESHOLD still changes what
      * the host sees. */
     memset(maskActual, 0, sizeof(maskActual));
-    memset(maskGolden, 0, sizeof(maskGolden));
-    hkv_seg_output_mask(maskActual, hkv_host_len(SEG_TIME_LEN), out, NULL, hkv_tensor_len(SEG_TIME_LEN),
+    memset(maskRef, 0, sizeof(maskRef));
+    hkv_seg_output_mask(maskActual, hkv_host_len(SEG_TIME_LEN), actual, NULL, hkv_tensor_len(SEG_TIME_LEN),
                         ECG_SEG_NUM_CLASS, ECG_SEG_PAD_LEN, ECG_SEG_THRESHOLD, scale, zp);
-    hkv_seg_output_mask(maskGolden, hkv_host_len(SEG_TIME_LEN), golden, NULL, hkv_tensor_len(SEG_TIME_LEN),
+    hkv_seg_output_mask(maskRef, hkv_host_len(SEG_TIME_LEN), ref, NULL, hkv_tensor_len(SEG_TIME_LEN),
                         ECG_SEG_NUM_CLASS, ECG_SEG_PAD_LEN, ECG_SEG_THRESHOLD, scale, zp);
-    int maskEq = memcmp(maskActual, maskGolden, sizeof(maskActual)) == 0;
+    int maskEq = memcmp(maskActual, maskRef, sizeof(maskActual)) == 0;
 
-    case_result_t *r = &segRes[mode][caseIdx];
     r->rc = rc;
     r->maxLsb = maxLsb;
     r->maxAbs = (float)maxLsb * scale;
@@ -305,41 +329,30 @@ run_seg_case(run_mode_t mode, int caseIdx)
     r->validCount = validCount;
     r->maskEq = maskEq;
     r->cycles = cycles;
+    r->refCycles = refCycles;
     r->pass = (rc == hkv_segmentation_status_ok) && (maxLsb <= SEG_MAX_LSB_ALLOWED) && maskEq;
-    return r->pass;
 }
 
-static int
-run_arr_case(run_mode_t mode, int caseIdx)
+static void
+compare_arr(case_result_t *r, const float *actual, const float *ref, int32_t rc, uint32_t cycles, uint32_t refCycles)
 {
-    const float *golden = golden_arr_outputs[caseIdx];
-    float *in = (float *)arrCtx.inputs[0].data;
-    const float *out = (const float *)arrCtx.outputs[0].data;
-
-    memcpy(in, golden_arr_inputs[caseIdx], GOLDEN_ARR_INPUT_LEN * sizeof(float));
-
-    uint32_t t0 = DWT->CYCCNT;
-    int32_t rc = hkv_arrhythmia_model_run(&arrCtx);
-    uint32_t cycles = DWT->CYCCNT - t0;
-
     float maxAbs = 0.0f;
     for (int i = 0; i < ARR_NUM_CLASS; i++) {
-        float d = out[i] - golden[i];
+        float d = actual[i] - ref[i];
         if (d < 0.0f) { d = -d; }
         if (d > maxAbs) { maxAbs = d; }
     }
 
-    int aIdx = argmax_f32(out, ARR_NUM_CLASS);
-    int gIdx = argmax_f32(golden, ARR_NUM_CLASS);
+    int aIdx = argmax_f32(actual, ARR_NUM_CLASS);
+    int gIdx = argmax_f32(ref, ARR_NUM_CLASS);
     int argmaxEq = (aIdx == gIdx);
 
     /* ecg_arrhythmia.cc: below threshold the class collapses to
      * ECG_ARR_INCONCLUSIVE, otherwise it is reported as argmax + 1. */
-    int aLabel = out[aIdx] > ECG_ARR_THRESHOLD ? aIdx + 1 : ECG_ARR_INCONCLUSIVE;
-    int gLabel = golden[gIdx] > ECG_ARR_THRESHOLD ? gIdx + 1 : ECG_ARR_INCONCLUSIVE;
+    int aLabel = actual[aIdx] > ECG_ARR_THRESHOLD ? aIdx + 1 : ECG_ARR_INCONCLUSIVE;
+    int gLabel = ref[gIdx] > ECG_ARR_THRESHOLD ? gIdx + 1 : ECG_ARR_INCONCLUSIVE;
     int labelEq = (aLabel == gLabel);
 
-    case_result_t *r = &arrRes[mode][caseIdx];
     r->rc = rc;
     r->maxLsb = 0;
     r->maxAbs = maxAbs;
@@ -348,55 +361,162 @@ run_arr_case(run_mode_t mode, int caseIdx)
     r->validCount = 1;
     r->maskEq = labelEq;
     r->cycles = cycles;
+    r->refCycles = refCycles;
     r->label = aLabel;
     r->pass = (rc == hkv_arrhythmia_status_ok) && argmaxEq && (maxAbs <= ARR_MAX_ABS_ALLOWED) && labelEq;
-    return r->pass;
 }
 
 static void
-print_mode(run_mode_t mode)
+run_seg_case(run_mode_t mode, int caseIdx)
+{
+    int8_t *in = segCtx.inputs[0].data;
+    const int8_t *out = segCtx.outputs[0].data;
+    float scale = segCtx.outputs[0].scale;
+    int32_t zp = segCtx.outputs[0].zero_point;
+
+    memcpy(in, golden_seg_inputs[caseIdx], GOLDEN_SEG_INPUT_LEN);
+
+    uint32_t t0 = DWT->CYCCNT;
+    int32_t rc = hkv_segmentation_model_run(&segCtx);
+    uint32_t cycles = DWT->CYCCNT - t0;
+    memcpy(aotSegOut, out, GOLDEN_SEG_OUTPUT_LEN);
+
+    compare_seg(&segRes[mode][REF_GOLDEN][caseIdx], aotSegOut, golden_seg_outputs[caseIdx], rc, cycles, 0, scale, zp);
+
+#if defined(HKV_PARITY_TFLM)
+    uint32_t refCycles = 0;
+    float refScale = scale;
+    int32_t refZp = zp;
+    memset(tflmSegOut, 0, sizeof(tflmSegOut));
+    int32_t refRc = hkv_tflm_ref_seg_run(golden_seg_inputs[caseIdx], GOLDEN_SEG_INPUT_LEN, tflmSegOut,
+                                         GOLDEN_SEG_OUTPUT_LEN, &refCycles, &refScale, &refZp);
+    /* A failure on either side has to surface as a failing case, so the AOT rc
+     * wins and the reference rc only fills in when the AOT side was clean. */
+    compare_seg(&segRes[mode][REF_TFLM][caseIdx], aotSegOut, tflmSegOut, rc != hkv_segmentation_status_ok ? rc : refRc,
+                cycles, refCycles, refScale, refZp);
+#endif
+
+    for (int ref = REF_FIRST; ref < REF_COUNT; ref++) { segPassCount[mode][ref] += segRes[mode][ref][caseIdx].pass; }
+}
+
+static void
+run_arr_case(run_mode_t mode, int caseIdx)
+{
+    float *in = (float *)arrCtx.inputs[0].data;
+    const float *out = (const float *)arrCtx.outputs[0].data;
+
+    memcpy(in, golden_arr_inputs[caseIdx], GOLDEN_ARR_INPUT_LEN * sizeof(float));
+
+    uint32_t t0 = DWT->CYCCNT;
+    int32_t rc = hkv_arrhythmia_model_run(&arrCtx);
+    uint32_t cycles = DWT->CYCCNT - t0;
+    memcpy(aotArrOut, out, sizeof(aotArrOut));
+
+    compare_arr(&arrRes[mode][REF_GOLDEN][caseIdx], aotArrOut, golden_arr_outputs[caseIdx], rc, cycles, 0);
+
+#if defined(HKV_PARITY_TFLM)
+    uint32_t refCycles = 0;
+    memset(tflmArrOut, 0, sizeof(tflmArrOut));
+    int32_t refRc = hkv_tflm_ref_arr_run(golden_arr_inputs[caseIdx], GOLDEN_ARR_INPUT_LEN, tflmArrOut, ARR_NUM_CLASS,
+                                         &refCycles);
+    compare_arr(&arrRes[mode][REF_TFLM][caseIdx], aotArrOut, tflmArrOut, rc != hkv_arrhythmia_status_ok ? rc : refRc,
+                cycles, refCycles);
+#endif
+
+    for (int ref = REF_FIRST; ref < REF_COUNT; ref++) { arrPassCount[mode][ref] += arrRes[mode][ref][caseIdx].pass; }
+}
+
+static uint32_t
+mean_u32(const uint32_t *v, int n)
+{
+    uint32_t sum = 0;
+    for (int i = 0; i < n; i++) { sum += v[i]; }
+    return n > 0 ? sum / (uint32_t)n : 0;
+}
+
+static void
+print_mode_ref(run_mode_t mode, ref_t ref)
 {
     char absBuf[16], allBuf[16], validBuf[16];
     const char *name = modeNames[mode];
+    const char *refName = refNames[ref];
 
     for (int i = 0; i < GOLDEN_SEG_NUM_CASES; i++) {
-        const case_result_t *r = &segRes[mode][i];
+        const case_result_t *r = &segRes[mode][ref][i];
         fmt_fixed(absBuf, r->maxAbs, 6);
         fmt_pct(allBuf, r->agreeAll, SEG_TIME_LEN);
         fmt_pct(validBuf, r->agreeValid, r->validCount);
-        nsx_printf("HKV|parity|seg mode=%s case=%d rc=%d max_lsb=%d max_abs=%s argmax_pct=%s valid_pct=%s "
-                   "mask_eq=%d cycles=%u pass=%d\r\n",
-                   name, i, (int)r->rc, r->maxLsb, absBuf, allBuf, validBuf, r->maskEq, (unsigned)r->cycles,
-                   r->pass);
+        nsx_printf("HKV|parity|seg mode=%s ref=%s case=%d rc=%d max_lsb=%d max_abs=%s argmax_pct=%s valid_pct=%s "
+                   "mask_eq=%d cycles=%u ref_cycles=%u pass=%d\r\n",
+                   name, refName, i, (int)r->rc, r->maxLsb, absBuf, allBuf, validBuf, r->maskEq, (unsigned)r->cycles,
+                   (unsigned)r->refCycles, r->pass);
     }
     /* Same key set as the seg line so one parser handles both: for a float
      * model max_lsb is not defined, argmax_pct/valid_pct are the single-label
      * agreement, and mask_eq is the thresholded label. */
     for (int i = 0; i < GOLDEN_ARR_NUM_CASES; i++) {
-        const case_result_t *r = &arrRes[mode][i];
+        const case_result_t *r = &arrRes[mode][ref][i];
         fmt_fixed(absBuf, r->maxAbs, 6);
         fmt_pct(allBuf, r->agreeAll, r->validCount);
-        nsx_printf("HKV|parity|arr mode=%s case=%d rc=%d max_lsb=0 max_abs=%s argmax_pct=%s valid_pct=%s "
-                   "mask_eq=%d cycles=%u pass=%d label=%d\r\n",
-                   name, i, (int)r->rc, absBuf, allBuf, allBuf, r->maskEq, (unsigned)r->cycles, r->pass,
-                   r->label);
+        nsx_printf("HKV|parity|arr mode=%s ref=%s case=%d rc=%d max_lsb=0 max_abs=%s argmax_pct=%s valid_pct=%s "
+                   "mask_eq=%d cycles=%u ref_cycles=%u pass=%d label=%d\r\n",
+                   name, refName, i, (int)r->rc, absBuf, allBuf, allBuf, r->maskEq, (unsigned)r->cycles,
+                   (unsigned)r->refCycles, r->pass, r->label);
     }
 
-    nsx_printf("HKV|parity|summary mode=%s seg_pass=%d/%d arr_pass=%d/%d seg_init_rc=%u arr_init_rc=%u "
+    nsx_printf("HKV|parity|summary mode=%s ref=%s seg_pass=%d/%d arr_pass=%d/%d seg_init_rc=%u arr_init_rc=%u "
                "clk_hz=%u\r\n",
-               name, segPassCount[mode], GOLDEN_SEG_NUM_CASES, arrPassCount[mode], GOLDEN_ARR_NUM_CASES,
-               (unsigned)segInitRc[mode], (unsigned)arrInitRc[mode], (unsigned)modeClockHz[mode]);
+               name, refName, segPassCount[mode][ref], GOLDEN_SEG_NUM_CASES, arrPassCount[mode][ref],
+               GOLDEN_ARR_NUM_CASES, (unsigned)segInitRc[mode], (unsigned)arrInitRc[mode],
+               (unsigned)modeClockHz[mode]);
+}
+
+/* Both runtimes measured in the same image at the same operating point, so the
+ * ratio is not carrying a toolchain or power-config difference. tflm=0 means
+ * the reference path was compiled out. */
+static void
+print_cycles(run_mode_t mode)
+{
+    uint32_t aot[GOLDEN_SEG_NUM_CASES > GOLDEN_ARR_NUM_CASES ? GOLDEN_SEG_NUM_CASES : GOLDEN_ARR_NUM_CASES];
+    uint32_t ref[GOLDEN_SEG_NUM_CASES > GOLDEN_ARR_NUM_CASES ? GOLDEN_SEG_NUM_CASES : GOLDEN_ARR_NUM_CASES];
+
+    for (int i = 0; i < GOLDEN_SEG_NUM_CASES; i++) {
+        aot[i] = segRes[mode][REF_FIRST][i].cycles;
+        ref[i] = segRes[mode][REF_FIRST][i].refCycles;
+    }
+    nsx_printf("HKV|parity|cycles mode=%s model=seg aot=%u tflm=%u clk_hz=%u\r\n", modeNames[mode],
+               (unsigned)mean_u32(aot, GOLDEN_SEG_NUM_CASES), (unsigned)mean_u32(ref, GOLDEN_SEG_NUM_CASES),
+               (unsigned)modeClockHz[mode]);
+
+    for (int i = 0; i < GOLDEN_ARR_NUM_CASES; i++) {
+        aot[i] = arrRes[mode][REF_FIRST][i].cycles;
+        ref[i] = arrRes[mode][REF_FIRST][i].refCycles;
+    }
+    nsx_printf("HKV|parity|cycles mode=%s model=arr aot=%u tflm=%u clk_hz=%u\r\n", modeNames[mode],
+               (unsigned)mean_u32(aot, GOLDEN_ARR_NUM_CASES), (unsigned)mean_u32(ref, GOLDEN_ARR_NUM_CASES),
+               (unsigned)modeClockHz[mode]);
 }
 
 static void
 print_report(int32_t segSelf, int32_t arrSelf)
 {
-    nsx_printf("\r\nHKV|parity|boot clk_hz=%u seg_arena=%u arr_arena=%u\r\n", (unsigned)modeClockHz[MODE_LP],
-               (unsigned)hkv_segmentation_arena_dtcm_size, (unsigned)hkv_arrhythmia_arena_dtcm_size);
+    /* Renamed with the arenas' move out of DTCM into .shared, so the boot line
+     * names the section the measurement was actually taken against. */
+    nsx_printf("\r\nHKV|parity|boot clk_hz=%u seg_arena_sram=%u arr_arena_sram=%u\r\n",
+               (unsigned)modeClockHz[MODE_LP], (unsigned)hkv_segmentation_arena_sram_size,
+               (unsigned)hkv_arrhythmia_arena_sram_size);
     nsx_printf("HKV|parity|selfcheck model=seg rc=%d\r\n", (int)segSelf);
     nsx_printf("HKV|parity|selfcheck model=arr rc=%d\r\n", (int)arrSelf);
 
-    for (int mode = 0; mode < MODE_COUNT; mode++) { print_mode((run_mode_t)mode); }
+#if defined(HKV_PARITY_TFLM)
+    nsx_printf("HKV|parity|selfcheck model=tflm_seg rc=%d\r\n", (int)tflmSegInitRc);
+    nsx_printf("HKV|parity|selfcheck model=tflm_arr rc=%d\r\n", (int)tflmArrInitRc);
+#endif
+
+    for (int mode = 0; mode < MODE_COUNT; mode++) {
+        for (int ref = REF_FIRST; ref < REF_COUNT; ref++) { print_mode_ref((run_mode_t)mode, (ref_t)ref); }
+        print_cycles((run_mode_t)mode);
+    }
     nsx_printf("PARITY_DONE\r\n");
 }
 
@@ -412,11 +532,11 @@ run_pass(run_mode_t mode)
 
     segInitRc[mode] = (uint32_t)hkv_segmentation_model_init(&segCtx);
     if (segInitRc[mode] == hkv_segmentation_status_ok) {
-        for (int i = 0; i < GOLDEN_SEG_NUM_CASES; i++) { segPassCount[mode] += run_seg_case(mode, i); }
+        for (int i = 0; i < GOLDEN_SEG_NUM_CASES; i++) { run_seg_case(mode, i); }
     }
     arrInitRc[mode] = (uint32_t)hkv_arrhythmia_model_init(&arrCtx);
     if (arrInitRc[mode] == hkv_arrhythmia_status_ok) {
-        for (int i = 0; i < GOLDEN_ARR_NUM_CASES; i++) { arrPassCount[mode] += run_arr_case(mode, i); }
+        for (int i = 0; i < GOLDEN_ARR_NUM_CASES; i++) { run_arr_case(mode, i); }
     }
 }
 
@@ -464,6 +584,15 @@ main(void)
 
     /* Before the case loops: these re-init the module-global context and reset
      * CYCCNT, so they must not land between a model_init and its measured runs. */
+#if defined(HKV_PARITY_TFLM)
+    /* Before the AOT self-checks so an AllocateTensors() failure is reported
+     * even if a self-check hangs, and once for both modes: the interpreter and
+     * its arena are mode independent. */
+    tflmSegInitRc = hkv_tflm_ref_init();
+    if (tflmSegInitRc == 0) { tflmSegInitRc = hkv_tflm_ref_seg_init(); }
+    tflmArrInitRc = hkv_tflm_ref_arr_init();
+#endif
+
     segSelf = hkv_segmentation_test_case_init();
     if (segSelf == 0) { segSelf = hkv_segmentation_test_case_run(); }
     arrSelf = hkv_arrhythmia_test_case_init();

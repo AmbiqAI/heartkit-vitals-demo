@@ -117,3 +117,26 @@ arrhythmia identical argmax with max absolute probability difference <= 0.008.
 The arrhythmia lines reuse the segmentation key set, where `max_lsb` is always 0
 (float output), `argmax_pct`/`valid_pct` are the single-label agreement and
 `mask_eq` is the thresholded firmware label from `src/ecg_arrhythmia.cc`.
+
+Every case is compared against two references, tagged `ref=` on each line and
+reported as a separate table:
+
+- `ref=tflm` **gates**. It runs the same flatbuffers through the TFLM
+  interpreter in the same image, on the same silicon, at the same operating
+  point, so a difference is attributable to the AOT compiler and nothing else.
+  Built by default; `-DHKV_PARITY_TFLM=OFF` drops it, and `parity_report.py`
+  then exits 1 because the gate cannot be evaluated.
+- `ref=golden` is **informational**. It is the host LiteRT capture, so it also
+  carries LiteRT-vs-TFLM kernel differences that this runner is not asked to
+  gate.
+
+`src/tflm.cc` is linked verbatim so the op resolver matches the firmware's.
+`src/ecg_segmentation.cc` and `src/ecg_arrhythmia.cc` are not: they pull
+`store.h` and `pk_ecg.h`, i.e. the FreeRTOS-scheduled app state this bare-metal
+image cannot stand up. `tools/aot/parity/tflm_ref.cc` mirrors their init and
+invoke instead -- same flatbuffers, same arena sizes from `constants.h`, same
+`AM_SHARED_RW` placement, same quantize and output handling.
+
+The TFLM invoke is timed with the same DWT bracket as the AOT run, so the
+`HKV|parity|cycles` lines give an AOT-vs-TFLM cycle comparison per model at
+both `lp` and `hp` that is free of toolchain and power-config differences.

@@ -179,6 +179,25 @@ if(HKV_BUILD_AOT_PARITY)
         nsx::hkv_segmentation_aot
         nsx::hkv_arrhythmia_aot
     )
+    # The gate reference: the same flatbuffers through TFLM in this same image,
+    # so an AOT/TFLM difference cannot be blamed on the host runtime or on a
+    # different operating point. src/tflm.cc is linked verbatim to keep the op
+    # resolver identical to the firmware's; the model wrappers next to it are
+    # not, because they pull store.h and the FreeRTOS-scheduled app state --
+    # tools/aot/parity/tflm_ref.cc mirrors their init and invoke instead.
+    option(HKV_PARITY_TFLM "Also run the parity cases through the TFLM runtime" ON)
+    if(HKV_PARITY_TFLM)
+        target_sources(hkv_aot_parity PRIVATE
+            tools/aot/parity/tflm_ref.cc
+            src/tflm.cc
+        )
+        target_compile_definitions(hkv_aot_parity PRIVATE HKV_PARITY_TFLM=1)
+        # helia_dsp for arm_math.h, which src/tflm.h includes. The firmware
+        # picks it up transitively through nsx::physiokit; this image has no
+        # reason to link the physiology layer.
+        target_link_libraries(hkv_aot_parity PRIVATE nsx::helia_rt nsx::helia_dsp)
+    endif()
+
     # Localisation aid for #37: replaces the timed pass with a per-op output
     # dump over SWO. Separate option so the default parity image is unchanged.
     option(HKV_PARITY_DUMP_OPS "Dump every segmentation operator output over SWO" OFF)
