@@ -16,7 +16,7 @@ LVGL is not built into this firmware, so the GPL-3.0 text carried in the AmbiqSu
 | --- | --- | --- |
 | `modules/helia-dsp` | https://github.com/AmbiqAI/helia-dsp.git | `9c18599bf7a7` |
 | `modules/helia-rt` | https://github.com/AmbiqAI/helia-rt.git | `helia-rt-v1.16.0 (c1b97f4a49ab)` |
-| `modules/ns-cmsis-nn` | https://github.com/AmbiqAI/ns-cmsis-nn.git | `v7.29.2 (631726420b04)` |
+| `modules/ns-cmsis-nn` | https://github.com/AmbiqAI/ns-cmsis-nn.git | `v7.31.0 (9884d5fccab8)` |
 | `modules/nsx-ambiq-sdk` | https://github.com/AmbiqAI/nsx-ambiq-sdk.git | `v5.2.24 (a9f4ec25a162)` |
 | `modules/nsx-as7058` | https://github.com/AmbiqAI/nsx-as7058.git | `c70db89ae561` |
 | `modules/nsx-physiokit` | https://github.com/AmbiqAI/nsx-physiokit.git | `17ac957fab6f` |
@@ -1516,7 +1516,7 @@ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND 
 ### `modules/ns-cmsis-nn`
 
 - Component path: `modules/ns-cmsis-nn`
-- Vendored from: https://github.com/AmbiqAI/ns-cmsis-nn.git at `v7.29.2 (631726420b04)` (`modules/ns-cmsis-nn`)
+- Vendored from: https://github.com/AmbiqAI/ns-cmsis-nn.git at `v7.31.0 (9884d5fccab8)` (`modules/ns-cmsis-nn`)
 - Declared license: not declared in an `nsx-module.yaml`; see the text below.
 
 #### `modules/ns-cmsis-nn/LICENSE`
@@ -1643,7 +1643,7 @@ section 4(b).
 ### `modules/ns-cmsis-nn/LICENSES`
 
 - Component path: `modules/ns-cmsis-nn/LICENSES`
-- Vendored from: https://github.com/AmbiqAI/ns-cmsis-nn.git at `v7.29.2 (631726420b04)` (`modules/ns-cmsis-nn`)
+- Vendored from: https://github.com/AmbiqAI/ns-cmsis-nn.git at `v7.31.0 (9884d5fccab8)` (`modules/ns-cmsis-nn`)
 - Declared license: not declared in an `nsx-module.yaml`; see the text below.
 
 #### `modules/ns-cmsis-nn/LICENSES/Apache-2.0.txt`
