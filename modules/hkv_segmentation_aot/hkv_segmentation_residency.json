@@ -16,25 +16,25 @@
     "scratch": [
       {
         "alignment": 16,
-        "memory": "dtcm",
+        "memory": "sram",
         "region_id": 0,
-        "total_size": 524288,
+        "total_size": 3145728,
         "used": 22560
       }
     ]
   },
   "module_prefix": "hkv_segmentation",
-  "plan_hash": "e7e860ab99fa70a1",
+  "plan_hash": "ef78df2313038784",
   "schema_version": 3,
-  "tensor_layout_hash": "47daabf9e8346082",
+  "tensor_layout_hash": "7fc1fd313371783d",
   "tensors": [
     {
       "id": "0",
-      "memory": "dtcm",
+      "memory": "sram",
       "offset": 0,
       "role": "scratch",
       "size": 256,
-      "source_memory": "dtcm"
+      "source_memory": "sram"
     },
     {
       "id": "5",
@@ -214,251 +214,251 @@
     },
     {
       "id": "39",
-      "memory": "dtcm",
+      "memory": "sram",
       "offset": 0,
       "role": "scratch",
       "size": 256,
-      "source_memory": "dtcm"
+      "source_memory": "sram"
     },
     {
       "id": "40",
-      "memory": "dtcm",
+      "memory": "sram",
       "offset": 256,
       "role": "scratch",
       "size": 256,
-      "source_memory": "dtcm"
+      "source_memory": "sram"
     },
     {
       "id": "41",
-      "memory": "dtcm",
+      "memory": "sram",
       "offset": 0,
       "role": "scratch",
       "size": 256,
-      "source_memory": "dtcm"
+      "source_memory": "sram"
     },
     {
       "id": "42",
-      "memory": "dtcm",
+      "memory": "sram",
       "offset": 256,
       "role": "scratch",
       "size": 4096,
-      "source_memory": "dtcm"
+      "source_memory": "sram"
     },
     {
       "id": "43",
-      "memory": "dtcm",
+      "memory": "sram",
       "offset": 4352,
       "role": "scratch",
       "size": 4096,
-      "source_memory": "dtcm"
+      "source_memory": "sram"
     },
     {
       "id": "44",
-      "memory": "dtcm",
+      "memory": "sram",
       "offset": 0,
       "role": "scratch",
       "size": 16,
-      "source_memory": "dtcm"
+      "source_memory": "sram"
     },
     {
       "id": "45",
-      "memory": "dtcm",
+      "memory": "sram",
       "offset": 16,
       "role": "scratch",
       "size": 8,
-      "source_memory": "dtcm"
+      "source_memory": "sram"
     },
     {
       "id": "46",
-      "memory": "dtcm",
+      "memory": "sram",
       "offset": 0,
       "role": "scratch",
       "size": 16,
-      "source_memory": "dtcm"
+      "source_memory": "sram"
     },
     {
       "id": "47",
-      "memory": "dtcm",
+      "memory": "sram",
       "offset": 16,
       "role": "scratch",
       "size": 16,
-      "source_memory": "dtcm"
+      "source_memory": "sram"
     },
     {
       "id": "48",
-      "memory": "dtcm",
+      "memory": "sram",
       "offset": 0,
       "role": "scratch",
       "size": 16,
-      "source_memory": "dtcm"
+      "source_memory": "sram"
     },
     {
       "id": "49",
-      "memory": "dtcm",
+      "memory": "sram",
       "offset": 16,
       "role": "scratch",
       "size": 4096,
-      "source_memory": "dtcm"
+      "source_memory": "sram"
     },
     {
       "id": "50",
-      "memory": "dtcm",
+      "memory": "sram",
       "offset": 4112,
       "role": "scratch",
       "size": 6144,
-      "source_memory": "dtcm"
+      "source_memory": "sram"
     },
     {
       "id": "51",
-      "memory": "dtcm",
+      "memory": "sram",
       "offset": 10256,
       "role": "scratch",
       "size": 6144,
-      "source_memory": "dtcm"
+      "source_memory": "sram"
     },
     {
       "id": "52",
-      "memory": "dtcm",
+      "memory": "sram",
       "offset": 0,
       "role": "scratch",
       "size": 24,
-      "source_memory": "dtcm"
+      "source_memory": "sram"
     },
     {
       "id": "53",
-      "memory": "dtcm",
+      "memory": "sram",
       "offset": 32,
       "role": "scratch",
       "size": 12,
-      "source_memory": "dtcm"
+      "source_memory": "sram"
     },
     {
       "id": "54",
-      "memory": "dtcm",
+      "memory": "sram",
       "offset": 0,
       "role": "scratch",
       "size": 24,
-      "source_memory": "dtcm"
+      "source_memory": "sram"
     },
     {
       "id": "55",
-      "memory": "dtcm",
+      "memory": "sram",
       "offset": 32,
       "role": "scratch",
       "size": 24,
-      "source_memory": "dtcm"
+      "source_memory": "sram"
     },
     {
       "id": "56",
-      "memory": "dtcm",
+      "memory": "sram",
       "offset": 0,
       "role": "scratch",
       "size": 24,
-      "source_memory": "dtcm"
+      "source_memory": "sram"
     },
     {
       "id": "57",
-      "memory": "dtcm",
+      "memory": "sram",
       "offset": 32,
       "role": "scratch",
       "size": 6144,
-      "source_memory": "dtcm"
+      "source_memory": "sram"
     },
     {
       "id": "58",
-      "memory": "dtcm",
+      "memory": "sram",
       "offset": 6176,
       "role": "scratch",
       "size": 8192,
-      "source_memory": "dtcm"
+      "source_memory": "sram"
     },
     {
       "id": "59",
-      "memory": "dtcm",
+      "memory": "sram",
       "offset": 14368,
       "role": "scratch",
       "size": 8192,
-      "source_memory": "dtcm"
+      "source_memory": "sram"
     },
     {
       "id": "60",
-      "memory": "dtcm",
+      "memory": "sram",
       "offset": 0,
       "role": "scratch",
       "size": 32,
-      "source_memory": "dtcm"
+      "source_memory": "sram"
     },
     {
       "id": "61",
-      "memory": "dtcm",
+      "memory": "sram",
       "offset": 32,
       "role": "scratch",
       "size": 16,
-      "source_memory": "dtcm"
+      "source_memory": "sram"
     },
     {
       "id": "62",
-      "memory": "dtcm",
+      "memory": "sram",
       "offset": 0,
       "role": "scratch",
       "size": 32,
-      "source_memory": "dtcm"
+      "source_memory": "sram"
     },
     {
       "id": "63",
-      "memory": "dtcm",
+      "memory": "sram",
       "offset": 32,
       "role": "scratch",
       "size": 32,
-      "source_memory": "dtcm"
+      "source_memory": "sram"
     },
     {
       "id": "64",
-      "memory": "dtcm",
+      "memory": "sram",
       "offset": 0,
       "role": "scratch",
       "size": 32,
-      "source_memory": "dtcm"
+      "source_memory": "sram"
     },
     {
       "id": "65",
-      "memory": "dtcm",
+      "memory": "sram",
       "offset": 32,
       "role": "scratch",
       "size": 8192,
-      "source_memory": "dtcm"
+      "source_memory": "sram"
     },
     {
       "id": "66",
-      "memory": "dtcm",
+      "memory": "sram",
       "offset": 8224,
       "role": "scratch",
       "size": 10240,
-      "source_memory": "dtcm"
+      "source_memory": "sram"
     },
     {
       "id": "67",
-      "memory": "dtcm",
+      "memory": "sram",
       "offset": 0,
       "role": "scratch",
       "size": 1024,
-      "source_memory": "dtcm"
+      "source_memory": "sram"
     },
     {
       "id": "68",
-      "memory": "dtcm",
+      "memory": "sram",
       "offset": 0,
       "role": "scratch",
       "size": 1024,
-      "source_memory": "dtcm"
+      "source_memory": "sram"
     },
     {
       "id": "69",
-      "memory": "dtcm",
+      "memory": "sram",
       "offset": 1024,
       "role": "scratch",
       "size": 1024,
-      "source_memory": "dtcm"
+      "source_memory": "sram"
     },
     {
       "id": "conv_2d_11_multiplier",
@@ -638,11 +638,11 @@
     },
     {
       "id": "conv_2d_28_scratch",
-      "memory": "dtcm",
+      "memory": "sram",
       "offset": 1024,
       "role": "scratch",
       "size": 400,
-      "source_memory": "dtcm"
+      "source_memory": "sram"
     },
     {
       "id": "conv_2d_28_shift",
@@ -750,11 +750,11 @@
     },
     {
       "id": "depthwise_conv_2d_1_scratch",
-      "memory": "dtcm",
+      "memory": "sram",
       "offset": 512,
       "role": "scratch",
       "size": 3472,
-      "source_memory": "dtcm"
+      "source_memory": "sram"
     },
     {
       "id": "depthwise_conv_2d_1_weight_sum",
@@ -782,11 +782,11 @@
     },
     {
       "id": "depthwise_conv_2d_2_scratch",
-      "memory": "dtcm",
+      "memory": "sram",
       "offset": 512,
       "role": "scratch",
       "size": 3472,
-      "source_memory": "dtcm"
+      "source_memory": "sram"
     },
     {
       "id": "depthwise_conv_2d_2_weight_sum",

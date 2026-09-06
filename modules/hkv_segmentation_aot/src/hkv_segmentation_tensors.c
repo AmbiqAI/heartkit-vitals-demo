@@ -24,7 +24,7 @@
 //── Memory Arenas ─────────────────────────────────────────────────────────────
 
 const size_t hkv_segmentation_arena_sizes[hkv_segmentation_num_arena_buffers] = {
-    [hkv_segmentation_arena_dtcm] = hkv_segmentation_arena_dtcm_size,
+    [hkv_segmentation_arena_sram] = hkv_segmentation_arena_sram_size,
     [hkv_segmentation_arena_const_mram] = hkv_segmentation_arena_const_mram_size,
 };
 
@@ -35,7 +35,7 @@ const size_t hkv_segmentation_arena_sizes[hkv_segmentation_num_arena_buffers] = 
 // these values, so ``allocate_arenas=true`` builds always satisfy the
 // constraint.
 const size_t hkv_segmentation_arena_alignments[hkv_segmentation_num_arena_buffers] = {
-    [hkv_segmentation_arena_dtcm] = 16,
+    [hkv_segmentation_arena_sram] = 16,
     [hkv_segmentation_arena_const_mram] = 16,
 };
 
@@ -43,12 +43,12 @@ const size_t hkv_segmentation_arena_alignments[hkv_segmentation_num_arena_buffer
 // staged-constant runtime copies) are uninitialized BSS-backed
 // storage; cold-constant arenas are read-only blobs whose bytes are
 // initialised in hkv_segmentation_constants.c.
-alignas(16) static HKV_SEGMENTATION_PUT_IN_DTCM int8_t hkv_segmentation_arena_dtcm_buffer[hkv_segmentation_arena_dtcm_size];
+alignas(16) static HKV_SEGMENTATION_PUT_IN_SRAM int8_t hkv_segmentation_arena_sram_buffer[hkv_segmentation_arena_sram_size];
 
 extern const HKV_SEGMENTATION_PUT_IN_MRAM_INIT int8_t hkv_segmentation_arena_const_mram__blob[9568];
 
 const void * const hkv_segmentation_arena_buffers[hkv_segmentation_num_arena_buffers] = {
-    [hkv_segmentation_arena_dtcm] = hkv_segmentation_arena_dtcm_buffer,
+    [hkv_segmentation_arena_sram] = hkv_segmentation_arena_sram_buffer,
     // Cold constant arena: kernels read directly from the in-image blob.
     [hkv_segmentation_arena_const_mram] = hkv_segmentation_arena_const_mram__blob,
 };
@@ -95,7 +95,7 @@ const float hkv_segmentation_outputs_scale[hkv_segmentation_num_outputs] = {
 const hkv_segmentation_tensor_descriptor_t hkv_segmentation_tensor_descriptors[hkv_segmentation_num_tensors] = {
     [hkv_segmentation_tensor_0] = {
         .type = hkv_segmentation_tensor_type_scratch,
-        .region = hkv_segmentation_arena_dtcm,
+        .region = hkv_segmentation_arena_sram,
         .offset = 0,
         .size = 256,
     },
@@ -233,193 +233,193 @@ const hkv_segmentation_tensor_descriptor_t hkv_segmentation_tensor_descriptors[h
     },
     [hkv_segmentation_tensor_39] = {
         .type = hkv_segmentation_tensor_type_scratch,
-        .region = hkv_segmentation_arena_dtcm,
+        .region = hkv_segmentation_arena_sram,
         .offset = 0,
         .size = 256,
     },
     [hkv_segmentation_tensor_40] = {
         .type = hkv_segmentation_tensor_type_scratch,
-        .region = hkv_segmentation_arena_dtcm,
+        .region = hkv_segmentation_arena_sram,
         .offset = 256,
         .size = 256,
     },
     [hkv_segmentation_tensor_41] = {
         .type = hkv_segmentation_tensor_type_scratch,
-        .region = hkv_segmentation_arena_dtcm,
+        .region = hkv_segmentation_arena_sram,
         .offset = 0,
         .size = 256,
     },
     [hkv_segmentation_tensor_42] = {
         .type = hkv_segmentation_tensor_type_scratch,
-        .region = hkv_segmentation_arena_dtcm,
+        .region = hkv_segmentation_arena_sram,
         .offset = 256,
         .size = 4096,
     },
     [hkv_segmentation_tensor_43] = {
         .type = hkv_segmentation_tensor_type_scratch,
-        .region = hkv_segmentation_arena_dtcm,
+        .region = hkv_segmentation_arena_sram,
         .offset = 4352,
         .size = 4096,
     },
     [hkv_segmentation_tensor_44] = {
         .type = hkv_segmentation_tensor_type_scratch,
-        .region = hkv_segmentation_arena_dtcm,
+        .region = hkv_segmentation_arena_sram,
         .offset = 0,
         .size = 16,
     },
     [hkv_segmentation_tensor_45] = {
         .type = hkv_segmentation_tensor_type_scratch,
-        .region = hkv_segmentation_arena_dtcm,
+        .region = hkv_segmentation_arena_sram,
         .offset = 16,
         .size = 8,
     },
     [hkv_segmentation_tensor_46] = {
         .type = hkv_segmentation_tensor_type_scratch,
-        .region = hkv_segmentation_arena_dtcm,
+        .region = hkv_segmentation_arena_sram,
         .offset = 0,
         .size = 16,
     },
     [hkv_segmentation_tensor_47] = {
         .type = hkv_segmentation_tensor_type_scratch,
-        .region = hkv_segmentation_arena_dtcm,
+        .region = hkv_segmentation_arena_sram,
         .offset = 16,
         .size = 16,
     },
     [hkv_segmentation_tensor_48] = {
         .type = hkv_segmentation_tensor_type_scratch,
-        .region = hkv_segmentation_arena_dtcm,
+        .region = hkv_segmentation_arena_sram,
         .offset = 0,
         .size = 16,
     },
     [hkv_segmentation_tensor_49] = {
         .type = hkv_segmentation_tensor_type_scratch,
-        .region = hkv_segmentation_arena_dtcm,
+        .region = hkv_segmentation_arena_sram,
         .offset = 16,
         .size = 4096,
     },
     [hkv_segmentation_tensor_50] = {
         .type = hkv_segmentation_tensor_type_scratch,
-        .region = hkv_segmentation_arena_dtcm,
+        .region = hkv_segmentation_arena_sram,
         .offset = 4112,
         .size = 6144,
     },
     [hkv_segmentation_tensor_51] = {
         .type = hkv_segmentation_tensor_type_scratch,
-        .region = hkv_segmentation_arena_dtcm,
+        .region = hkv_segmentation_arena_sram,
         .offset = 10256,
         .size = 6144,
     },
     [hkv_segmentation_tensor_52] = {
         .type = hkv_segmentation_tensor_type_scratch,
-        .region = hkv_segmentation_arena_dtcm,
+        .region = hkv_segmentation_arena_sram,
         .offset = 0,
         .size = 24,
     },
     [hkv_segmentation_tensor_53] = {
         .type = hkv_segmentation_tensor_type_scratch,
-        .region = hkv_segmentation_arena_dtcm,
+        .region = hkv_segmentation_arena_sram,
         .offset = 32,
         .size = 12,
     },
     [hkv_segmentation_tensor_54] = {
         .type = hkv_segmentation_tensor_type_scratch,
-        .region = hkv_segmentation_arena_dtcm,
+        .region = hkv_segmentation_arena_sram,
         .offset = 0,
         .size = 24,
     },
     [hkv_segmentation_tensor_55] = {
         .type = hkv_segmentation_tensor_type_scratch,
-        .region = hkv_segmentation_arena_dtcm,
+        .region = hkv_segmentation_arena_sram,
         .offset = 32,
         .size = 24,
     },
     [hkv_segmentation_tensor_56] = {
         .type = hkv_segmentation_tensor_type_scratch,
-        .region = hkv_segmentation_arena_dtcm,
+        .region = hkv_segmentation_arena_sram,
         .offset = 0,
         .size = 24,
     },
     [hkv_segmentation_tensor_57] = {
         .type = hkv_segmentation_tensor_type_scratch,
-        .region = hkv_segmentation_arena_dtcm,
+        .region = hkv_segmentation_arena_sram,
         .offset = 32,
         .size = 6144,
     },
     [hkv_segmentation_tensor_58] = {
         .type = hkv_segmentation_tensor_type_scratch,
-        .region = hkv_segmentation_arena_dtcm,
+        .region = hkv_segmentation_arena_sram,
         .offset = 6176,
         .size = 8192,
     },
     [hkv_segmentation_tensor_59] = {
         .type = hkv_segmentation_tensor_type_scratch,
-        .region = hkv_segmentation_arena_dtcm,
+        .region = hkv_segmentation_arena_sram,
         .offset = 14368,
         .size = 8192,
     },
     [hkv_segmentation_tensor_60] = {
         .type = hkv_segmentation_tensor_type_scratch,
-        .region = hkv_segmentation_arena_dtcm,
+        .region = hkv_segmentation_arena_sram,
         .offset = 0,
         .size = 32,
     },
     [hkv_segmentation_tensor_61] = {
         .type = hkv_segmentation_tensor_type_scratch,
-        .region = hkv_segmentation_arena_dtcm,
+        .region = hkv_segmentation_arena_sram,
         .offset = 32,
         .size = 16,
     },
     [hkv_segmentation_tensor_62] = {
         .type = hkv_segmentation_tensor_type_scratch,
-        .region = hkv_segmentation_arena_dtcm,
+        .region = hkv_segmentation_arena_sram,
         .offset = 0,
         .size = 32,
     },
     [hkv_segmentation_tensor_63] = {
         .type = hkv_segmentation_tensor_type_scratch,
-        .region = hkv_segmentation_arena_dtcm,
+        .region = hkv_segmentation_arena_sram,
         .offset = 32,
         .size = 32,
     },
     [hkv_segmentation_tensor_64] = {
         .type = hkv_segmentation_tensor_type_scratch,
-        .region = hkv_segmentation_arena_dtcm,
+        .region = hkv_segmentation_arena_sram,
         .offset = 0,
         .size = 32,
     },
     [hkv_segmentation_tensor_65] = {
         .type = hkv_segmentation_tensor_type_scratch,
-        .region = hkv_segmentation_arena_dtcm,
+        .region = hkv_segmentation_arena_sram,
         .offset = 32,
         .size = 8192,
     },
     [hkv_segmentation_tensor_66] = {
         .type = hkv_segmentation_tensor_type_scratch,
-        .region = hkv_segmentation_arena_dtcm,
+        .region = hkv_segmentation_arena_sram,
         .offset = 8224,
         .size = 10240,
     },
     [hkv_segmentation_tensor_67] = {
         .type = hkv_segmentation_tensor_type_scratch,
-        .region = hkv_segmentation_arena_dtcm,
+        .region = hkv_segmentation_arena_sram,
         .offset = 0,
         .size = 1024,
     },
     [hkv_segmentation_tensor_68] = {
         .type = hkv_segmentation_tensor_type_scratch,
-        .region = hkv_segmentation_arena_dtcm,
+        .region = hkv_segmentation_arena_sram,
         .offset = 0,
         .size = 1024,
     },
     [hkv_segmentation_tensor_69] = {
         .type = hkv_segmentation_tensor_type_scratch,
-        .region = hkv_segmentation_arena_dtcm,
+        .region = hkv_segmentation_arena_sram,
         .offset = 1024,
         .size = 1024,
     },
     [hkv_segmentation_tensor_depthwise_conv_2d_1_scratch] = {
         .type = hkv_segmentation_tensor_type_scratch,
-        .region = hkv_segmentation_arena_dtcm,
+        .region = hkv_segmentation_arena_sram,
         .offset = 512,
         .size = 3472,
     },
@@ -431,7 +431,7 @@ const hkv_segmentation_tensor_descriptor_t hkv_segmentation_tensor_descriptors[h
     },
     [hkv_segmentation_tensor_depthwise_conv_2d_2_scratch] = {
         .type = hkv_segmentation_tensor_type_scratch,
-        .region = hkv_segmentation_arena_dtcm,
+        .region = hkv_segmentation_arena_sram,
         .offset = 512,
         .size = 3472,
     },
@@ -659,7 +659,7 @@ const hkv_segmentation_tensor_descriptor_t hkv_segmentation_tensor_descriptors[h
     },
     [hkv_segmentation_tensor_conv_2d_28_scratch] = {
         .type = hkv_segmentation_tensor_type_scratch,
-        .region = hkv_segmentation_arena_dtcm,
+        .region = hkv_segmentation_arena_sram,
         .offset = 1024,
         .size = 400,
     },

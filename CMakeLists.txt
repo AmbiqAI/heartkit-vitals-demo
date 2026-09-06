@@ -40,6 +40,14 @@ target_include_directories(app_freertos_config INTERFACE
 )
 add_library(nsx::freertos_config ALIAS app_freertos_config)
 
+# The generated AOT modules leave their PUT_IN_* placement macros as no-ops and
+# expose this hook so the consumer picks the section. Must be set before the
+# bootstrap add_subdirectory()s the modules. See tools/aot/hkv_aot_attributes.h.
+set(HKV_SEGMENTATION_AOT_ATTRIBUTES_HEADER
+    "${CMAKE_CURRENT_LIST_DIR}/tools/aot/hkv_aot_attributes.h")
+set(HKV_ARRHYTHMIA_AOT_ATTRIBUTES_HEADER
+    "${CMAKE_CURRENT_LIST_DIR}/tools/aot/hkv_aot_attributes.h")
+
 nsx_bootstrap_app(
     APP_ROOT "${CMAKE_CURRENT_LIST_DIR}"
     BOARD "${NSX_BOARD}"

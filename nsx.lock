@@ -3,7 +3,7 @@
 schema_version: 4
 targets:
   apollo510b_evb:
-    generated_at: '2026-09-06T18:17:45+00:00'
+    generated_at: '2026-09-06T18:43:07+00:00'
     nsx_tool:
       version: 0.1.0
     manifest:
@@ -329,18 +329,18 @@ targets:
         constraint: vendored
         resolved:
           vendored_at: modules/hkv_segmentation_aot
-          content_hash: sha256:271d151d16d8c53d52adaddd136de936febafe72aa2496309561f91b5e73e964
-          acquired_at: '2026-09-06T18:17:45+00:00'
+          content_hash: sha256:9fcb3e743947ebb43a0ffe10f72b50e742e59a54accdf65ec5e3cbefb6d532dd
+          acquired_at: '2026-09-06T18:43:07+00:00'
       hkv_arrhythmia_aot:
         project: hkv_arrhythmia_aot
         kind: vendored
         constraint: vendored
         resolved:
           vendored_at: modules/hkv_arrhythmia_aot
-          content_hash: sha256:589d1ba23018a328c10ff3c18158c97213122c708b88c477f1c7aff4862b5087
-          acquired_at: '2026-09-06T18:17:45+00:00'
+          content_hash: sha256:fd9d4e0588d1f451989b9baeca98227476c624a22ba59b158ce8f3711c7599f0
+          acquired_at: '2026-09-06T18:43:07+00:00'
   apollo510_evb:
-    generated_at: '2026-09-06T18:17:45+00:00'
+    generated_at: '2026-09-06T18:43:07+00:00'
     nsx_tool:
       version: 0.1.0
     manifest:
@@ -634,18 +634,18 @@ targets:
         constraint: vendored
         resolved:
           vendored_at: modules/hkv_segmentation_aot
-          content_hash: sha256:271d151d16d8c53d52adaddd136de936febafe72aa2496309561f91b5e73e964
-          acquired_at: '2026-09-06T18:17:45+00:00'
+          content_hash: sha256:9fcb3e743947ebb43a0ffe10f72b50e742e59a54accdf65ec5e3cbefb6d532dd
+          acquired_at: '2026-09-06T18:43:07+00:00'
       hkv_arrhythmia_aot:
         project: hkv_arrhythmia_aot
         kind: vendored
         constraint: vendored
         resolved:
           vendored_at: modules/hkv_arrhythmia_aot
-          content_hash: sha256:589d1ba23018a328c10ff3c18158c97213122c708b88c477f1c7aff4862b5087
-          acquired_at: '2026-09-06T18:17:45+00:00'
+          content_hash: sha256:fd9d4e0588d1f451989b9baeca98227476c624a22ba59b158ce8f3711c7599f0
+          acquired_at: '2026-09-06T18:43:07+00:00'
   apollo330mP_evb:
-    generated_at: '2026-09-06T18:17:46+00:00'
+    generated_at: '2026-09-06T18:43:07+00:00'
     nsx_tool:
       version: 0.1.0
     manifest:
@@ -939,13 +939,13 @@ targets:
         constraint: vendored
         resolved:
           vendored_at: modules/hkv_segmentation_aot
-          content_hash: sha256:271d151d16d8c53d52adaddd136de936febafe72aa2496309561f91b5e73e964
-          acquired_at: '2026-09-06T18:17:46+00:00'
+          content_hash: sha256:9fcb3e743947ebb43a0ffe10f72b50e742e59a54accdf65ec5e3cbefb6d532dd
+          acquired_at: '2026-09-06T18:43:07+00:00'
       hkv_arrhythmia_aot:
         project: hkv_arrhythmia_aot
         kind: vendored
         constraint: vendored
         resolved:
           vendored_at: modules/hkv_arrhythmia_aot
-          content_hash: sha256:589d1ba23018a328c10ff3c18158c97213122c708b88c477f1c7aff4862b5087
-          acquired_at: '2026-09-06T18:17:46+00:00'
+          content_hash: sha256:fd9d4e0588d1f451989b9baeca98227476c624a22ba59b158ce8f3711c7599f0
+          acquired_at: '2026-09-06T18:43:07+00:00'

@@ -35,7 +35,7 @@ extern "C" {
 // status changes. Downstream binaries that hard-code arena region
 // IDs can validate this matches the planner that built their loader
 // before binding arenas.
-#define HKV_SEGMENTATION_PLAN_HASH "e7e860ab99fa70a1"
+#define HKV_SEGMENTATION_PLAN_HASH "ef78df2313038784"
 
 //── Tensor/Memory Definitions ─────────────────────────────────────────────────
 
@@ -157,7 +157,7 @@ typedef struct {
 // model produce identical enum values. The PLAN_HASH macro above
 // fingerprints the same ordering for ABI drift detection.
 typedef enum {
-    hkv_segmentation_arena_dtcm = 0,
+    hkv_segmentation_arena_sram = 0,
     hkv_segmentation_arena_const_mram = 1,
     hkv_segmentation_num_arena_buffers = 2
 } hkv_segmentation_arena_region_t;
@@ -235,8 +235,8 @@ typedef struct {
 
 //── Memory Arenas ─────────────────────────────────────────────────────────────
 
-#define hkv_segmentation_arena_dtcm_size  22560
-#define hkv_segmentation_arena_dtcm_alignment  16
+#define hkv_segmentation_arena_sram_size  22560
+#define hkv_segmentation_arena_sram_alignment  16
 #define hkv_segmentation_arena_const_mram_size  9568
 #define hkv_segmentation_arena_const_mram_alignment  16
 

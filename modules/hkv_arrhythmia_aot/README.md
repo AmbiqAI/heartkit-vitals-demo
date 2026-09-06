@@ -56,7 +56,7 @@ may be aliased across models that share the harness.
 
 | Memory Location     | Available Size (KB)      | Allocated Size (KB)       | Allocation % |
 |--------------|-----------------|-----------------|----------------|
-| DTCM | 512.0 | 14.62 | 3.0% |
+| SRAM | 3072.0 | 14.62 | 0.0% |
 
 
 

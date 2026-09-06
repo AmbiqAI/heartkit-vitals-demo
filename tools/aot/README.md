@@ -9,6 +9,19 @@ The modules compile as part of the firmware build but nothing links them yet;
 the segmentation and arrhythmia adapters still call TFLM. See
 AmbiqAI/heartkit-vitals-demo#37.
 
+## Memory layout
+
+The first AOT build mirrors what TFLM does today: weights cold in MRAM as XIP
+`.rodata`, working arena in shared SRAM. The YAML rules place the `constant`
+tensors in MRAM and the `scratch` tensors in SRAM; the generator then emits
+`<prefix>_arena_sram_buffer` guarded by `<PREFIX>_PUT_IN_SRAM`, which defaults
+to a no-op. `hkv_aot_attributes.h` defines those macros as
+`__attribute__((section(".shared")))`, the same section `AM_SHARED_RW` puts the
+TFLM arenas in, and the app `CMakeLists.txt` force-includes it through each
+module's `<MODULE>_ATTRIBUTES_HEADER` variable before the modules are added.
+Neither model has `persistent` tensors, so no rule is needed for that kind.
+Moving the arenas to TCM is a later optimization.
+
 ## Regenerate
 
 ```sh
