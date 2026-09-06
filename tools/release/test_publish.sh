@@ -116,7 +116,13 @@ EOF
 }
 
 fixture() {
-  ROOT="$(mktemp -d -t hkv-publish-test)"
+  # An explicit template: -t with a bare prefix is a BSD extension that GNU
+  # coreutils rejects. A failure here must stop the run, not leave ROOT empty
+  # and let the fixture write into the current directory. See #70.
+  ROOT="$(mktemp -d "${TMPDIR:-/tmp}/hkv-publish-test.XXXXXX")" \
+    || { printf 'error: mktemp failed\n' >&2; exit 1; }
+  [ -n "$ROOT" ] && [ -d "$ROOT" ] \
+    || { printf 'error: fixture root was not created\n' >&2; exit 1; }
   FIXTURES+=("$ROOT")
   FAKE_HOME="${ROOT}/home"
   REPO="${ROOT}/repo"
@@ -227,6 +233,12 @@ test_destination_guard() {
   assert_rc 1 "refuses a path outside \$HOME"
   assert_has "${ROOT}/err" 'outside $HOME' "says why it refused the outside path"
 
+  mkdir -p "${FAKE_HOME}/share/firmware/v510"
+  publish --tag v5.0.0 --notes notes.md --dest "${FAKE_HOME}/share/firmware/v510" \
+    --repo-dir "$REPO" --yes
+  assert_rc 1 "refuses a folder not named for the slug"
+  assert_has "${ROOT}/err" "must be named v500" "says which name it wanted"
+
   assert_lacks "${ROOT}/gh.log" "release upload" "no gh release upload from a rejected run"
   if [ "$(dest_manifest)" = "$BEFORE" ]; then
     ok "destination is byte identical"
@@ -316,6 +328,94 @@ test_missing_sha256sums_fails() {
   assert_lacks "${ROOT}/gh.log" "release upload" "nothing was uploaded"
 }
 
+test_leftover_backup_stops_before_gh() {
+  printf '== a leftover backup stops the run before anything is uploaded\n'
+  fixture
+  mkdir -p "${FAKE_HOME}/share/firmware/.v500.backup"
+  printf 'the destination an earlier run could not restore\n' \
+    > "${FAKE_HOME}/share/firmware/.v500.backup/RELEASE.md"
+  publish "${ARGS[@]}" --yes
+  assert_rc 1 "exits 1"
+  assert_has "${ROOT}/err" "backup from an earlier run" "names the leftover backup"
+  assert_lacks "${ROOT}/out" "publish plan" "stops before the plan, so before any gh call"
+  assert_lacks "${ROOT}/gh.log" "release upload" "nothing was uploaded"
+  assert_lacks "${ROOT}/gh.log" "release edit" "the notes were not set"
+  assert_exists "${FAKE_HOME}/share/firmware/.v500.backup/RELEASE.md" "the leftover backup is untouched"
+  if [ "$(dest_manifest)" = "$BEFORE" ]; then
+    ok "destination is byte identical"
+  else
+    bad "destination is byte identical"
+  fi
+}
+
+test_rollback_reports_a_failed_restore() {
+  printf '== a restore that cannot be carried out is reported, not claimed\n'
+  fixture
+  # cp -Rp carries the mode across, so after the swap the live folder holds a
+  # directory whose contents cannot be removed and the restore has nowhere to
+  # land.
+  chmod 500 "${PKG}/apollo510b"
+  fake_shasum 3
+  publish "${ARGS[@]}" --yes
+  assert_rc 1 "exits 1"
+  assert_has "${ROOT}/err" "COULD NOT RESTORE" "reports the failed restore"
+  assert_lacks "${ROOT}/err" "destination restored" "does not claim a restore that did not happen"
+  assert_absent "${DEST}/.v500.backup" "the backup is not nested inside the destination"
+  assert_content "${FAKE_HOME}/share/firmware/.v500.backup/FAE-RUNBOOK.md" \
+    "runbook the field team owns" "the previous destination survives in the backup"
+  chmod -R u+rwx "$ROOT" 2>/dev/null
+}
+
+test_archive_matching_is_exact() {
+  printf '== only the archives named for this slug are uploaded\n'
+  fixture
+  printf 'a release candidate drop\n' \
+    > "${REPO}/dist/heartkit-vitals-demo-v500-rc1-firmware.zip"
+  printf 'a board that is not in the drop\n' \
+    > "${REPO}/dist/heartkit-vitals-demo-v500-apollo330-firmware.zip"
+  publish "${ARGS[@]}" --dry-run
+  assert_rc 0 "exits 0"
+  assert_has "${ROOT}/out" "heartkit-vitals-demo-v500-firmware.zip" "keeps the combined archive"
+  assert_has "${ROOT}/out" "heartkit-vitals-demo-v500-apollo510b-firmware.zip" "keeps the per-board archive"
+  assert_lacks "${ROOT}/out" "v500-rc1-firmware.zip" "ignores a suffixed slug"
+  assert_lacks "${ROOT}/out" "v500-apollo330-firmware.zip" "ignores a board absent from the drop"
+}
+
+test_unreadable_draft_state_fails() {
+  printf '== an unreadable draft state stops the run\n'
+  fixture
+  cat > "${BIN}/gh" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "${ROOT}/gh.log"
+case "\$*" in
+  *"--json isDraft"*) printf 'gh: release not found\n' >&2; exit 1 ;;
+esac
+exit 0
+EOF
+  chmod +x "${BIN}/gh"
+  publish "${ARGS[@]}" --yes
+  assert_rc 1 "exits 1 when gh errors"
+  assert_has "${ROOT}/err" "could not read the draft state" "says the state is unknown"
+  assert_lacks "${ROOT}/gh.log" "release upload" "nothing was uploaded"
+
+  # gh exiting 0 with nothing to say is the same stop.
+  cat > "${BIN}/gh" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "${ROOT}/gh.log"
+exit 0
+EOF
+  chmod +x "${BIN}/gh"
+  publish "${ARGS[@]}" --yes
+  assert_rc 1 "exits 1 on an empty answer"
+  assert_has "${ROOT}/err" "could not read the draft state" "says the state is unknown"
+  assert_lacks "${ROOT}/gh.log" "release upload" "still nothing uploaded"
+  if [ "$(dest_manifest)" = "$BEFORE" ]; then
+    ok "destination is byte identical"
+  else
+    bad "destination is byte identical"
+  fi
+}
+
 printf '==> tools/release/publish.sh\n'
 test_dry_run_prints_plan_and_changes_nothing
 test_plan_only_without_yes
@@ -325,6 +425,10 @@ test_swap_publishes_and_preserves_runbook
 test_rollback_restores_backup
 test_checksum_mismatch_fails
 test_missing_sha256sums_fails
+test_leftover_backup_stops_before_gh
+test_rollback_reports_a_failed_restore
+test_archive_matching_is_exact
+test_unreadable_draft_state_fails
 
 printf '\n%s passed, %s failed\n' "$PASSED" "$FAILED"
 [ "$FAILED" -eq 0 ] || exit 1

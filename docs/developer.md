@@ -313,7 +313,12 @@ The drop folder is replaced by a staged swap: the new contents are assembled
 in a sibling directory, the live folder is renamed to a backup, and the
 staging directory takes its place. `FAE-RUNBOOK.md` is carried across from the
 destination. Any failure restores the backup and names it in the message, and
-the backup is removed only after the destination verifies. See #62.
+the backup is removed only after the destination verifies. A restore that
+cannot be carried out, because the live folder could not be cleared, is
+reported as `COULD NOT RESTORE` with both paths named, so a failed rollback is
+never mistaken for a successful one; move the folder aside and rename the
+backup back by hand. A backup left over from such a run stops the next run
+before anything is uploaded. See #62.
 
 `tools/release/test_publish.sh` covers these paths against a fake `gh` and
 runs from `scripts/ci-local.sh tests`.

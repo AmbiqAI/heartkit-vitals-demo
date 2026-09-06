@@ -24,7 +24,9 @@
 # The drop folder is replaced through a staged swap rather than in place: the
 # new contents are assembled in a sibling directory, the live folder is renamed
 # to a backup, and the staging directory takes its place. Any failure restores
-# the backup, so a shared folder is never left half replaced. FAE-RUNBOOK.md is
+# the backup, so a shared folder is never left half replaced; a restore that
+# cannot be carried out is reported as COULD NOT RESTORE, naming both paths for
+# the operator to sort out by hand. FAE-RUNBOOK.md is
 # written by the field team, not by this repo, so the copy in the destination is
 # carried across.
 #
@@ -165,8 +167,16 @@ DEST_NAME="$(basename "$DEST")"
 
 STAGING="${DEST_PARENT}/.${DEST_NAME}.staging"
 BACKUP="${DEST_PARENT}/.${DEST_NAME}.backup"
+
+# A leftover backup is the only surviving copy of a destination an earlier run
+# failed to restore. Checked here rather than at the swap, so the stop lands
+# before anything is uploaded. See #70.
+[ ! -e "$BACKUP" ] || die "a backup from an earlier run is in the way: ${BACKUP}"
+
 BACKUP_LIVE=0
+STAGING_LIVE=0
 PUBLISH_DONE=0
+CLEANUP_DONE=0
 
 # ---------------------------------------------------------------------------
 # Source drop
@@ -178,13 +188,58 @@ PKG_ROOT="dist/${SLUG}"
 [ -d "$PKG_ROOT" ] || die "no drop folder ${PKG_ROOT}; run tools/release/package.sh first"
 [ -f "${PKG_ROOT}/SHA256SUMS" ] || die "${PKG_ROOT}/SHA256SUMS is missing; the drop cannot be verified"
 
+# The archive names package.sh writes for this slug, spelled out: the combined
+# drop and one per board folder in the drop. A glob on the slug would also
+# match the archives of a suffixed release, uploading v500-rc1 as v500. See #70.
+_CANDIDATES=("heartkit-vitals-demo-${SLUG}-firmware.zip")
+while IFS= read -r _board; do
+  [ -n "$_board" ] || continue
+  _CANDIDATES+=("heartkit-vitals-demo-${SLUG}-${_board}-firmware.zip")
+done < <(find "$PKG_ROOT" -mindepth 1 -maxdepth 1 -type d | sed 's|.*/||')
+
 ZIPS=()
 while IFS= read -r _zip; do
-  [ -n "$_zip" ] && ZIPS+=("$_zip")
-done < <(find dist -maxdepth 1 -name "heartkit-vitals-demo-${SLUG}-*firmware.zip" | LC_ALL=C sort)
-[ "${#ZIPS[@]}" -gt 0 ] || die "no dist/heartkit-vitals-demo-${SLUG}-*firmware.zip to upload"
+  if [ -f "dist/${_zip}" ]; then ZIPS+=("dist/${_zip}"); fi
+done < <(printf '%s\n' "${_CANDIDATES[@]}" | LC_ALL=C sort -u)
+[ "${#ZIPS[@]}" -gt 0 ] \
+  || die "no dist/heartkit-vitals-demo-${SLUG}-firmware.zip or per-board archive to upload"
 
-TMP_DIR="$(mktemp -d -t hkv-publish)"
+# ---------------------------------------------------------------------------
+# Cleanup and rollback
+# ---------------------------------------------------------------------------
+
+on_exit() {
+  [ "$CLEANUP_DONE" -eq 0 ] || return 0
+  CLEANUP_DONE=1
+
+  # The exit status is deliberately not consulted: bash reports rc=0 to the
+  # EXIT trap when a signal ends the run, and a half-finished swap has to be
+  # undone either way. See #70.
+  if [ "$PUBLISH_DONE" -eq 0 ] && [ "$BACKUP_LIVE" -eq 1 ]; then
+    warn "publish failed mid-swap; restoring the previous destination from ${BACKUP}"
+    rm -rf "${DEST:?}" || true
+    if [ ! -e "$DEST" ] && mv "$BACKUP" "$DEST"; then
+      warn "destination restored from ${BACKUP} (including FAE-RUNBOOK.md)"
+    else
+      warn "COULD NOT RESTORE: the previous destination is at ${BACKUP} and ${DEST} is in the way; move ${DEST} aside and rename ${BACKUP} back by hand"
+    fi
+  fi
+  if [ "$STAGING_LIVE" -eq 1 ] && [ -d "$STAGING" ]; then
+    rm -rf "$STAGING" 2>/dev/null || true
+  fi
+  if [ -n "${TMP_DIR:-}" ] && [ -d "$TMP_DIR" ]; then
+    rm -rf "$TMP_DIR" 2>/dev/null || true
+  fi
+}
+# Installed before the first temporary directory exists, so a pre-flight die
+# does not leak one.
+trap on_exit EXIT
+# Without an explicit exit the signal handler would return into the interrupted
+# swap and carry on.
+trap 'on_exit; exit 130' INT
+trap 'on_exit; exit 143' TERM
+
+TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/hkv-publish.XXXXXX")"
 
 # One checklist for everything that lands in the destination: the drop tree from
 # the package's own SHA256SUMS, plus the archives, which are built beside the
@@ -300,26 +355,6 @@ fi
 # Carry it out
 # ---------------------------------------------------------------------------
 
-on_exit() {
-  local rc=$?
-  if [ "$rc" -ne 0 ] && [ "$PUBLISH_DONE" -eq 0 ] && [ "$BACKUP_LIVE" -eq 1 ]; then
-    warn "publish failed mid-swap; restoring the previous destination from ${BACKUP}"
-    rm -rf "${DEST:?}" 2>/dev/null || true
-    if mv "$BACKUP" "$DEST" 2>/dev/null; then
-      warn "destination restored from ${BACKUP} (including FAE-RUNBOOK.md)"
-    else
-      warn "COULD NOT RESTORE: the previous destination is still at ${BACKUP}"
-    fi
-  fi
-  if [ -n "${STAGING:-}" ] && [ -d "$STAGING" ]; then
-    rm -rf "$STAGING" 2>/dev/null || true
-  fi
-  if [ -n "${TMP_DIR:-}" ] && [ -d "$TMP_DIR" ]; then
-    rm -rf "$TMP_DIR" 2>/dev/null || true
-  fi
-}
-trap on_exit EXIT
-
 note "release assets"
 gh release upload "$TAG" --clobber "${ZIPS[@]}"
 gh release edit "$TAG" -F "$NOTES"
@@ -327,10 +362,7 @@ gh release view "$TAG" --json assets --jq '.assets[] | "\(.name) \(.size)B"'
 
 note "drop folder"
 
-# A leftover backup is the only surviving copy of a destination an earlier run
-# failed to restore. Stopping is the only safe move.
-[ -e "$BACKUP" ] && die "a backup from an earlier run is in the way: ${BACKUP}"
-
+STAGING_LIVE=1
 rm -rf "$STAGING"
 mkdir -p "$STAGING"
 cp -Rp "${PKG_ROOT}/." "$STAGING/"
