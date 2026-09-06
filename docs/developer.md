@@ -100,6 +100,15 @@ and `cpu_tx`; the rest is idle plus a remainder carrying PPG stage time, DSP
 paths and RTOS overhead, which have no per-stage counters and which `cpu_proj`
 excludes.
 
+Settled means from 180 s captures on `apollo510b_evb`, firmware 054c7ec
+(v5.1.0 pre-release), dashboard connected, 2026-09-05 (#70): USB low power
+`util` 16.1, `cpu_cap` 0.4, `cpu_inf` 9.0, `cpu_tx` 0.3, `batt_days` 36.3,
+`avg_ips` 69; USB high performance `util` 8.0, `cpu_inf` 3.1, `batt_days` 27.8,
+`avg_ips` 198; BLE low power `util` 23.5, `cpu_inf` 9.8, `batt_days` 31.4,
+`avg_ips` 57. All three captures ended with zero missed samples and zero
+`bus_err`, `bus_reset`, `sens_restart` and stalls. Use these as the comparison
+baseline for the release gate below.
+
 The battery model's sleep term assumes a quiet bus. With the async sensor read
 the task is blocked while the IOM moves the FIFO, so that transfer time is
 billed as idle even though the peripheral is active for a few milliseconds per
