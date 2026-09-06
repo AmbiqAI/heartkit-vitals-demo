@@ -159,15 +159,22 @@ def apply_uio_overrides(dev, ep_in, ep_out, rx_buf, overrides, timeout_ms, wait_
     device sends its current state in reply to the zero-length request the
     caller already wrote. See #37.
 
-    Returns the state written, or None if no state echo arrived in wait_s.
+    Returns (state written, device bytes read); the state is None if no echo
+    arrived in wait_s or the link failed.
     """
     state = None
+    rx_bytes = 0
     deadline = time.monotonic() + wait_s
     while state is None and time.monotonic() < deadline:
         try:
-            rx_buf.extend(dev.read(ep_in.bEndpointAddress, PACKET_LEN * 4, timeout=timeout_ms))
+            chunk = dev.read(ep_in.bEndpointAddress, PACKET_LEN * 4, timeout=timeout_ms)
         except usb.core.USBTimeoutError:
             continue
+        except usb.core.USBError as exc:
+            print(f"USB read error during handshake: {exc}", file=sys.stderr)
+            return None, rx_bytes
+        rx_buf.extend(chunk)
+        rx_bytes += len(chunk)
         for parsed in drain_packets(rx_buf):
             if parsed is None:
                 continue
@@ -175,11 +182,11 @@ def apply_uio_overrides(dev, ep_in, ep_out, rx_buf, overrides, timeout_ms, wait_
             if slot_type == 2 and len(data) == UIO_STATE_LEN:
                 state = bytearray(data)
     if state is None:
-        return None
+        return None, rx_bytes
     for idx, value in overrides.items():
         state[idx] = value
     ep_out.write(pack_packet(0, 2, bytes(state)), timeout=timeout_ms)
-    return bytes(state)
+    return bytes(state), rx_bytes
 
 
 def find_vendor_endpoints(dev):
@@ -312,16 +319,19 @@ def main():
                 parser.error("--uio-state must encode exactly eight bytes")
             ep_out.write(pack_packet(0, 2, state), timeout=args.timeout_ms)
             print(f"sent UIO state update: {state.hex()}")
+        handshake_bytes = 0
         if overrides:
-            written = apply_uio_overrides(dev, ep_in, ep_out, rx_buf, overrides, args.timeout_ms)
+            written, handshake_bytes = apply_uio_overrides(
+                dev, ep_in, ep_out, rx_buf, overrides, args.timeout_ms)
             if written is None:
                 print("error: no UIO state echo from device; nothing was changed", file=sys.stderr)
                 return 1
             print(f"sent UIO state update: {written.hex()}")
 
         packet_count = 0
-        byte_count = 0
+        byte_count = handshake_bytes
         bad_count = 0
+        read_failed = False
         slot_counts = {}
         ppg_samples = [[], []]
         start = time.monotonic()
@@ -337,6 +347,7 @@ def main():
                 continue
             except usb.core.USBError as exc:
                 print(f"USB read error: {exc}", file=sys.stderr)
+                read_failed = True
                 break
 
             for parsed in drain_packets(rx_buf):
@@ -379,14 +390,15 @@ def main():
                 print(f"  PPG {name}: n={len(samples)} range=[{min(samples)}, {max(samples)}] "
                       f"rail_hits={rail_hits} ({100.0 * rail_hits / len(samples):.1f}%) "
                       f"mean_step={mean_step:.1f} max_step={max_step}")
-        # Machine-readable footer: tools/bench/usb_bench.py gates on crc_errors.
+        # Machine-readable footer: tools/bench/usb_bench.py gates on packets,
+        # crc_errors, and duration.
         print(f"summary: packets={packet_count} bytes={byte_count} "
               f"crc_errors={bad_count} duration={elapsed:.1f}s")
     finally:
         usb.util.release_interface(dev, intf_num)
         usb.util.dispose_resources(dev)
 
-    return 0
+    return 1 if read_failed else 0
 
 
 if __name__ == "__main__":

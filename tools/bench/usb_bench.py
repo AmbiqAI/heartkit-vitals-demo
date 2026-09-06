@@ -17,14 +17,17 @@ until the capture is over. See #37.
 The board must already be flashed: this tool never programs anything.
 
 Exit codes:
-    0   Capture finished, log written, no CRC errors reported by the host.
-    1   USB host or SWO capture failed, or the host reported CRC errors.
+    0   Capture finished, log written, and the host drained packets without CRC
+        errors for the whole window.
+    1   USB host or SWO capture failed, or the host reported CRC errors, no
+        packets, or a run shorter than the capture window.
     2   Bad arguments (argparse).
 """
 
 import argparse
 import os
 import re
+import shlex
 import subprocess
 import sys
 import time
@@ -37,7 +40,15 @@ SWO_CAPTURE = os.path.join(REPO_ROOT, "tools", "bench", "swo_capture.py")
 # while swo_capture.py is still writing lines.
 HOLD_S = 5.0
 
-SUMMARY_RE = re.compile(r"^summary: packets=(\d+) bytes=(\d+) crc_errors=(\d+)", re.M)
+# The host's own clock and the capture's start never line up exactly; anything
+# beyond this is a host that stopped draining early.
+DURATION_SLACK_S = 1.0
+
+# Seconds to let a terminated host flush its summary line before killing it.
+TERM_GRACE_S = 5.0
+
+SUMMARY_RE = re.compile(
+    r"^summary: packets=(\d+) bytes=(\d+) crc_errors=(\d+) duration=([\d.]+)", re.M)
 
 
 def build_commands(args, swo_extra):
@@ -79,16 +90,16 @@ def main(argv=None):
     usb_cmd, swo_cmd = build_commands(args, swo_extra)
 
     if args.dry_run:
-        print("usb host: " + " ".join(usb_cmd))
+        print("usb host: " + shlex.join(usb_cmd))
         print(f"settle:   {args.settle:g}s")
-        print("swo:      " + " ".join(swo_cmd))
+        print("swo:      " + shlex.join(swo_cmd))
         return 0
 
     if not os.path.isdir(args.app_dir):
         parser.error(f"app-dir does not exist: {args.app_dir}")
 
     usb_log = args.log + ".usb"
-    print("starting USB host: " + " ".join(usb_cmd))
+    print("starting USB host: " + shlex.join(usb_cmd))
     with open(usb_log, "w") as usb_out:
         try:
             usb_proc = subprocess.Popen(usb_cmd, stdout=usb_out, stderr=subprocess.STDOUT)
@@ -96,6 +107,7 @@ def main(argv=None):
             print(f"could not start the USB host: {exc}", file=sys.stderr)
             return 1
 
+        captured = False
         try:
             deadline = time.monotonic() + args.settle
             while time.monotonic() < deadline:
@@ -105,9 +117,21 @@ def main(argv=None):
                     return 1
                 time.sleep(0.5)
 
-            print("capturing SWO: " + " ".join(swo_cmd))
+            print("capturing SWO: " + shlex.join(swo_cmd))
             swo_rc = subprocess.call(swo_cmd)
+            captured = swo_rc == 0
+        except KeyboardInterrupt:
+            print("interrupted; stopping the USB host", file=sys.stderr)
+            return 1
         finally:
+            # Only a clean capture is worth waiting out the host's remaining
+            # hold; anything else would block until its --duration expires.
+            if not captured:
+                usb_proc.terminate()
+                try:
+                    usb_proc.wait(timeout=TERM_GRACE_S)
+                except subprocess.TimeoutExpired:
+                    usb_proc.kill()
             usb_rc = usb_proc.wait()
 
     print(f"USB host output: {usb_log}")
@@ -126,12 +150,27 @@ def main(argv=None):
         failed = True
     else:
         print(match.group(0))
-        if int(match.group(3)) != 0:
-            print(f"USB host reported {match.group(3)} CRC errors", file=sys.stderr)
+        packets = int(match.group(1))
+        crc_errors = int(match.group(3))
+        duration = float(match.group(4))
+        if packets == 0:
+            print("USB host drained no packets; the SWO figures are not a "
+                  "streaming workload", file=sys.stderr)
+            failed = True
+        if crc_errors != 0:
+            print(f"USB host reported {crc_errors} CRC errors", file=sys.stderr)
+            failed = True
+        min_duration = args.settle + args.seconds - DURATION_SLACK_S
+        if duration < min_duration:
+            print(f"USB host ran {duration:g}s, short of the {min_duration:g}s the "
+                  f"capture window needed", file=sys.stderr)
             failed = True
 
     return 1 if failed else 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        sys.exit(1)
