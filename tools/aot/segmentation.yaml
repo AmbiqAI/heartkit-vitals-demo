@@ -21,11 +21,15 @@ platform:
   name: apollo510b_evb
 memory:
   # Weights stay cold in MRAM (XIP .rodata); only the scratch arena is RAM,
-  # which the apollo510b linker script places in MCU_TCM via .bss.
+  # which the apollo510b linker script places in MCU_TCM via .bss. The rule
+  # type is matched against the lowercase AIR tensor kind, so `CONSTANT`
+  # silently matches nothing.
   tensors:
-  - type: CONSTANT
+  - type: constant
     attributes:
       memory: MRAM
+  # Emits <prefix>_residency.json next to the module as placement evidence.
+  dump_residency_json: true
 test:
   enabled: true
   golden_data: tools/aot/golden/golden-seg.npz

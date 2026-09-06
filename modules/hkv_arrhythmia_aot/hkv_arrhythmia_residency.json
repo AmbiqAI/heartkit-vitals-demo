@@ -1,0 +1,1224 @@
+{
+  "arenas": {
+    "constant": [
+      {
+        "alignment": 16,
+        "kind": "cold",
+        "memory": "mram",
+        "region_id": 1,
+        "source_memory": "mram",
+        "tensor_count": 92,
+        "total_size": 25380,
+        "used": 25380
+      }
+    ],
+    "persistent": [],
+    "scratch": [
+      {
+        "alignment": 16,
+        "memory": "dtcm",
+        "region_id": 0,
+        "total_size": 524288,
+        "used": 14976
+      }
+    ]
+  },
+  "module_prefix": "hkv_arrhythmia",
+  "plan_hash": "5d2b8211f7f2f774",
+  "schema_version": 3,
+  "tensor_layout_hash": "8247728b04d5b4f7",
+  "tensors": [
+    {
+      "id": "0",
+      "memory": "dtcm",
+      "offset": 0,
+      "role": "scratch",
+      "size": 2000,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "2",
+      "memory": "mram",
+      "offset": 25376,
+      "role": "constant",
+      "size": 4,
+      "source_memory": "mram"
+    },
+    {
+      "id": "3",
+      "memory": "mram",
+      "offset": 25376,
+      "role": "constant",
+      "size": 4,
+      "source_memory": "mram"
+    },
+    {
+      "id": "4",
+      "memory": "mram",
+      "offset": 0,
+      "role": "constant",
+      "size": 4,
+      "source_memory": "mram"
+    },
+    {
+      "id": "7",
+      "memory": "mram",
+      "offset": 25008,
+      "role": "constant",
+      "size": 320,
+      "source_memory": "mram"
+    },
+    {
+      "id": "9",
+      "memory": "mram",
+      "offset": 18928,
+      "role": "constant",
+      "size": 5120,
+      "source_memory": "mram"
+    },
+    {
+      "id": "11",
+      "memory": "mram",
+      "offset": 17136,
+      "role": "constant",
+      "size": 1024,
+      "source_memory": "mram"
+    },
+    {
+      "id": "13",
+      "memory": "mram",
+      "offset": 15920,
+      "role": "constant",
+      "size": 1024,
+      "source_memory": "mram"
+    },
+    {
+      "id": "15",
+      "memory": "mram",
+      "offset": 14576,
+      "role": "constant",
+      "size": 576,
+      "source_memory": "mram"
+    },
+    {
+      "id": "17",
+      "memory": "mram",
+      "offset": 10736,
+      "role": "constant",
+      "size": 3072,
+      "source_memory": "mram"
+    },
+    {
+      "id": "19",
+      "memory": "mram",
+      "offset": 9584,
+      "role": "constant",
+      "size": 576,
+      "source_memory": "mram"
+    },
+    {
+      "id": "21",
+      "memory": "mram",
+      "offset": 8864,
+      "role": "constant",
+      "size": 576,
+      "source_memory": "mram"
+    },
+    {
+      "id": "23",
+      "memory": "mram",
+      "offset": 7856,
+      "role": "constant",
+      "size": 432,
+      "source_memory": "mram"
+    },
+    {
+      "id": "25",
+      "memory": "mram",
+      "offset": 5744,
+      "role": "constant",
+      "size": 1536,
+      "source_memory": "mram"
+    },
+    {
+      "id": "27",
+      "memory": "mram",
+      "offset": 5104,
+      "role": "constant",
+      "size": 256,
+      "source_memory": "mram"
+    },
+    {
+      "id": "29",
+      "memory": "mram",
+      "offset": 4752,
+      "role": "constant",
+      "size": 256,
+      "source_memory": "mram"
+    },
+    {
+      "id": "31",
+      "memory": "mram",
+      "offset": 4080,
+      "role": "constant",
+      "size": 288,
+      "source_memory": "mram"
+    },
+    {
+      "id": "33",
+      "memory": "mram",
+      "offset": 2928,
+      "role": "constant",
+      "size": 768,
+      "source_memory": "mram"
+    },
+    {
+      "id": "35",
+      "memory": "mram",
+      "offset": 2496,
+      "role": "constant",
+      "size": 144,
+      "source_memory": "mram"
+    },
+    {
+      "id": "37",
+      "memory": "mram",
+      "offset": 2256,
+      "role": "constant",
+      "size": 144,
+      "source_memory": "mram"
+    },
+    {
+      "id": "39",
+      "memory": "mram",
+      "offset": 1744,
+      "role": "constant",
+      "size": 216,
+      "source_memory": "mram"
+    },
+    {
+      "id": "41",
+      "memory": "mram",
+      "offset": 1072,
+      "role": "constant",
+      "size": 384,
+      "source_memory": "mram"
+    },
+    {
+      "id": "42",
+      "memory": "mram",
+      "offset": 1056,
+      "role": "constant",
+      "size": 1,
+      "source_memory": "mram"
+    },
+    {
+      "id": "44",
+      "memory": "mram",
+      "offset": 800,
+      "role": "constant",
+      "size": 64,
+      "source_memory": "mram"
+    },
+    {
+      "id": "46",
+      "memory": "mram",
+      "offset": 688,
+      "role": "constant",
+      "size": 64,
+      "source_memory": "mram"
+    },
+    {
+      "id": "48",
+      "memory": "mram",
+      "offset": 352,
+      "role": "constant",
+      "size": 144,
+      "source_memory": "mram"
+    },
+    {
+      "id": "50",
+      "memory": "mram",
+      "offset": 16,
+      "role": "constant",
+      "size": 144,
+      "source_memory": "mram"
+    },
+    {
+      "id": "51",
+      "memory": "dtcm",
+      "offset": 2000,
+      "role": "scratch",
+      "size": 500,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "52",
+      "memory": "dtcm",
+      "offset": 0,
+      "role": "scratch",
+      "size": 12,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "53",
+      "memory": "dtcm",
+      "offset": 16,
+      "role": "scratch",
+      "size": 4,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "54",
+      "memory": "dtcm",
+      "offset": 0,
+      "role": "scratch",
+      "size": 16,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "55",
+      "memory": "dtcm",
+      "offset": 2000,
+      "role": "scratch",
+      "size": 500,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "56",
+      "memory": "dtcm",
+      "offset": 2512,
+      "role": "scratch",
+      "size": 4000,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "57",
+      "memory": "dtcm",
+      "offset": 6512,
+      "role": "scratch",
+      "size": 4000,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "58",
+      "memory": "dtcm",
+      "offset": 0,
+      "role": "scratch",
+      "size": 2000,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "59",
+      "memory": "dtcm",
+      "offset": 2000,
+      "role": "scratch",
+      "size": 16,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "60",
+      "memory": "dtcm",
+      "offset": 2016,
+      "role": "scratch",
+      "size": 4,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "61",
+      "memory": "dtcm",
+      "offset": 2000,
+      "role": "scratch",
+      "size": 16,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "62",
+      "memory": "dtcm",
+      "offset": 2016,
+      "role": "scratch",
+      "size": 16,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "63",
+      "memory": "dtcm",
+      "offset": 2032,
+      "role": "scratch",
+      "size": 2000,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "64",
+      "memory": "dtcm",
+      "offset": 4032,
+      "role": "scratch",
+      "size": 3000,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "65",
+      "memory": "dtcm",
+      "offset": 0,
+      "role": "scratch",
+      "size": 3000,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "66",
+      "memory": "dtcm",
+      "offset": 3008,
+      "role": "scratch",
+      "size": 1512,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "67",
+      "memory": "dtcm",
+      "offset": 0,
+      "role": "scratch",
+      "size": 24,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "68",
+      "memory": "dtcm",
+      "offset": 32,
+      "role": "scratch",
+      "size": 6,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "69",
+      "memory": "dtcm",
+      "offset": 0,
+      "role": "scratch",
+      "size": 24,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "70",
+      "memory": "dtcm",
+      "offset": 32,
+      "role": "scratch",
+      "size": 24,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "71",
+      "memory": "dtcm",
+      "offset": 64,
+      "role": "scratch",
+      "size": 1512,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "72",
+      "memory": "dtcm",
+      "offset": 1584,
+      "role": "scratch",
+      "size": 2016,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "73",
+      "memory": "dtcm",
+      "offset": 3600,
+      "role": "scratch",
+      "size": 2016,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "74",
+      "memory": "dtcm",
+      "offset": 0,
+      "role": "scratch",
+      "size": 1024,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "75",
+      "memory": "dtcm",
+      "offset": 1024,
+      "role": "scratch",
+      "size": 32,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "76",
+      "memory": "dtcm",
+      "offset": 1056,
+      "role": "scratch",
+      "size": 8,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "77",
+      "memory": "dtcm",
+      "offset": 1024,
+      "role": "scratch",
+      "size": 32,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "78",
+      "memory": "dtcm",
+      "offset": 1056,
+      "role": "scratch",
+      "size": 32,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "79",
+      "memory": "dtcm",
+      "offset": 1088,
+      "role": "scratch",
+      "size": 1024,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "80",
+      "memory": "dtcm",
+      "offset": 2112,
+      "role": "scratch",
+      "size": 1536,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "81",
+      "memory": "dtcm",
+      "offset": 0,
+      "role": "scratch",
+      "size": 1536,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "82",
+      "memory": "dtcm",
+      "offset": 1536,
+      "role": "scratch",
+      "size": 768,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "83",
+      "memory": "dtcm",
+      "offset": 0,
+      "role": "scratch",
+      "size": 48,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "84",
+      "memory": "dtcm",
+      "offset": 48,
+      "role": "scratch",
+      "size": 12,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "85",
+      "memory": "dtcm",
+      "offset": 0,
+      "role": "scratch",
+      "size": 48,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "86",
+      "memory": "dtcm",
+      "offset": 48,
+      "role": "scratch",
+      "size": 48,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "87",
+      "memory": "dtcm",
+      "offset": 96,
+      "role": "scratch",
+      "size": 768,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "88",
+      "memory": "dtcm",
+      "offset": 864,
+      "role": "scratch",
+      "size": 1024,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "89",
+      "memory": "dtcm",
+      "offset": 1888,
+      "role": "scratch",
+      "size": 1024,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "90",
+      "memory": "dtcm",
+      "offset": 0,
+      "role": "scratch",
+      "size": 512,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "91",
+      "memory": "dtcm",
+      "offset": 512,
+      "role": "scratch",
+      "size": 64,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "92",
+      "memory": "dtcm",
+      "offset": 576,
+      "role": "scratch",
+      "size": 16,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "93",
+      "memory": "dtcm",
+      "offset": 512,
+      "role": "scratch",
+      "size": 64,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "94",
+      "memory": "dtcm",
+      "offset": 576,
+      "role": "scratch",
+      "size": 64,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "95",
+      "memory": "dtcm",
+      "offset": 640,
+      "role": "scratch",
+      "size": 512,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "96",
+      "memory": "dtcm",
+      "offset": 0,
+      "role": "scratch",
+      "size": 640,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "97",
+      "memory": "dtcm",
+      "offset": 640,
+      "role": "scratch",
+      "size": 80,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "98",
+      "memory": "dtcm",
+      "offset": 0,
+      "role": "scratch",
+      "size": 4,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "99",
+      "memory": "dtcm",
+      "offset": 16,
+      "role": "scratch",
+      "size": 4,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "100",
+      "memory": "dtcm",
+      "offset": 0,
+      "role": "scratch",
+      "size": 16,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "conv_2d_10_multiplier",
+      "memory": "mram",
+      "offset": 928,
+      "role": "constant",
+      "size": 64,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_10_shift",
+      "memory": "mram",
+      "offset": 992,
+      "role": "constant",
+      "size": 64,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_10_weight_sum",
+      "memory": "mram",
+      "offset": 864,
+      "role": "constant",
+      "size": 64,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_13_multiplier",
+      "memory": "mram",
+      "offset": 1552,
+      "role": "constant",
+      "size": 96,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_13_shift",
+      "memory": "mram",
+      "offset": 1648,
+      "role": "constant",
+      "size": 96,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_13_weight_sum",
+      "memory": "mram",
+      "offset": 1456,
+      "role": "constant",
+      "size": 96,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_17_multiplier",
+      "memory": "mram",
+      "offset": 2432,
+      "role": "constant",
+      "size": 24,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_17_shift",
+      "memory": "mram",
+      "offset": 2464,
+      "role": "constant",
+      "size": 24,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_17_weight_sum",
+      "memory": "mram",
+      "offset": 2400,
+      "role": "constant",
+      "size": 24,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_18_multiplier",
+      "memory": "mram",
+      "offset": 2736,
+      "role": "constant",
+      "size": 96,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_18_shift",
+      "memory": "mram",
+      "offset": 2832,
+      "role": "constant",
+      "size": 96,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_18_weight_sum",
+      "memory": "mram",
+      "offset": 2640,
+      "role": "constant",
+      "size": 96,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_21_multiplier",
+      "memory": "mram",
+      "offset": 3824,
+      "role": "constant",
+      "size": 128,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_21_shift",
+      "memory": "mram",
+      "offset": 3952,
+      "role": "constant",
+      "size": 128,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_21_weight_sum",
+      "memory": "mram",
+      "offset": 3696,
+      "role": "constant",
+      "size": 128,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_25_multiplier",
+      "memory": "mram",
+      "offset": 5040,
+      "role": "constant",
+      "size": 32,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_25_shift",
+      "memory": "mram",
+      "offset": 5072,
+      "role": "constant",
+      "size": 32,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_25_weight_sum",
+      "memory": "mram",
+      "offset": 5008,
+      "role": "constant",
+      "size": 32,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_26_multiplier",
+      "memory": "mram",
+      "offset": 5488,
+      "role": "constant",
+      "size": 128,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_26_shift",
+      "memory": "mram",
+      "offset": 5616,
+      "role": "constant",
+      "size": 128,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_26_weight_sum",
+      "memory": "mram",
+      "offset": 5360,
+      "role": "constant",
+      "size": 128,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_29_multiplier",
+      "memory": "mram",
+      "offset": 7472,
+      "role": "constant",
+      "size": 192,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_29_shift",
+      "memory": "mram",
+      "offset": 7664,
+      "role": "constant",
+      "size": 192,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_29_weight_sum",
+      "memory": "mram",
+      "offset": 7280,
+      "role": "constant",
+      "size": 192,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_33_multiplier",
+      "memory": "mram",
+      "offset": 9488,
+      "role": "constant",
+      "size": 48,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_33_shift",
+      "memory": "mram",
+      "offset": 9536,
+      "role": "constant",
+      "size": 48,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_33_weight_sum",
+      "memory": "mram",
+      "offset": 9440,
+      "role": "constant",
+      "size": 48,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_34_multiplier",
+      "memory": "mram",
+      "offset": 10352,
+      "role": "constant",
+      "size": 192,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_34_shift",
+      "memory": "mram",
+      "offset": 10544,
+      "role": "constant",
+      "size": 192,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_34_weight_sum",
+      "memory": "mram",
+      "offset": 10160,
+      "role": "constant",
+      "size": 192,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_37_multiplier",
+      "memory": "mram",
+      "offset": 14064,
+      "role": "constant",
+      "size": 256,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_37_shift",
+      "memory": "mram",
+      "offset": 14320,
+      "role": "constant",
+      "size": 256,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_37_weight_sum",
+      "memory": "mram",
+      "offset": 13808,
+      "role": "constant",
+      "size": 256,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_41_multiplier",
+      "memory": "mram",
+      "offset": 17008,
+      "role": "constant",
+      "size": 64,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_41_shift",
+      "memory": "mram",
+      "offset": 17072,
+      "role": "constant",
+      "size": 64,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_41_weight_sum",
+      "memory": "mram",
+      "offset": 16944,
+      "role": "constant",
+      "size": 64,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_42_multiplier",
+      "memory": "mram",
+      "offset": 18416,
+      "role": "constant",
+      "size": 256,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_42_shift",
+      "memory": "mram",
+      "offset": 18672,
+      "role": "constant",
+      "size": 256,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_42_weight_sum",
+      "memory": "mram",
+      "offset": 18160,
+      "role": "constant",
+      "size": 256,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_45_multiplier",
+      "memory": "mram",
+      "offset": 24368,
+      "role": "constant",
+      "size": 320,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_45_shift",
+      "memory": "mram",
+      "offset": 24688,
+      "role": "constant",
+      "size": 320,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_45_weight_sum",
+      "memory": "mram",
+      "offset": 24048,
+      "role": "constant",
+      "size": 320,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_5_multiplier",
+      "memory": "mram",
+      "offset": 224,
+      "role": "constant",
+      "size": 64,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_5_scratch",
+      "memory": "dtcm",
+      "offset": 0,
+      "role": "scratch",
+      "size": 64,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "conv_2d_5_shift",
+      "memory": "mram",
+      "offset": 288,
+      "role": "constant",
+      "size": 64,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_5_weight_sum",
+      "memory": "mram",
+      "offset": 160,
+      "role": "constant",
+      "size": 64,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_9_multiplier",
+      "memory": "mram",
+      "offset": 768,
+      "role": "constant",
+      "size": 16,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_9_shift",
+      "memory": "mram",
+      "offset": 784,
+      "role": "constant",
+      "size": 16,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_9_weight_sum",
+      "memory": "mram",
+      "offset": 752,
+      "role": "constant",
+      "size": 16,
+      "source_memory": "mram"
+    },
+    {
+      "id": "depthwise_conv_2d_14_multiplier",
+      "memory": "mram",
+      "offset": 2064,
+      "role": "constant",
+      "size": 96,
+      "source_memory": "mram"
+    },
+    {
+      "id": "depthwise_conv_2d_14_scratch",
+      "memory": "dtcm",
+      "offset": 7040,
+      "role": "scratch",
+      "size": 4464,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "depthwise_conv_2d_14_shift",
+      "memory": "mram",
+      "offset": 2160,
+      "role": "constant",
+      "size": 96,
+      "source_memory": "mram"
+    },
+    {
+      "id": "depthwise_conv_2d_14_weight_sum",
+      "memory": "mram",
+      "offset": 1968,
+      "role": "constant",
+      "size": 96,
+      "source_memory": "mram"
+    },
+    {
+      "id": "depthwise_conv_2d_22_multiplier",
+      "memory": "mram",
+      "offset": 4496,
+      "role": "constant",
+      "size": 128,
+      "source_memory": "mram"
+    },
+    {
+      "id": "depthwise_conv_2d_22_scratch",
+      "memory": "dtcm",
+      "offset": 5616,
+      "role": "scratch",
+      "size": 4464,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "depthwise_conv_2d_22_shift",
+      "memory": "mram",
+      "offset": 4624,
+      "role": "constant",
+      "size": 128,
+      "source_memory": "mram"
+    },
+    {
+      "id": "depthwise_conv_2d_22_weight_sum",
+      "memory": "mram",
+      "offset": 4368,
+      "role": "constant",
+      "size": 128,
+      "source_memory": "mram"
+    },
+    {
+      "id": "depthwise_conv_2d_30_multiplier",
+      "memory": "mram",
+      "offset": 8480,
+      "role": "constant",
+      "size": 192,
+      "source_memory": "mram"
+    },
+    {
+      "id": "depthwise_conv_2d_30_scratch",
+      "memory": "dtcm",
+      "offset": 3648,
+      "role": "scratch",
+      "size": 4464,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "depthwise_conv_2d_30_shift",
+      "memory": "mram",
+      "offset": 8672,
+      "role": "constant",
+      "size": 192,
+      "source_memory": "mram"
+    },
+    {
+      "id": "depthwise_conv_2d_30_weight_sum",
+      "memory": "mram",
+      "offset": 8288,
+      "role": "constant",
+      "size": 192,
+      "source_memory": "mram"
+    },
+    {
+      "id": "depthwise_conv_2d_38_multiplier",
+      "memory": "mram",
+      "offset": 15408,
+      "role": "constant",
+      "size": 256,
+      "source_memory": "mram"
+    },
+    {
+      "id": "depthwise_conv_2d_38_scratch",
+      "memory": "dtcm",
+      "offset": 2912,
+      "role": "scratch",
+      "size": 4464,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "depthwise_conv_2d_38_shift",
+      "memory": "mram",
+      "offset": 15664,
+      "role": "constant",
+      "size": 256,
+      "source_memory": "mram"
+    },
+    {
+      "id": "depthwise_conv_2d_38_weight_sum",
+      "memory": "mram",
+      "offset": 15152,
+      "role": "constant",
+      "size": 256,
+      "source_memory": "mram"
+    },
+    {
+      "id": "depthwise_conv_2d_6_multiplier",
+      "memory": "mram",
+      "offset": 560,
+      "role": "constant",
+      "size": 64,
+      "source_memory": "mram"
+    },
+    {
+      "id": "depthwise_conv_2d_6_scratch",
+      "memory": "dtcm",
+      "offset": 10512,
+      "role": "scratch",
+      "size": 4464,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "depthwise_conv_2d_6_shift",
+      "memory": "mram",
+      "offset": 624,
+      "role": "constant",
+      "size": 64,
+      "source_memory": "mram"
+    },
+    {
+      "id": "depthwise_conv_2d_6_weight_sum",
+      "memory": "mram",
+      "offset": 496,
+      "role": "constant",
+      "size": 64,
+      "source_memory": "mram"
+    },
+    {
+      "id": "fully_connected_47_multiplier",
+      "memory": "mram",
+      "offset": 25344,
+      "role": "constant",
+      "size": 16,
+      "source_memory": "mram"
+    },
+    {
+      "id": "fully_connected_47_shift",
+      "memory": "mram",
+      "offset": 25360,
+      "role": "constant",
+      "size": 16,
+      "source_memory": "mram"
+    },
+    {
+      "id": "fully_connected_47_weight_sum",
+      "memory": "mram",
+      "offset": 25328,
+      "role": "constant",
+      "size": 16,
+      "source_memory": "mram"
+    }
+  ]
+}

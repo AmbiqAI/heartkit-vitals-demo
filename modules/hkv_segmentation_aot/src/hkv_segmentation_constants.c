@@ -28,11 +28,11 @@
 //
 // Layout follows planner offsets exactly (including alignment padding),
 // so each staged arena can be hydrated by one bulk copy.
-// Cold constant arena in dtcm (kernels read in place).
+// Cold constant arena in mram (kernels read in place).
 // `const` is omitted for memories whose ``_INIT`` placement targets
 // loadable RAM (see ``MemoryType.is_init_ram``); otherwise GNU ld
 // orphans .rodata out of the writable RAM section.
-alignas(16) HKV_SEGMENTATION_PUT_IN_DTCM_INIT int8_t hkv_segmentation_arena_const_dtcm__blob[9568] = {
+alignas(16) const HKV_SEGMENTATION_PUT_IN_MRAM_INIT int8_t hkv_segmentation_arena_const_mram__blob[9568] = {
     // hkv_segmentation_tensor_38 @ offset 0
     82, -16, 116, -73, -127, -38, 41,
     // padding 9 bytes

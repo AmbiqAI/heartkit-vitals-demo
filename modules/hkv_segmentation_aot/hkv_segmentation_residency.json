@@ -1,0 +1,816 @@
+{
+  "arenas": {
+    "constant": [
+      {
+        "alignment": 16,
+        "kind": "cold",
+        "memory": "mram",
+        "region_id": 1,
+        "source_memory": "mram",
+        "tensor_count": 63,
+        "total_size": 9568,
+        "used": 9568
+      }
+    ],
+    "persistent": [],
+    "scratch": [
+      {
+        "alignment": 16,
+        "memory": "dtcm",
+        "region_id": 0,
+        "total_size": 524288,
+        "used": 22560
+      }
+    ]
+  },
+  "module_prefix": "hkv_segmentation",
+  "plan_hash": "e7e860ab99fa70a1",
+  "schema_version": 3,
+  "tensor_layout_hash": "47daabf9e8346082",
+  "tensors": [
+    {
+      "id": "0",
+      "memory": "dtcm",
+      "offset": 0,
+      "role": "scratch",
+      "size": 256,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "5",
+      "memory": "mram",
+      "offset": 8400,
+      "role": "constant",
+      "size": 1120,
+      "source_memory": "mram"
+    },
+    {
+      "id": "7",
+      "memory": "mram",
+      "offset": 6640,
+      "role": "constant",
+      "size": 1280,
+      "source_memory": "mram"
+    },
+    {
+      "id": "9",
+      "memory": "mram",
+      "offset": 5744,
+      "role": "constant",
+      "size": 512,
+      "source_memory": "mram"
+    },
+    {
+      "id": "11",
+      "memory": "mram",
+      "offset": 5040,
+      "role": "constant",
+      "size": 512,
+      "source_memory": "mram"
+    },
+    {
+      "id": "12",
+      "memory": "mram",
+      "offset": 4656,
+      "role": "constant",
+      "size": 128,
+      "source_memory": "mram"
+    },
+    {
+      "id": "13",
+      "memory": "mram",
+      "offset": 4432,
+      "role": "constant",
+      "size": 224,
+      "source_memory": "mram"
+    },
+    {
+      "id": "15",
+      "memory": "mram",
+      "offset": 3280,
+      "role": "constant",
+      "size": 768,
+      "source_memory": "mram"
+    },
+    {
+      "id": "17",
+      "memory": "mram",
+      "offset": 2704,
+      "role": "constant",
+      "size": 288,
+      "source_memory": "mram"
+    },
+    {
+      "id": "19",
+      "memory": "mram",
+      "offset": 2272,
+      "role": "constant",
+      "size": 288,
+      "source_memory": "mram"
+    },
+    {
+      "id": "20",
+      "memory": "mram",
+      "offset": 1984,
+      "role": "constant",
+      "size": 96,
+      "source_memory": "mram"
+    },
+    {
+      "id": "21",
+      "memory": "mram",
+      "offset": 1808,
+      "role": "constant",
+      "size": 168,
+      "source_memory": "mram"
+    },
+    {
+      "id": "23",
+      "memory": "mram",
+      "offset": 1136,
+      "role": "constant",
+      "size": 384,
+      "source_memory": "mram"
+    },
+    {
+      "id": "24",
+      "memory": "mram",
+      "offset": 1120,
+      "role": "constant",
+      "size": 1,
+      "source_memory": "mram"
+    },
+    {
+      "id": "25",
+      "memory": "mram",
+      "offset": 1120,
+      "role": "constant",
+      "size": 1,
+      "source_memory": "mram"
+    },
+    {
+      "id": "26",
+      "memory": "mram",
+      "offset": 1120,
+      "role": "constant",
+      "size": 1,
+      "source_memory": "mram"
+    },
+    {
+      "id": "28",
+      "memory": "mram",
+      "offset": 800,
+      "role": "constant",
+      "size": 128,
+      "source_memory": "mram"
+    },
+    {
+      "id": "30",
+      "memory": "mram",
+      "offset": 576,
+      "role": "constant",
+      "size": 128,
+      "source_memory": "mram"
+    },
+    {
+      "id": "31",
+      "memory": "mram",
+      "offset": 384,
+      "role": "constant",
+      "size": 64,
+      "source_memory": "mram"
+    },
+    {
+      "id": "32",
+      "memory": "mram",
+      "offset": 272,
+      "role": "constant",
+      "size": 112,
+      "source_memory": "mram"
+    },
+    {
+      "id": "34",
+      "memory": "mram",
+      "offset": 64,
+      "role": "constant",
+      "size": 16,
+      "source_memory": "mram"
+    },
+    {
+      "id": "36",
+      "memory": "mram",
+      "offset": 32,
+      "role": "constant",
+      "size": 7,
+      "source_memory": "mram"
+    },
+    {
+      "id": "38",
+      "memory": "mram",
+      "offset": 0,
+      "role": "constant",
+      "size": 7,
+      "source_memory": "mram"
+    },
+    {
+      "id": "39",
+      "memory": "dtcm",
+      "offset": 0,
+      "role": "scratch",
+      "size": 256,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "40",
+      "memory": "dtcm",
+      "offset": 256,
+      "role": "scratch",
+      "size": 256,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "41",
+      "memory": "dtcm",
+      "offset": 0,
+      "role": "scratch",
+      "size": 256,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "42",
+      "memory": "dtcm",
+      "offset": 256,
+      "role": "scratch",
+      "size": 4096,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "43",
+      "memory": "dtcm",
+      "offset": 4352,
+      "role": "scratch",
+      "size": 4096,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "44",
+      "memory": "dtcm",
+      "offset": 0,
+      "role": "scratch",
+      "size": 16,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "45",
+      "memory": "dtcm",
+      "offset": 16,
+      "role": "scratch",
+      "size": 8,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "46",
+      "memory": "dtcm",
+      "offset": 0,
+      "role": "scratch",
+      "size": 16,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "47",
+      "memory": "dtcm",
+      "offset": 16,
+      "role": "scratch",
+      "size": 16,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "48",
+      "memory": "dtcm",
+      "offset": 0,
+      "role": "scratch",
+      "size": 16,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "49",
+      "memory": "dtcm",
+      "offset": 16,
+      "role": "scratch",
+      "size": 4096,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "50",
+      "memory": "dtcm",
+      "offset": 4112,
+      "role": "scratch",
+      "size": 6144,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "51",
+      "memory": "dtcm",
+      "offset": 10256,
+      "role": "scratch",
+      "size": 6144,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "52",
+      "memory": "dtcm",
+      "offset": 0,
+      "role": "scratch",
+      "size": 24,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "53",
+      "memory": "dtcm",
+      "offset": 32,
+      "role": "scratch",
+      "size": 12,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "54",
+      "memory": "dtcm",
+      "offset": 0,
+      "role": "scratch",
+      "size": 24,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "55",
+      "memory": "dtcm",
+      "offset": 32,
+      "role": "scratch",
+      "size": 24,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "56",
+      "memory": "dtcm",
+      "offset": 0,
+      "role": "scratch",
+      "size": 24,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "57",
+      "memory": "dtcm",
+      "offset": 32,
+      "role": "scratch",
+      "size": 6144,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "58",
+      "memory": "dtcm",
+      "offset": 6176,
+      "role": "scratch",
+      "size": 8192,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "59",
+      "memory": "dtcm",
+      "offset": 14368,
+      "role": "scratch",
+      "size": 8192,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "60",
+      "memory": "dtcm",
+      "offset": 0,
+      "role": "scratch",
+      "size": 32,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "61",
+      "memory": "dtcm",
+      "offset": 32,
+      "role": "scratch",
+      "size": 16,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "62",
+      "memory": "dtcm",
+      "offset": 0,
+      "role": "scratch",
+      "size": 32,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "63",
+      "memory": "dtcm",
+      "offset": 32,
+      "role": "scratch",
+      "size": 32,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "64",
+      "memory": "dtcm",
+      "offset": 0,
+      "role": "scratch",
+      "size": 32,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "65",
+      "memory": "dtcm",
+      "offset": 32,
+      "role": "scratch",
+      "size": 8192,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "66",
+      "memory": "dtcm",
+      "offset": 8224,
+      "role": "scratch",
+      "size": 10240,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "67",
+      "memory": "dtcm",
+      "offset": 0,
+      "role": "scratch",
+      "size": 1024,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "68",
+      "memory": "dtcm",
+      "offset": 0,
+      "role": "scratch",
+      "size": 1024,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "69",
+      "memory": "dtcm",
+      "offset": 1024,
+      "role": "scratch",
+      "size": 1024,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "conv_2d_11_multiplier",
+      "memory": "mram",
+      "offset": 1616,
+      "role": "constant",
+      "size": 96,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_11_shift",
+      "memory": "mram",
+      "offset": 1712,
+      "role": "constant",
+      "size": 96,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_11_weight_sum",
+      "memory": "mram",
+      "offset": 1520,
+      "role": "constant",
+      "size": 96,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_14_multiplier",
+      "memory": "mram",
+      "offset": 2608,
+      "role": "constant",
+      "size": 48,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_14_shift",
+      "memory": "mram",
+      "offset": 2656,
+      "role": "constant",
+      "size": 48,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_14_weight_sum",
+      "memory": "mram",
+      "offset": 2560,
+      "role": "constant",
+      "size": 48,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_15_multiplier",
+      "memory": "mram",
+      "offset": 3088,
+      "role": "constant",
+      "size": 96,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_15_shift",
+      "memory": "mram",
+      "offset": 3184,
+      "role": "constant",
+      "size": 96,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_15_weight_sum",
+      "memory": "mram",
+      "offset": 2992,
+      "role": "constant",
+      "size": 96,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_19_multiplier",
+      "memory": "mram",
+      "offset": 4176,
+      "role": "constant",
+      "size": 128,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_19_shift",
+      "memory": "mram",
+      "offset": 4304,
+      "role": "constant",
+      "size": 128,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_19_weight_sum",
+      "memory": "mram",
+      "offset": 4048,
+      "role": "constant",
+      "size": 128,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_22_multiplier",
+      "memory": "mram",
+      "offset": 5616,
+      "role": "constant",
+      "size": 64,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_22_shift",
+      "memory": "mram",
+      "offset": 5680,
+      "role": "constant",
+      "size": 64,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_22_weight_sum",
+      "memory": "mram",
+      "offset": 5552,
+      "role": "constant",
+      "size": 64,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_23_multiplier",
+      "memory": "mram",
+      "offset": 6384,
+      "role": "constant",
+      "size": 128,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_23_shift",
+      "memory": "mram",
+      "offset": 6512,
+      "role": "constant",
+      "size": 128,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_23_weight_sum",
+      "memory": "mram",
+      "offset": 6256,
+      "role": "constant",
+      "size": 128,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_27_multiplier",
+      "memory": "mram",
+      "offset": 8080,
+      "role": "constant",
+      "size": 160,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_27_shift",
+      "memory": "mram",
+      "offset": 8240,
+      "role": "constant",
+      "size": 160,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_27_weight_sum",
+      "memory": "mram",
+      "offset": 7920,
+      "role": "constant",
+      "size": 160,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_28_multiplier",
+      "memory": "mram",
+      "offset": 9536,
+      "role": "constant",
+      "size": 16,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_28_scratch",
+      "memory": "dtcm",
+      "offset": 1024,
+      "role": "scratch",
+      "size": 400,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "conv_2d_28_shift",
+      "memory": "mram",
+      "offset": 9552,
+      "role": "constant",
+      "size": 16,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_28_weight_sum",
+      "memory": "mram",
+      "offset": 9520,
+      "role": "constant",
+      "size": 16,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_3_multiplier",
+      "memory": "mram",
+      "offset": 144,
+      "role": "constant",
+      "size": 64,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_3_shift",
+      "memory": "mram",
+      "offset": 208,
+      "role": "constant",
+      "size": 64,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_3_weight_sum",
+      "memory": "mram",
+      "offset": 80,
+      "role": "constant",
+      "size": 64,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_6_multiplier",
+      "memory": "mram",
+      "offset": 736,
+      "role": "constant",
+      "size": 32,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_6_shift",
+      "memory": "mram",
+      "offset": 768,
+      "role": "constant",
+      "size": 32,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_6_weight_sum",
+      "memory": "mram",
+      "offset": 704,
+      "role": "constant",
+      "size": 32,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_7_multiplier",
+      "memory": "mram",
+      "offset": 992,
+      "role": "constant",
+      "size": 64,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_7_shift",
+      "memory": "mram",
+      "offset": 1056,
+      "role": "constant",
+      "size": 64,
+      "source_memory": "mram"
+    },
+    {
+      "id": "conv_2d_7_weight_sum",
+      "memory": "mram",
+      "offset": 928,
+      "role": "constant",
+      "size": 64,
+      "source_memory": "mram"
+    },
+    {
+      "id": "depthwise_conv_2d_12_multiplier",
+      "memory": "mram",
+      "offset": 2080,
+      "role": "constant",
+      "size": 96,
+      "source_memory": "mram"
+    },
+    {
+      "id": "depthwise_conv_2d_12_shift",
+      "memory": "mram",
+      "offset": 2176,
+      "role": "constant",
+      "size": 96,
+      "source_memory": "mram"
+    },
+    {
+      "id": "depthwise_conv_2d_1_scratch",
+      "memory": "dtcm",
+      "offset": 512,
+      "role": "scratch",
+      "size": 3472,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "depthwise_conv_2d_1_weight_sum",
+      "memory": "mram",
+      "offset": 16,
+      "role": "constant",
+      "size": 4,
+      "source_memory": "mram"
+    },
+    {
+      "id": "depthwise_conv_2d_20_multiplier",
+      "memory": "mram",
+      "offset": 4784,
+      "role": "constant",
+      "size": 128,
+      "source_memory": "mram"
+    },
+    {
+      "id": "depthwise_conv_2d_20_shift",
+      "memory": "mram",
+      "offset": 4912,
+      "role": "constant",
+      "size": 128,
+      "source_memory": "mram"
+    },
+    {
+      "id": "depthwise_conv_2d_2_scratch",
+      "memory": "dtcm",
+      "offset": 512,
+      "role": "scratch",
+      "size": 3472,
+      "source_memory": "dtcm"
+    },
+    {
+      "id": "depthwise_conv_2d_2_weight_sum",
+      "memory": "mram",
+      "offset": 48,
+      "role": "constant",
+      "size": 4,
+      "source_memory": "mram"
+    },
+    {
+      "id": "depthwise_conv_2d_4_multiplier",
+      "memory": "mram",
+      "offset": 448,
+      "role": "constant",
+      "size": 64,
+      "source_memory": "mram"
+    },
+    {
+      "id": "depthwise_conv_2d_4_shift",
+      "memory": "mram",
+      "offset": 512,
+      "role": "constant",
+      "size": 64,
+      "source_memory": "mram"
+    }
+  ]
+}

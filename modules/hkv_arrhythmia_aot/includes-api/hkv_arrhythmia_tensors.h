@@ -35,7 +35,7 @@ extern "C" {
 // status changes. Downstream binaries that hard-code arena region
 // IDs can validate this matches the planner that built their loader
 // before binding arenas.
-#define HKV_ARRHYTHMIA_PLAN_HASH "d21bec730d03ecbc"
+#define HKV_ARRHYTHMIA_PLAN_HASH "5d2b8211f7f2f774"
 
 //── Tensor/Memory Definitions ─────────────────────────────────────────────────
 
@@ -209,7 +209,7 @@ typedef struct {
 // fingerprints the same ordering for ABI drift detection.
 typedef enum {
     hkv_arrhythmia_arena_dtcm = 0,
-    hkv_arrhythmia_arena_const_dtcm = 1,
+    hkv_arrhythmia_arena_const_mram = 1,
     hkv_arrhythmia_num_arena_buffers = 2
 } hkv_arrhythmia_arena_region_t;
 
@@ -288,8 +288,8 @@ typedef struct {
 
 #define hkv_arrhythmia_arena_dtcm_size  14976
 #define hkv_arrhythmia_arena_dtcm_alignment  16
-#define hkv_arrhythmia_arena_const_dtcm_size  25380
-#define hkv_arrhythmia_arena_const_dtcm_alignment  16
+#define hkv_arrhythmia_arena_const_mram_size  25380
+#define hkv_arrhythmia_arena_const_mram_alignment  16
 
 extern const void * const hkv_arrhythmia_arena_buffers[hkv_arrhythmia_num_arena_buffers];
 /**

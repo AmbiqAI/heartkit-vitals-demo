@@ -56,7 +56,7 @@ may be aliased across models that share the harness.
 
 | Memory Location     | Available Size (KB)      | Allocated Size (KB)       | Allocation % |
 |--------------|-----------------|-----------------|----------------|
-| DTCM | 487.21 | 14.62 | 3.0% |
+| DTCM | 512.0 | 14.62 | 3.0% |
 
 
 
@@ -71,7 +71,7 @@ source blob in cold storage before the first
 
 | Runtime Memory | Source Memory | Residency | Size (KB) | Tensors |
 |----------------|---------------|-----------|-------------------|---------|
-| DTCM | DTCM | cold | 24.79 | 92 |
+| MRAM | MRAM | cold | 24.79 | 92 |
 
 
 

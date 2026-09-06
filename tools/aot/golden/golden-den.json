@@ -2,7 +2,7 @@
   "model": "den",
   "model_path": "assets/denoise.tflite",
   "model_sha256": "e94a5788163e436d63750cb9dd462932cc281863d5d42d0c4851fd85a1b89d0a",
-  "stimulus_path": "/Users/adam.page/Ambiq/demos/heartkit-vitals-demo/.claude/worktrees/37-golden/assets/ecg_stimulus.csv",
+  "stimulus_path": "assets/ecg_stimulus.csv",
   "stimulus_sha256": "18861f4c5c02e53d1b7ce1f1911d87d516d0d5bae89e41981dfee39832a82c3f",
   "sample_rate_hz": 100,
   "num_cases": 8,

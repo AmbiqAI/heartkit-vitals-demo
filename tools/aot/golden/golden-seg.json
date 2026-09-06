@@ -2,7 +2,7 @@
   "model": "seg",
   "model_path": "assets/segmentation.tflite",
   "model_sha256": "93c4493a1d09e1818abaffd74973d807b9e6830e5a03217b2c777abe1032e6fe",
-  "stimulus_path": "/Users/adam.page/Ambiq/demos/heartkit-vitals-demo/.claude/worktrees/37-golden/assets/ecg_stimulus.csv",
+  "stimulus_path": "assets/ecg_stimulus.csv",
   "stimulus_sha256": "18861f4c5c02e53d1b7ce1f1911d87d516d0d5bae89e41981dfee39832a82c3f",
   "sample_rate_hz": 100,
   "num_cases": 8,

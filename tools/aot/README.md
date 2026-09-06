@@ -35,10 +35,12 @@ frozen`) catch hand edits to the committed trees.
 ## Golden data
 
 `golden/` holds the reference input/output pairs used by the generated
-`--test.enabled` case: eight cases per model (`golden-<m>.npz` is case 0,
-`golden-<m>_caseNN.npz` are the rest) plus a `golden-<m>.json` sidecar carrying
-the model sha256, the stimulus sha256, tensor shapes and quantization, and the
-firmware constants the stimulus was preprocessed with. `den` fixtures are
+`--test.enabled` case: eight cases per model. Only `golden-<m>.npz` (case 0)
+feeds the generated on-device test case; `golden-<m>_caseNN.npz` are consumed
+by the host parity runner (branch 37-aot-parity). Each model also has a
+`golden-<m>.json` sidecar carrying the model sha256, the stimulus sha256,
+tensor shapes and quantization, and the firmware constants the stimulus was
+preprocessed with. `den` fixtures are
 included for completeness; denoise stays on TFLM.
 
 The generator, `tools/aot/make_golden.py`, lands with PR #77 — until then,

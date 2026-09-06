@@ -35,7 +35,7 @@ extern "C" {
 // status changes. Downstream binaries that hard-code arena region
 // IDs can validate this matches the planner that built their loader
 // before binding arenas.
-#define HKV_SEGMENTATION_PLAN_HASH "ef8de41a895a6509"
+#define HKV_SEGMENTATION_PLAN_HASH "e7e860ab99fa70a1"
 
 //── Tensor/Memory Definitions ─────────────────────────────────────────────────
 
@@ -158,7 +158,7 @@ typedef struct {
 // fingerprints the same ordering for ABI drift detection.
 typedef enum {
     hkv_segmentation_arena_dtcm = 0,
-    hkv_segmentation_arena_const_dtcm = 1,
+    hkv_segmentation_arena_const_mram = 1,
     hkv_segmentation_num_arena_buffers = 2
 } hkv_segmentation_arena_region_t;
 
@@ -237,8 +237,8 @@ typedef struct {
 
 #define hkv_segmentation_arena_dtcm_size  22560
 #define hkv_segmentation_arena_dtcm_alignment  16
-#define hkv_segmentation_arena_const_dtcm_size  9568
-#define hkv_segmentation_arena_const_dtcm_alignment  16
+#define hkv_segmentation_arena_const_mram_size  9568
+#define hkv_segmentation_arena_const_mram_alignment  16
 
 extern const void * const hkv_segmentation_arena_buffers[hkv_segmentation_num_arena_buffers];
 /**

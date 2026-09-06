@@ -138,6 +138,10 @@ endif()
 # PR that switches segmentation and arrhythmia over. See AmbiqAI/heartkit-vitals-demo#37.
 # `nsx build` names the app target, not `all`, so the dependency hangs off the
 # app rather than a custom ALL target.
-add_dependencies(heartkit-vitals-demo hkv_segmentation_aot hkv_arrhythmia_aot)
+foreach(_aot_module hkv_segmentation_aot hkv_arrhythmia_aot)
+    if(TARGET ${_aot_module})
+        add_dependencies(heartkit-vitals-demo ${_aot_module})
+    endif()
+endforeach()
 
 nsx_finalize_app(heartkit-vitals-demo)
