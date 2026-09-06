@@ -93,6 +93,47 @@ EOF
   chmod +x "${BIN}/gh"
 }
 
+# Like fake_gh true, but every release mutation also records whether the
+# destination already held the new drop when the call was made. Ordering across
+# the script's own output and the gh log cannot be compared directly; the state
+# of the folder at call time can.
+fake_gh_recording_dest() {
+  cat > "${BIN}/gh" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "${ROOT}/gh.log"
+case "\$*" in
+  *"release upload"*|*"release edit"*)
+    if [ -f "${DEST}/RELEASE.md" ] && [ ! -f "${DEST}/STALE.txt" ]; then
+      printf 'dest-new: %s %s\n' "\$1" "\$2" >> "${ROOT}/gh.order"
+    else
+      printf 'dest-old: %s %s\n' "\$1" "\$2" >> "${ROOT}/gh.order"
+    fi
+    ;;
+esac
+case "\$*" in
+  *"--json isDraft"*) printf 'true\n' ;;
+  *"--json assets"*)  printf 'fixture-asset.zip 12B\n' ;;
+esac
+exit 0
+EOF
+  chmod +x "${BIN}/gh"
+}
+
+# A draft release whose asset upload fails, to exercise the path where the
+# destination has already been swapped.
+fake_gh_upload_fails() {
+  cat > "${BIN}/gh" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "${ROOT}/gh.log"
+case "\$*" in
+  *"--json isDraft"*) printf 'true\n'; exit 0 ;;
+  *"release upload"*) printf 'gh: HTTP 502 from api.github.com\n' >&2; exit 1 ;;
+esac
+exit 0
+EOF
+  chmod +x "${BIN}/gh"
+}
+
 # fake_shasum <n>: pass every call through to the real shasum, except the nth
 # `-c` check, which fails. Injecting the failure from PATH keeps the test hook
 # out of the script under test.
@@ -151,15 +192,20 @@ fixture() {
   # Created up front so "gh was not called" is an assertion about an empty log
   # rather than about a missing file.
   : > "${ROOT}/gh.log"
+  : > "${ROOT}/gh.order"
   fake_gh true
   ARGS=(--tag v5.0.0 --notes notes.md --dest "$DEST" --repo-dir "$REPO")
   BEFORE="$(dest_manifest)"
 }
 
 # publish <args...>: run the script under the fixture's HOME and PATH.
+#
+# stdin is /dev/null so the run never has a terminal, whether or not the suite
+# was started from one. The published-release prompt is exercised through
+# HKV_PUBLISH_CONFIRM_FD instead, which is a test-only hook.
 publish() {
   ( cd "$REPO" && HOME="$FAKE_HOME" PATH="${BIN}:${PATH}" "$PUBLISH" "$@" ) \
-    > "${ROOT}/out" 2> "${ROOT}/err"
+    < /dev/null > "${ROOT}/out" 2> "${ROOT}/err"
   RC=$?
 }
 
@@ -296,11 +342,103 @@ test_rollback_restores_backup() {
   assert_absent "${DEST}/RELEASE.md" "the new drop is not left in place"
   assert_absent "${FAKE_HOME}/share/firmware/.v500.backup" "no backup left behind"
   assert_absent "${FAKE_HOME}/share/firmware/.v500.staging" "no staging left behind"
+  assert_lacks "${ROOT}/gh.log" "release upload" "a failed swap uploads nothing"
+  assert_lacks "${ROOT}/gh.log" "release edit" "a failed swap leaves the notes alone"
   if [ "$(dest_manifest)" = "$BEFORE" ]; then
     ok "destination is byte identical to before the run"
   else
     bad "destination is byte identical to before the run"
   fi
+}
+
+test_staging_failure_leaves_the_release_alone() {
+  printf '== a staging failure stops before the swap and before any gh call\n'
+  fixture
+  # Second check is the staging directory, before the live folder is touched.
+  fake_shasum 2
+  publish "${ARGS[@]}" --yes
+  assert_rc 1 "exits 1"
+  assert_has "${ROOT}/err" "checksums do not verify" "says the staging copy failed"
+  assert_lacks "${ROOT}/gh.log" "release upload" "nothing was uploaded"
+  assert_lacks "${ROOT}/gh.log" "release edit" "the notes were not set"
+  assert_absent "${FAKE_HOME}/share/firmware/.v500.backup" "no backup left behind"
+  assert_absent "${FAKE_HOME}/share/firmware/.v500.staging" "no staging left behind"
+  if [ "$(dest_manifest)" = "$BEFORE" ]; then
+    ok "destination is byte identical to before the run"
+  else
+    bad "destination is byte identical to before the run"
+  fi
+}
+
+test_destination_swaps_before_the_release() {
+  printf '== the destination is swapped and verified before the release is touched\n'
+  fixture
+  fake_gh_recording_dest
+  publish "${ARGS[@]}" --yes
+  assert_rc 0 "exits 0"
+  assert_has "${ROOT}/gh.order" "dest-new: release upload" "uploaded with the new drop already live"
+  assert_has "${ROOT}/gh.order" "dest-new: release edit" "set the notes with the new drop already live"
+  assert_lacks "${ROOT}/gh.order" "dest-old" "no release call ran against the old drop"
+  assert_has "${ROOT}/out" "checksums OK (destination)" "verified the destination"
+  assert_has "${ROOT}/out" "step 1: destination" "the plan puts the destination first"
+  assert_has "${ROOT}/out" "step 2: assets to upload" "the plan puts the release second"
+}
+
+test_gh_failure_after_swap_keeps_the_new_drop() {
+  printf '== a gh failure after the swap keeps the new drop and asks for a retry\n'
+  fixture
+  fake_gh_upload_fails
+  publish "${ARGS[@]}" --yes
+  assert_rc 1 "exits non-zero"
+  assert_has "${ROOT}/err" "retry by hand" "tells the operator to retry"
+  assert_has "${ROOT}/err" "gh release upload v5.0.0 --clobber" "prints the upload command"
+  assert_has "${ROOT}/err" "gh release edit v5.0.0 -F notes.md" "prints the edit command"
+  assert_lacks "${ROOT}/err" "restoring the previous destination" "does not roll the drop back"
+  assert_lacks "${ROOT}/err" "COULD NOT RESTORE" "does not attempt a restore at all"
+  assert_exists "${DEST}/RELEASE.md" "the new drop stays in place"
+  assert_content "${DEST}/FAE-RUNBOOK.md" "runbook the field team owns" "the runbook is still there"
+  assert_absent "${DEST}/STALE.txt" "the old drop is not brought back"
+  assert_absent "${FAKE_HOME}/share/firmware/.v500.backup" "the backup was removed at the verify"
+  assert_absent "${FAKE_HOME}/share/firmware/.v500.staging" "no staging left behind"
+}
+
+test_allow_published_confirmation() {
+  printf '== --allow-published asks for a typed confirmation\n'
+  fixture
+  fake_gh false
+
+  publish "${ARGS[@]}" --yes --allow-published
+  assert_rc 1 "exits 1 with no terminal to ask at"
+  assert_has "${ROOT}/err" "needs a terminal to confirm at" "says why it stopped"
+  assert_has "${ROOT}/err" "is NOT a draft" "says the release is published"
+  assert_lacks "${ROOT}/gh.log" "release upload" "--yes alone uploaded nothing"
+  assert_lacks "${ROOT}/gh.log" "release edit" "--yes alone set no notes"
+  if [ "$(dest_manifest)" = "$BEFORE" ]; then
+    ok "destination is byte identical"
+  else
+    bad "destination is byte identical"
+  fi
+
+  export HKV_PUBLISH_CONFIRM_FD="${ROOT}/answer"
+  printf 'no\n' > "$HKV_PUBLISH_CONFIRM_FD"
+  publish "${ARGS[@]}" --yes --allow-published
+  assert_rc 1 "exits 1 when the answer is not yes"
+  assert_has "${ROOT}/err" "answer was not yes" "says the confirmation was declined"
+  assert_lacks "${ROOT}/gh.log" "release upload" "a declined run uploads nothing"
+  assert_absent "${DEST}/RELEASE.md" "a declined run copies nothing"
+  if [ "$(dest_manifest)" = "$BEFORE" ]; then
+    ok "destination is byte identical"
+  else
+    bad "destination is byte identical"
+  fi
+
+  printf 'yes\n' > "$HKV_PUBLISH_CONFIRM_FD"
+  publish "${ARGS[@]}" --yes --allow-published
+  assert_rc 0 "exits 0 once yes is typed"
+  assert_has "${ROOT}/err" "type yes to replace the assets" "prompted before mutating"
+  assert_has "${ROOT}/gh.log" "release upload" "uploaded the assets"
+  assert_exists "${DEST}/RELEASE.md" "refreshed the destination"
+  unset HKV_PUBLISH_CONFIRM_FD
 }
 
 test_checksum_mismatch_fails() {
@@ -423,6 +561,10 @@ test_destination_guard
 test_draft_gate
 test_swap_publishes_and_preserves_runbook
 test_rollback_restores_backup
+test_staging_failure_leaves_the_release_alone
+test_destination_swaps_before_the_release
+test_gh_failure_after_swap_keeps_the_new_drop
+test_allow_published_confirmation
 test_checksum_mismatch_fails
 test_missing_sha256sums_fails
 test_leftover_backup_stops_before_gh

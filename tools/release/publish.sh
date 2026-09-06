@@ -19,7 +19,8 @@
 # runs every read-only check and prints the plan it would carry out.
 #
 # The GitHub release must still be a draft. Publishing over a release people
-# may already have downloaded needs --allow-published, said out loud.
+# may already have downloaded needs --allow-published and a typed confirmation
+# at the terminal, which --yes does not stand in for.
 #
 # The drop folder is replaced through a staged swap rather than in place: the
 # new contents are assembled in a sibling directory, the live folder is renamed
@@ -29,6 +30,12 @@
 # the operator to sort out by hand. FAE-RUNBOOK.md is
 # written by the field team, not by this repo, so the copy in the destination is
 # carried across.
+#
+# The drop is swapped and the destination verified before the release is
+# touched, because the swap is the step that can be undone and the release is
+# not: an upload people may already have fetched cannot be recalled. If the gh
+# step then fails the new drop stays in place, correct and verified, and the
+# run stops with the gh commands to retry by hand. See #70.
 #
 # See #62.
 
@@ -63,12 +70,20 @@ Usage: tools/release/publish.sh --tag vX.Y.Z --notes FILE --dest DIR
                      nothing is uploaded, copied or deleted.
   --allow-published  Allow a release that is no longer a draft. Off by default:
                      republishing over a release people may already have
-                     downloaded is a deliberate act.
+                     downloaded is a deliberate act. Prompts at the terminal
+                     for a typed `yes` before anything is mutated; --yes does
+                     not answer that prompt, and a run with no terminal to ask
+                     at stops instead.
+
+The destination is swapped and verified first; the release is uploaded and its
+notes set only after that. A gh failure after the swap leaves the new drop in
+place and prints the commands to retry by hand.
 
 Exit codes:
-  0  Plan printed, or assets uploaded, notes set and destination refreshed.
-  1  A precondition failed, a checksum did not verify, or the swap was rolled
-     back.
+  0  Plan printed, or destination refreshed, assets uploaded and notes set.
+  1  A precondition failed, a checksum did not verify, the swap was rolled
+     back, the published-release confirmation was declined, or the release
+     could not be updated after the destination was swapped.
   2  Bad arguments.
 USAGE
 }
@@ -178,7 +193,9 @@ or a partly deleted backup left by a run that published successfully; compare it
 against ${DEST} and remove it by hand before publishing again"
 
 STAGING_LIVE=0
-PUBLISH_DONE=0
+# Set once the destination holds the new drop and has verified. From that point
+# the folder is correct, so nothing that follows may roll it back. See #70.
+SWAP_VERIFIED=0
 CLEANUP_DONE=0
 
 # ---------------------------------------------------------------------------
@@ -221,7 +238,7 @@ on_exit() {
   # Keyed on the backup directory rather than a flag, so an interrupt landing
   # inside the rename that creates it still restores. The pre-flight check
   # guarantees any backup present here was made by this run. See #70.
-  if [ "$PUBLISH_DONE" -eq 0 ] && [ -d "$BACKUP" ]; then
+  if [ "$SWAP_VERIFIED" -eq 0 ] && [ -d "$BACKUP" ]; then
     warn "publish failed mid-swap; restoring the previous destination from ${BACKUP}"
     rm -rf "${DEST:?}" || true
     if [ ! -e "$DEST" ] && mv "$BACKUP" "$DEST"; then
@@ -326,9 +343,7 @@ printf '  release\n'
 plan "tag           : ${TAG} (${RELEASE_STATE})"
 plan "notes         : ${NOTES}"
 plan "source drop   : ${REPO_DIR}/${PKG_ROOT}"
-printf '  assets to upload (gh release upload --clobber)\n'
-for _z in "${ZIPS[@]}"; do plan "$_z"; done
-printf '  destination\n'
+printf '  step 1: destination\n'
 plan "folder        : ${DEST}"
 plan "staging       : ${STAGING}"
 plan "backup        : ${BACKUP}"
@@ -346,6 +361,12 @@ while IFS= read -r _f; do plan "$_f"; done < "$DELETE_LIST"
 printf '  checksums to verify\n'
 plan "${PKG_ROOT}/SHA256SUMS plus ${#ZIPS[@]} archive digests, checked in the"
 plan "staging directory and again in the destination after the swap"
+printf '  step 2: assets to upload (gh release upload --clobber)\n'
+for _z in "${ZIPS[@]}"; do plan "$_z"; done
+plan "then gh release edit ${TAG} -F ${NOTES}"
+printf '  order\n'
+plan "the destination is swapped and verified before the release is touched;"
+plan "a gh failure after that leaves the new drop in place"
 printf '\n'
 
 if [ "$DRY_RUN" -eq 1 ]; then
@@ -361,10 +382,36 @@ fi
 # Carry it out
 # ---------------------------------------------------------------------------
 
-note "release assets"
-gh release upload "$TAG" --clobber "${ZIPS[@]}"
-gh release edit "$TAG" -F "$NOTES"
-gh release view "$TAG" --json assets --jq '.assets[] | "\(.name) \(.size)B"'
+# Asked here rather than at the release gate, so a dry run or a plan-only run
+# never blocks on a prompt. --yes is a decision about the plan; this is a
+# separate decision about the people holding the old asset hashes, so it is
+# read from the terminal and cannot be pre-answered on the command line.
+confirm_published_release() {
+  local src reply
+  printf '\n' >&2
+  warn "release ${TAG} is NOT a draft: it is published"
+  warn "its assets are downloadable now, and anyone holding a SHA-256 of one will find it no longer matches"
+  if [ -n "${HKV_PUBLISH_CONFIRM_FD:-}" ]; then
+    # Test-only hook: names a file the answer is read from, so the prompt can
+    # be exercised without a terminal. Not for operator use. See #70.
+    src="$HKV_PUBLISH_CONFIRM_FD"
+    [ -r "$src" ] || die "HKV_PUBLISH_CONFIRM_FD is not readable: ${src}"
+  else
+    { [ -t 0 ] && [ -r /dev/tty ]; } \
+      || die "--allow-published needs a terminal to confirm at; run it by hand rather than from a script or a pipe"
+    src=/dev/tty
+  fi
+  printf 'type yes to replace the assets of published release %s: ' "$TAG" >&2
+  read -r reply < "$src" \
+    || die "no answer read from ${src}; leaving published release ${TAG} alone"
+  printf '\n' >&2
+  [ "$reply" = "yes" ] \
+    || die "answer was not yes; leaving published release ${TAG} alone"
+}
+
+if [ "$RELEASE_STATE" = "published" ]; then
+  confirm_published_release
+fi
 
 note "drop folder"
 
@@ -383,8 +430,29 @@ mv "$STAGING" "$DEST"
 
 verify_sums "$DEST" "$ALL_SUMS" "destination"
 
-PUBLISH_DONE=1
+SWAP_VERIFIED=1
 rm -rf "$BACKUP"
+
+# The drop is correct from here on. A gh failure is reported against a
+# destination that stays as it is: rolling it back would replace a verified
+# drop with a stale one to match a release that was never updated. See #70.
+gh_failed() {
+  printf 'error: %s\n' "$1" >&2
+  printf '%s\n' "the drop folder ${DEST} holds the new build and verified; it is left in place" >&2
+  printf '%s\n' "the release ${TAG} was NOT updated; retry by hand:" >&2
+  printf '  gh release upload %q --clobber' "$TAG" >&2
+  printf ' %q' "${ZIPS[@]}" >&2
+  printf '\n' >&2
+  printf '  gh release edit %q -F %q\n' "$TAG" "$NOTES" >&2
+  exit 1
+}
+
+note "release assets"
+gh release upload "$TAG" --clobber "${ZIPS[@]}" \
+  || gh_failed "gh release upload failed for ${TAG}"
+gh release edit "$TAG" -F "$NOTES" \
+  || gh_failed "gh release edit failed for ${TAG}"
+gh release view "$TAG" --json assets --jq '.assets[] | "\(.name) \(.size)B"' || true
 
 note "published ${TAG} to ${DEST}"
 ls "$DEST"

@@ -305,12 +305,17 @@ tools/release/publish.sh --tag v5.0.0 --notes RELEASE-NOTES-v5.0.0.md --dest "$D
 tools/release/publish.sh --tag v5.0.0 --notes RELEASE-NOTES-v5.0.0.md --dest "$DEST" --yes
 ```
 
-The plan names the release and its draft state, the assets to upload, the
-files to copy, the files to delete from the drop folder, and the checksums to
-verify. Each of these stops the run:
+The plan names the release and its draft state, then the two steps in the
+order they are carried out: step 1 refreshes the drop folder, step 2 uploads
+the assets and sets the notes. Each of these stops the run:
 
 - The GitHub release must still be a draft. Replacing the assets of a release
-  people may already have downloaded needs `--allow-published`.
+  people may already have downloaded needs `--allow-published`, and that flag
+  then prompts at the terminal: it prints the tag, says the release is NOT a
+  draft and that people may already hold the published asset hashes, and reads
+  a typed `yes` from `/dev/tty`. `--yes` does not answer that prompt, and a run
+  with no terminal to ask at stops rather than assuming an answer. The prompt
+  comes after the plan, so `--dry-run` and plan-only runs never block on it.
 - The destination is canonicalised and must be an existing directory named for
   the release slug, at least two levels below `$HOME`. A trailing slash, a
   missing path component, `$HOME` itself and anything outside `$HOME` are
@@ -321,16 +326,29 @@ verify. Each of these stops the run:
 The drop folder is replaced by a staged swap: the new contents are assembled
 in a sibling directory, the live folder is renamed to a backup, and the
 staging directory takes its place. `FAE-RUNBOOK.md` is carried across from the
-destination. Any failure restores the backup and names it in the message, and
-the backup is removed only after the destination verifies. A restore that
-cannot be carried out, because the live folder could not be cleared, is
-reported as `COULD NOT RESTORE` with both paths named, so a failed rollback is
-never mistaken for a successful one; move the folder aside and rename the
-backup back by hand. A backup left over from such a run stops the next run
-before anything is uploaded. See #62.
+destination. Any failure up to and including the swap restores the backup and
+names it in the message, and the backup is removed only after the destination
+verifies. A restore that cannot be carried out, because the live folder could
+not be cleared, is reported as `COULD NOT RESTORE` with both paths named, so a
+failed rollback is never mistaken for a successful one; move the folder aside
+and rename the backup back by hand. A backup left over from such a run stops
+the next run before anything is uploaded. See #62.
+
+The swap runs first and the release is touched only after the destination has
+verified. The swap can be undone; an upload cannot be recalled once someone has
+fetched it. So if `gh release upload` or `gh release edit` fails after the swap,
+the new drop stays in place, because it is the verified build and rolling it
+back would restore a stale drop to match a release that was never updated. The
+run prints the exact `gh` commands to retry by hand and exits 1; the backup is
+already gone at that point, so nothing is left to clean up and the next run is
+not blocked. Retry the two commands, or re-run the helper: the swap is
+idempotent. See #70.
 
 `tools/release/test_publish.sh` covers these paths against a fake `gh` and
-runs from `scripts/ci-local.sh tests`.
+runs from `scripts/ci-local.sh tests`. It drives the `--allow-published` prompt
+through `HKV_PUBLISH_CONFIRM_FD`, which names a file the answer is read from
+instead of the terminal. That variable is a test hook, not an operator switch;
+do not set it when publishing.
 
 ## Clean Working State
 
