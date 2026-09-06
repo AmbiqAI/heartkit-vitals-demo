@@ -179,5 +179,12 @@ if(HKV_BUILD_AOT_PARITY)
         nsx::hkv_segmentation_aot
         nsx::hkv_arrhythmia_aot
     )
+    # Localisation aid for #37: replaces the timed pass with a per-op output
+    # dump over SWO. Separate option so the default parity image is unchanged.
+    option(HKV_PARITY_DUMP_OPS "Dump every segmentation operator output over SWO" OFF)
+    if(HKV_PARITY_DUMP_OPS)
+        target_compile_definitions(hkv_aot_parity PRIVATE HKV_PARITY_DUMP_OPS=1)
+    endif()
+
     nsx_finalize_app(hkv_aot_parity)
 endif()

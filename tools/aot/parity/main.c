@@ -107,6 +107,97 @@ sync_core_clock(void)
 static hkv_segmentation_model_context_t segCtx = {.callback = NULL};
 static hkv_arrhythmia_model_context_t arrCtx = {.callback = NULL};
 
+#if defined(HKV_PARITY_DUMP_OPS)
+/* Per-op output dump, opt-in at compile time. Off by default: it emits ~70 KB of
+ * hex over SWO per pass and replaces the timed parity pass entirely. Used to
+ * localise the segmentation divergence against a LiteRT builtin-kernel dump.
+ * See AmbiqAI/heartkit-vitals-demo#37. */
+
+/* op id -> its output tensor. The enum value is not the LiteRT tensor index
+ * (the generator interns extra requant slots), so the LiteRT index is carried
+ * separately for the log; it is what the reference npz keys are named after. */
+typedef struct {
+    hkv_segmentation_tensor_ident_t ident;
+    int litert;
+} dump_slot_t;
+
+static const dump_slot_t dumpSlots[31] = {
+    {hkv_segmentation_tensor_39, 39}, {hkv_segmentation_tensor_40, 40},
+    {hkv_segmentation_tensor_41, 41}, {hkv_segmentation_tensor_42, 42},
+    {hkv_segmentation_tensor_43, 43}, {hkv_segmentation_tensor_44, 44},
+    {hkv_segmentation_tensor_45, 45}, {hkv_segmentation_tensor_46, 46},
+    {hkv_segmentation_tensor_47, 47}, {hkv_segmentation_tensor_48, 48},
+    {hkv_segmentation_tensor_49, 49}, {hkv_segmentation_tensor_50, 50},
+    {hkv_segmentation_tensor_51, 51}, {hkv_segmentation_tensor_52, 52},
+    {hkv_segmentation_tensor_53, 53}, {hkv_segmentation_tensor_54, 54},
+    {hkv_segmentation_tensor_55, 55}, {hkv_segmentation_tensor_56, 56},
+    {hkv_segmentation_tensor_57, 57}, {hkv_segmentation_tensor_58, 58},
+    {hkv_segmentation_tensor_59, 59}, {hkv_segmentation_tensor_60, 60},
+    {hkv_segmentation_tensor_61, 61}, {hkv_segmentation_tensor_62, 62},
+    {hkv_segmentation_tensor_63, 63}, {hkv_segmentation_tensor_64, 64},
+    {hkv_segmentation_tensor_65, 65}, {hkv_segmentation_tensor_66, 66},
+    {hkv_segmentation_tensor_67, 67}, {hkv_segmentation_tensor_68, 68},
+    {hkv_segmentation_tensor_69, 69},
+};
+
+#define DUMP_CHUNK 64
+
+/* `len` is the whole tensor; `off` and the hex length locate the chunk. */
+static void
+dump_op_output(int32_t op)
+{
+    static const char digits[] = "0123456789abcdef";
+    char hex[2 * DUMP_CHUNK + 1];
+
+    if (op < 0 || op >= (int32_t)(sizeof(dumpSlots) / sizeof(dumpSlots[0]))) { return; }
+    const dump_slot_t *slot = &dumpSlots[op];
+    const uint8_t *data = (const uint8_t *)segCtx.tensor_ptrs[slot->ident];
+    int len = (int)hkv_segmentation_tensor_descriptors[slot->ident].size;
+    if (data == NULL || len <= 0) { return; }
+
+    for (int off = 0; off < len; off += DUMP_CHUNK) {
+        int n = len - off < DUMP_CHUNK ? len - off : DUMP_CHUNK;
+        for (int i = 0; i < n; i++) {
+            hex[2 * i] = digits[(data[off + i] >> 4) & 0xF];
+            hex[2 * i + 1] = digits[data[off + i] & 0xF];
+        }
+        hex[2 * n] = '\0';
+        nsx_printf("HKV|opdump|seg op=%d tensor=%d len=%d off=%d hex=%s\r\n", (int)op, slot->litert, len,
+                   off, hex);
+    }
+}
+
+/* Scratch tensors share arena space, so each output has to be read in its own
+ * run_finished before a later op overwrites it. */
+static void
+dump_callback(int32_t op, hkv_segmentation_operator_state_t state, int32_t status, void *user_data)
+{
+    (void)status;
+    (void)user_data;
+    if (state != hkv_segmentation_op_state_run_finished) { return; }
+    dump_op_output(op);
+}
+
+static void
+run_op_dump(void)
+{
+    segCtx.callback = dump_callback;
+    int32_t initRc = hkv_segmentation_model_init(&segCtx);
+
+    while (1) {
+        nsx_printf("\r\nHKV|opdump|begin model=seg case=0 init_rc=%d\r\n", (int)initRc);
+        int32_t rc = hkv_segmentation_status_ok;
+        if (initRc == hkv_segmentation_status_ok) {
+            memcpy(segCtx.inputs[0].data, golden_seg_inputs[0], GOLDEN_SEG_INPUT_LEN);
+            rc = hkv_segmentation_model_run(&segCtx);
+        }
+        nsx_printf("HKV|opdump|end model=seg case=0 rc=%d\r\n", (int)rc);
+        nsx_printf("PARITY_DONE\r\n");
+        nsx_delay_us(10000000);
+    }
+}
+#endif /* HKV_PARITY_DUMP_OPS */
+
 /* nsx_printf goes through the newlib-nano vfprintf, which drops %f. Every
  * value printed here is a small non-negative magnitude, so fixed point keeps
  * the log parseable without pulling in the float formatter. */
@@ -366,6 +457,9 @@ main(void)
     sync_core_clock();
     dwt_enable();
 
+#if defined(HKV_PARITY_DUMP_OPS)
+    run_op_dump();
+#else
     int32_t segSelf = -1, arrSelf = -1;
 
     /* Before the case loops: these re-init the module-global context and reset
@@ -388,4 +482,5 @@ main(void)
         print_report(segSelf, arrSelf);
         nsx_delay_us(10000000);
     }
+#endif
 }
