@@ -64,27 +64,38 @@ themselves and think it is broken.
 > are running always-on AI on a very small energy budget."
 
 **4:00 MCU Battery Life (est., excl. sensor).**
-> "About 28 days at 96 MHz. 27.7 days estimated on this build, from a measured
-> 30.5 percent busy fraction. It assumes a 1485 mWh budget, two CR2032 cells,
-> and it covers MCU energy only. Sensor power is not in it."
+> "About 36 days at 96 MHz over USB. 36.3 days estimated on the v5.1.0
+> pre-release firmware, from a measured 16.1 percent busy fraction. It assumes
+> a 1485 mWh budget, two CR2032 cells, and it covers MCU energy only. Sensor
+> power is not in it."
 
 Say the caveat in the same breath as the number, every time. Two cells, never
 one. Estimated, never measured.
 
-The script figures above are the v5.0.0 package figures. Read the tile in front
-of you; on a newer build it will differ. Measured on branch 65-sensor-opt before
-release, Apollo510B over USB, dashboard connected, 180 s: 16.0 percent
-utilization, a 36.4 day battery estimate and 71.3 inferences per second, against
-39.9 percent, 24.0 days and 58.5 inferences per second in the same conditions on
-the v5.0.0-era build (#65).
+Quote the build you flashed and read the tile in front of you. On the v5.0.0
+package the same tile reads about 28 days, 27.7 days from a measured 30.5
+percent busy fraction.
+
+Measured on `apollo510b_evb`, firmware 054c7ec (v5.1.0 pre-release), 180 s
+captures with the dashboard connected, 2026-09-05 (#65, #70): over USB in low
+power, 16.1 percent CPU, 36.3 days and about 55 to 70 inferences per second;
+over BLE in low power, 23.5 percent, 31.4 days and the same throughput range.
+Throughput is a range because the tile at one instant and the mean over the
+capture differ. The v5.0.0-era build measured 39.9 percent, 24.0 days and 58.5
+inferences per second over USB in the same conditions (#65).
 
 **4:30 Speed toggle.** Flip to 250 MHz, show that streaming continues, flip
 back.
 > "The operating point is a runtime control. Both modes are supported. At
 > 250 MHz you get 2 to 3x the AI throughput, varying by model and build, the
 > efficiency tiles change by model, so a tile may read higher or lower, and the
-> modelled battery life falls to about 15 days. You trade energy for headroom,
-> without stopping the stream."
+> modelled battery life falls. You trade energy for headroom, without stopping
+> the stream."
+
+On the v5.1.0 pre-release firmware (054c7ec) the high-performance figures over
+USB are about 200 inferences per second and 27.8 modelled days, against 55 to 70
+and 36.3 days in low power. On the v5.0.0 package the battery tile falls to
+about 15 days in high performance (#25).
 
 Read the efficiency tiles on the screen in front of you before you say anything
 about their direction. Paired readings on the released build came out mixed
@@ -107,7 +118,9 @@ build, that was a timebase defect, fixed in v5.0.0 (#25).
 - **Do not present the CPU number as product CPU load.** The tile shows the
   measured busy figure, everything the firmware runs including the demo
   transport, and the battery estimate derives from that same number. BLE reads
-  about 10 points higher than USB for that reason (#19).
+  higher than USB for that reason: about 7 points in low power on the v5.1.0
+  pre-release firmware, 23.5 percent against 16.1, and about 5 fewer modelled
+  battery days (#19, #70).
 - **Do not quote sensor power or whole-system power.** Neither is modelled or
   measured here.
 - **Do not present the efficiency tiles as measured.** They divide throughput by

@@ -174,18 +174,32 @@ sourcing on issues #25 and #18.
 window (`kCpuStatsRollingSeconds` in `src/main.cc`). It includes everything the
 firmware does, which means the USB or BLE transport that exists only to feed
 this dashboard is counted in the number. A deployed product that streams nothing
-would read lower. BLE reads higher than USB for the same reason: measurements
-put BLE at 37.7 percent against roughly 27 to 28 percent for USB (issue #19).
-The same number is the busy fraction the battery model bills, so the CPU tile
-and the battery tile derive from one measurement. A per-task breakdown and a
-deployment projection are emitted on the SWO `cpu` line as diagnostics; see
+would read lower. BLE reads higher than USB for the same reason. The same number
+is the busy fraction the battery model bills, so the CPU tile and the battery
+tile derive from one measurement. A per-task breakdown and a deployment
+projection are emitted on the SWO `cpu` line as diagnostics; see
 `docs/developer.md`.
 
-Measured on branch 65-sensor-opt before release, Apollo510B over USB, dashboard
-connected, 180 s: 16.0 percent utilization, a 36.4 day battery estimate and
-71.3 inferences per second, against 39.9 percent, 24.0 days and 58.5 inferences
-per second in the same conditions on the v5.0.0-era build (issue #65). The
-v5.0.0 figures quoted in this section stand as the record of that release.
+Measured on `apollo510b_evb`, firmware 054c7ec (v5.1.0 pre-release), 180 s SWO
+captures with the dashboard connected, 2026-09-05 (issues #65, #70):
+
+| Transport and mode | CPU | Battery est. | AI throughput |
+| --- | --- | --- | --- |
+| USB, 96 MHz low power | 16.1 percent | 36.3 days | about 55 to 70 IPS |
+| USB, 250 MHz high performance | 8.0 percent | 27.8 days | about 200 IPS |
+| BLE, 96 MHz low power | 23.5 percent | 31.4 days | about 55 to 70 IPS |
+
+In low power, BLE costs about 7 points more CPU and about 5 fewer modelled
+battery days than USB. Throughput reads as a range because the settled mean over
+a capture and the tile at any one instant differ: the low-power means were 69
+inferences per second over USB and 57 over BLE, while the tile was read at 59
+and 61. All three captures ended with zero missed samples and zero bus errors,
+bus resets, sensor restarts and stalls.
+
+The v5.0.0 release measured 39.9 percent, 24.0 days and 58.5 inferences per
+second over USB in low power (issue #65), and a separate v5.0.0-era run put BLE
+at 37.7 percent against roughly 27 to 28 percent for USB (issue #19). Those
+figures are the record of those runs, not of this build.
 
 **MCU Battery Life (est., excl. sensor).** This is a **model, not a
 measurement**. It covers **MCU energy only; sensor power is deliberately
@@ -193,11 +207,13 @@ excluded**, because sensor draw depends on LED count, drive strength, and
 sampling duty, none of which are properties of the MCU. The model splits time
 into inference, general compute, and sleep, and bills each at its own figure:
 sleep and per-MHz compute from the Apollo510B SoC Datasheet DS-A510B-1p1p0
-Table 39, inference from bench runlogs dated 2026-02-26. It models about
-28 days at 96 MHz: 27.7 days against a measured 30.5 percent busy fraction
-(issues #17, #25). The busy fraction it bills is the measured CPU figure above,
-so everything the core runs, the demo transport included, is billed at active
-power.
+Table 39, inference from bench runlogs dated 2026-02-26. The busy fraction it
+bills is the measured CPU figure above, so everything the core runs, the demo
+transport included, is billed at active power, which means the estimate moves
+with the build. On firmware 054c7ec it models 36.3 days at 96 MHz over USB
+against a measured 16.1 percent busy fraction; on v5.0.0 it modelled about
+28 days, 27.7 days against a measured 30.5 percent busy fraction (issues #17,
+#25).
 
 It assumes a 1485 mWh budget (2 x 225 mAh at 3.3 V); the cell capacity is a
 chosen assumption, not a sourced figure (issue #18). The known errors run
@@ -227,15 +243,19 @@ figure, from the same bench runlogs dated 2026-02-26.
 250 MHz high-performance operation. **Both modes are supported.** The default is
 96 MHz low power.
 
-Measured on an Apollo510B EVB, 2026-09-01 and 2026-09-02 (issue #25), in 250 MHz
+Measured on `apollo510b_evb`, firmware 054c7ec (v5.1.0 pre-release), 180 s
+capture over USB with the dashboard connected, 2026-09-05, in 250 MHz
 high-performance mode expect:
 
-- AI throughput **2 to 3x, varying by model and build**. Two builds of the same
-  code measured average throughput of 67.8 against 135.5 inferences per second,
-  and 66.2 against 182.6. The models execute in place from MRAM with their
-  arenas in shared SRAM, so binary layout changes how the largest model caches
-  and moves the three-stage mean without moving inference duty. The bench
-  harness, with the models and arena held in TCM, measured 2.59x.
+- AI throughput **2 to 3x, varying by model and build**. This firmware measured
+  about 200 inferences per second against 55 to 70 in low power, roughly 2.9x.
+  On v5.0.0-era builds, measured 2026-09-01 and 2026-09-02 (issue #25), two
+  builds of the same code measured average throughput of 67.8 against 135.5
+  inferences per second, and 66.2 against 182.6. The models execute in place
+  from MRAM with their arenas in shared SRAM, so binary layout changes how the
+  largest model caches and moves the three-stage mean without moving inference
+  duty. The bench harness, with the models and arena held in TCM, measured
+  2.59x.
 - The three efficiency tiles **change by model in high performance: a tile may
   read higher or lower**. The tiles are throughput divided by inference power, so
   they carry the same binary layout effect as throughput and the three models do
@@ -245,8 +265,13 @@ high-performance mode expect:
   17 percent for segmentation in the harness (issue #18); that is a harness
   result, and the on-device tile did not reproduce it. Read the live tiles rather
   than quoting a direction or a percentage in advance.
-- A lower battery figure: about 15 days modelled at 250 MHz, 14.6 days against a
-  measured 22.3 percent busy fraction, compared with 27.7 days at 96 MHz.
+- A lower battery figure: 27.8 days modelled at 250 MHz against a measured
+  8.0 percent busy fraction, compared with 36.3 days at 96 MHz on the same
+  firmware. The busy fraction falls because each inference finishes sooner,
+  while the model bills more power for the time the core is busy, so the
+  estimate still lands lower. On v5.0.0 the same comparison was 14.6 days
+  against a measured 22.3 percent busy fraction, compared with 27.7 days at
+  96 MHz (issue #25).
 
 If you are looking at an older build, note that a timebase defect made
 high-performance figures read wrong; it was fixed in v5.0.0 (issue #25).

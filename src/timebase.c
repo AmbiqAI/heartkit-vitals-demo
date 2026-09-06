@@ -31,7 +31,7 @@
 //
 // If someone later confirms against the AmbiqSuite source that
 // ui32SysclkFreq tracks the performance mode, prefer it: it removes the table
-// and would cover the parts left as TODO(verify) below.
+// and would cover the boards left unresolved below.
 
 #if defined(AM_PART_APOLLO510B) || defined(AM_PART_APOLLO510)
 
@@ -67,17 +67,9 @@
 
 #else
 
-/* TODO(verify): the core frequency at each MCU performance mode for
- * apollo330mP_evb (AM_PART_APOLLO330P) against its own datasheet. That part's
- * HAL splits high performance into HP1 (192 MHz) and HP2 (250 MHz)
- * (am_hal_pwrctrl.h:218-220) and this repo has no sourced value for which one
- * NSX_POWER_PERF_HIGH lands on, so this is a no-op there: SystemCoreClock and
- * the tick keep their current (boot-time) behaviour, i.e. issue #25 is unfixed
- * on that board, rather than being "fixed" with a number nobody checked.
- * Nothing else on that board follows the operating point either -- its
- * MCU_INFERENCE_POWER_MW_LP and _HP are the same figure (constants.h:197-198),
- * so inference_power_mw() is mode-independent there. The demo hardware is
- * apollo510b_evb. */
+/* TODO(#71): apollo330mP_evb high-performance clock is HP1 or HP2 per the
+ * Apollo330P HAL; unresolved, tick and SystemCoreClock keep boot-time
+ * behaviour on that board (#25). */
 
 #endif
 

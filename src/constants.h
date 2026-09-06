@@ -115,12 +115,7 @@ extern "C" {
  *   - The SLEEP and COMPUTE-per-MHz figures are APOLLO510B DATASHEET VALUES
  *     used here as a cross-part placeholder. They are not verified for the
  *     non-B part.
- * TODO(verify): the Apollo510 (non-B) SoC datasheet exists at
- * OneDrive .../Ambiq/sws/datasheets/soc/ap5/Apollo510-SoC-Datasheet.pdf. Read
- * Table 39 "Current Consumption in Active Mode and Sleep Modes" for ISS1
- * (System Sleep 1), IRUNLPFB and IRUNHPFB, and split this branch out with its
- * own numbers if they differ. Deliberately NOT transcribed here: nobody has
- * opened that document for this change. */
+ * TODO(#71): verify the borrowed Apollo510B sleep and compute-per-MHz figures against the Apollo510 (non-B) SoC Datasheet, Table 39, symbols ISS1, IRUNLPFB, IRUNHPFB. */
 #define MCU_POWER_APOLLO5_FIGURES (1)
 
 #endif
@@ -182,28 +177,14 @@ extern "C" {
 
 #else
 
-/* TODO(verify): 2.12 mW sleep power for apollo330mP_evb (AM_PART_APOLLO330P)
- * has no source of record (issue #18 searched OneDrive benchmarks, Confluence,
- * Jira, GitHub and git history and found none). Check the Apollo330P SoC
- * datasheet, "Current Consumption in Active Mode and Sleep Modes", for the
- * System Sleep 1 symbol, in OneDrive .../Ambiq/sws/datasheets/soc/. Value left
- * unchanged: replacing it with an Apollo510B number would be inventing
- * provenance, not fixing it. */
+/* TODO(#71): 2.12 mW sleep power for apollo330mP_evb has no source of record; verify against the Apollo330P SoC datasheet System Sleep 1 symbol. */
 #define MCU_SLEEP_POWER_MW (2.12)
 
-/* TODO(verify): 13.65 mW inference power for apollo330mP_evb has no source of
- * record (issue #18). Check the Apollo330P SoC datasheet for the CoreMark
- * run-power symbol, and bench the model set on this board the way
- * apollo510_evb was benched on 2026-02-26. Value left unchanged, and it is
- * used for both speed modes because no per-operating-point figure exists. */
+/* TODO(#71): 13.65 mW inference power for apollo330mP_evb has no source of record; verify against the Apollo330P SoC datasheet run-power symbol and a bench run. */
 #define MCU_INFERENCE_POWER_MW_LP (13.65)
 #define MCU_INFERENCE_POWER_MW_HP (13.65)
 
-/* TODO(verify): no general-compute figure exists for this part. Rather than
- * invent one, non-inference busy time is billed at the inference rate above --
- * i.e. this branch keeps the old, conservative two-state behaviour, and the
- * three-state split only bites where the figures are sourced. Replace with the
- * Apollo330P run-power symbol x the operating clock once verified. */
+/* TODO(#71): no general-compute figure exists for this part, so non-inference busy time is billed at the inference rate above; replace with the Apollo330P run-power symbol x the operating clock once verified. */
 #define MCU_COMPUTE_POWER_MW_LP (MCU_INFERENCE_POWER_MW_LP)
 #define MCU_COMPUTE_POWER_MW_HP (MCU_INFERENCE_POWER_MW_HP)
 

@@ -100,6 +100,15 @@ and `cpu_tx`; the rest is idle plus a remainder carrying PPG stage time, DSP
 paths and RTOS overhead, which have no per-stage counters and which `cpu_proj`
 excludes.
 
+Settled means from 180 s captures on `apollo510b_evb`, firmware 054c7ec
+(v5.1.0 pre-release), dashboard connected, 2026-09-05 (#70): USB low power
+`util` 16.1, `cpu_cap` 0.4, `cpu_inf` 9.0, `cpu_tx` 0.3, `batt_days` 36.3,
+`avg_ips` 69; USB high performance `util` 8.0, `cpu_inf` 3.1, `batt_days` 27.8,
+`avg_ips` 198; BLE low power `util` 23.5, `cpu_inf` 9.8, `batt_days` 31.4,
+`avg_ips` 57. All three captures ended with zero missed samples and zero
+`bus_err`, `bus_reset`, `sens_restart` and stalls. Use these as the comparison
+baseline for the release gate below.
+
 The battery model's sleep term assumes a quiet bus. With the async sensor read
 the task is blocked while the IOM moves the FIFO, so that transfer time is
 billed as idle even though the peripheral is active for a few milliseconds per
@@ -279,10 +288,68 @@ is written into the release notes before anything is published.
    clock ratio should sit near 1.0; a ratio far off means the capture or the
    timebase is wrong and the figures cannot be read.
 4. Run the transport counter capture above.
-5. Record the result in the release notes, then publish. Publication is
-   manual until a reviewed helper lands. See #39.
+5. Record the result in the release notes, then publish with
+   `tools/release/publish.sh`. Publication stays a manual step, run by hand
+   after the gate above.
 
 An empty capture is a stop-and-report condition. See `tools/bench/README.md`.
+
+### Publishing
+
+The publish helper prints its plan and stops. `--yes` carries the plan out;
+`--dry-run` prints it and mutates nothing even alongside `--yes`.
+
+```bash
+DEST="$HOME/Library/CloudStorage/OneDrive-AmbiqMicroInc/AITG - Documents/Demos/vital-sign-monitoring/firmware/v500"
+tools/release/publish.sh --tag v5.0.0 --notes RELEASE-NOTES-v5.0.0.md --dest "$DEST" --dry-run
+tools/release/publish.sh --tag v5.0.0 --notes RELEASE-NOTES-v5.0.0.md --dest "$DEST" --yes
+```
+
+The plan names the release and its draft state, then the two steps in the
+order they are carried out: step 1 refreshes the drop folder, step 2 uploads
+the assets and sets the notes. Each of these stops the run:
+
+- The GitHub release must still be a draft. Replacing the assets of a release
+  people may already have downloaded needs `--allow-published`, and that flag
+  then prompts at the terminal: it prints the tag, says the release is NOT a
+  draft and that people may already hold the published asset hashes, and reads
+  a typed `yes` from `/dev/tty`. `--yes` does not answer that prompt, and a run
+  with no terminal to ask at stops rather than assuming an answer. The prompt
+  comes after the plan, so `--dry-run` and plan-only runs never block on it.
+- The destination is canonicalised and must be an existing directory named for
+  the release slug, at least two levels below `$HOME`. A trailing slash, a
+  missing path component, `$HOME` itself and anything outside `$HOME` are
+  refused.
+- The drop is verified against `dist/<slug>/SHA256SUMS`, plus the archive
+  digests, before and after the copy. A missing checksum file fails.
+
+The drop folder is replaced by a staged swap: the new contents are assembled
+in a sibling directory, the live folder is renamed to a backup, and the
+staging directory takes its place. `FAE-RUNBOOK.md` is carried across from the
+destination. Any failure up to and including the swap restores the backup and
+names it in the message, and the backup is removed only after the destination
+verifies. A restore that cannot be carried out, because the live folder could
+not be cleared, is reported as `COULD NOT RESTORE` with both paths named, so a
+failed rollback is never mistaken for a successful one; move the folder aside
+and rename the backup back by hand. A backup left over from such a run stops
+the next run before anything is uploaded. See #62.
+
+The swap runs first and the release is touched only after the destination has
+verified. The swap can be undone; an upload cannot be recalled once someone has
+fetched it. So if `gh release upload` or `gh release edit` fails after the swap,
+the new drop stays in place, because it is the verified build and rolling it
+back would restore a stale drop to match a release that was never updated. The
+run prints the exact `gh` commands to retry by hand and exits 1; the backup is
+already gone at that point, so nothing is left to clean up and the next run is
+not blocked. Retry the two commands, or re-run the helper: the swap is
+idempotent. See #70.
+
+`tools/release/test_publish.sh` covers these paths against a fake `gh` and
+runs from `scripts/ci-local.sh tests`. It drives the `--allow-published` prompt
+through `HKV_PUBLISH_CONFIRM_FILE`, which names a file the answer is read from
+instead of the terminal. The script reads it only when the file sits under
+`$TMPDIR`, and dies otherwise: it is a test hook, not an operator switch, so do
+not set it when publishing.
 
 ## Clean Working State
 
