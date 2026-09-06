@@ -346,9 +346,10 @@ idempotent. See #70.
 
 `tools/release/test_publish.sh` covers these paths against a fake `gh` and
 runs from `scripts/ci-local.sh tests`. It drives the `--allow-published` prompt
-through `HKV_PUBLISH_CONFIRM_FD`, which names a file the answer is read from
-instead of the terminal. That variable is a test hook, not an operator switch;
-do not set it when publishing.
+through `HKV_PUBLISH_CONFIRM_FILE`, which names a file the answer is read from
+instead of the terminal. The script reads it only when the file sits under
+`$TMPDIR`, and dies otherwise: it is a test hook, not an operator switch, so do
+not set it when publishing.
 
 ## Clean Working State
 

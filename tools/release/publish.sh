@@ -387,15 +387,26 @@ fi
 # separate decision about the people holding the old asset hashes, so it is
 # read from the terminal and cannot be pre-answered on the command line.
 confirm_published_release() {
-  local src reply
+  local src reply src_dir tmp_real
   printf '\n' >&2
   warn "release ${TAG} is NOT a draft: it is published"
   warn "its assets are downloadable now, and anyone holding a SHA-256 of one will find it no longer matches"
-  if [ -n "${HKV_PUBLISH_CONFIRM_FD:-}" ]; then
+  if [ -n "${HKV_PUBLISH_CONFIRM_FILE:-}" ]; then
     # Test-only hook: names a file the answer is read from, so the prompt can
-    # be exercised without a terminal. Not for operator use. See #70.
-    src="$HKV_PUBLISH_CONFIRM_FD"
-    [ -r "$src" ] || die "HKV_PUBLISH_CONFIRM_FD is not readable: ${src}"
+    # be exercised without a terminal. Not for operator use. Confined to the
+    # temp directory so a stray value in an operator environment cannot
+    # pre-answer a real run. See #70.
+    src="$HKV_PUBLISH_CONFIRM_FILE"
+    [ -r "$src" ] || die "HKV_PUBLISH_CONFIRM_FILE is not readable: ${src}"
+    src_dir="$(cd -P -- "$(dirname -- "$src")" 2>/dev/null && pwd)" \
+      || die "confirmation file override is test-only"
+    tmp_real="$(cd -P -- "${TMPDIR:-/tmp}" 2>/dev/null && pwd)" \
+      || die "confirmation file override is test-only"
+    case "${src_dir}/" in
+      "${tmp_real}"/*) ;;
+      *) die "confirmation file override is test-only" ;;
+    esac
+    src="${src_dir}/$(basename -- "$src")"
   else
     { [ -t 0 ] && [ -r /dev/tty ]; } \
       || die "--allow-published needs a terminal to confirm at; run it by hand rather than from a script or a pipe"
@@ -440,10 +451,13 @@ gh_failed() {
   printf 'error: %s\n' "$1" >&2
   printf '%s\n' "the drop folder ${DEST} holds the new build and verified; it is left in place" >&2
   printf '%s\n' "the release ${TAG} was NOT updated; retry by hand:" >&2
-  printf '  gh release upload %q --clobber' "$TAG" >&2
+  # Prefixed with the repository directory: gh infers the repository from the
+  # working directory, and the asset and notes paths are repository relative,
+  # so a bare command only works from where the run started.
+  printf '  cd %q && gh release upload %q --clobber' "$REPO_DIR" "$TAG" >&2
   printf ' %q' "${ZIPS[@]}" >&2
   printf '\n' >&2
-  printf '  gh release edit %q -F %q\n' "$TAG" "$NOTES" >&2
+  printf '  cd %q && gh release edit %q -F %q\n' "$REPO_DIR" "$TAG" "$NOTES" >&2
   exit 1
 }
 

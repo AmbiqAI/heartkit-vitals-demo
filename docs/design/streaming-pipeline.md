@@ -14,11 +14,12 @@ symptom persists after the host-side playout-clock fix.
 ### 1.1 Root cause (verified in source)
 
 The ECG TX taps are written **only** from inside the segmentation branch, in
-200-sample blocks:
+206-sample blocks:
 
 - `src/main.cc:950-952` transfers/pushes `ECG_SEG_VALID_LEN` samples.
-- `ECG_SEG_VALID_LEN = 250 - 2*25 = 200` (`src/constants.h:176-178`), which at
-  `ECG_TARGET_RATE = 100` Hz is **2 s of signal**.
+- `ECG_SEG_VALID_LEN = 256 - 2*25 = 206` (`src/constants.h:429-431`), which at
+  `ECG_TARGET_RATE = 100` Hz is **2.06 s of signal** (the segmentation window
+  is 256 samples, 2.56 s).
 - That branch is an `else if` (`src/main.cc:929`) firing roughly once per 2 s.
 
 `send_ecg_signals()` then runs every ~100 ms loop tick and pops at most 40

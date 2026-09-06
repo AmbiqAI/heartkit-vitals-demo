@@ -202,7 +202,7 @@ fixture() {
 #
 # stdin is /dev/null so the run never has a terminal, whether or not the suite
 # was started from one. The published-release prompt is exercised through
-# HKV_PUBLISH_CONFIRM_FD instead, which is a test-only hook.
+# HKV_PUBLISH_CONFIRM_FILE instead, which is a test-only hook.
 publish() {
   ( cd "$REPO" && HOME="$FAKE_HOME" PATH="${BIN}:${PATH}" "$PUBLISH" "$@" ) \
     < /dev/null > "${ROOT}/out" 2> "${ROOT}/err"
@@ -391,8 +391,11 @@ test_gh_failure_after_swap_keeps_the_new_drop() {
   publish "${ARGS[@]}" --yes
   assert_rc 1 "exits non-zero"
   assert_has "${ROOT}/err" "retry by hand" "tells the operator to retry"
-  assert_has "${ROOT}/err" "gh release upload v5.0.0 --clobber" "prints the upload command"
-  assert_has "${ROOT}/err" "gh release edit v5.0.0 -F notes.md" "prints the edit command"
+  # Same resolution the script applies to --repo-dir, so the fixture's raw path
+  # (mktemp inherits a trailing slash from TMPDIR) still matches.
+  repo_real="$(cd -- "$REPO" && pwd)"
+  assert_has "${ROOT}/err" "cd ${repo_real} && gh release upload v5.0.0 --clobber" "the upload retry runs from any cwd"
+  assert_has "${ROOT}/err" "cd ${repo_real} && gh release edit v5.0.0 -F notes.md" "the edit retry runs from any cwd"
   assert_lacks "${ROOT}/err" "restoring the previous destination" "does not roll the drop back"
   assert_lacks "${ROOT}/err" "COULD NOT RESTORE" "does not attempt a restore at all"
   assert_exists "${DEST}/RELEASE.md" "the new drop stays in place"
@@ -419,8 +422,8 @@ test_allow_published_confirmation() {
     bad "destination is byte identical"
   fi
 
-  export HKV_PUBLISH_CONFIRM_FD="${ROOT}/answer"
-  printf 'no\n' > "$HKV_PUBLISH_CONFIRM_FD"
+  export HKV_PUBLISH_CONFIRM_FILE="${ROOT}/answer"
+  printf 'no\n' > "$HKV_PUBLISH_CONFIRM_FILE"
   publish "${ARGS[@]}" --yes --allow-published
   assert_rc 1 "exits 1 when the answer is not yes"
   assert_has "${ROOT}/err" "answer was not yes" "says the confirmation was declined"
@@ -432,13 +435,29 @@ test_allow_published_confirmation() {
     bad "destination is byte identical"
   fi
 
-  printf 'yes\n' > "$HKV_PUBLISH_CONFIRM_FD"
+  printf 'yes\n' > "$HKV_PUBLISH_CONFIRM_FILE"
   publish "${ARGS[@]}" --yes --allow-published
   assert_rc 0 "exits 0 once yes is typed"
   assert_has "${ROOT}/err" "type yes to replace the assets" "prompted before mutating"
   assert_has "${ROOT}/gh.log" "release upload" "uploaded the assets"
   assert_exists "${DEST}/RELEASE.md" "refreshed the destination"
-  unset HKV_PUBLISH_CONFIRM_FD
+
+  # The hook must not be usable to pre-answer a real run, so it is only read
+  # from the temp directory. Moving TMPDIR puts the same file outside it.
+  fixture
+  fake_gh false
+  export HKV_PUBLISH_CONFIRM_FILE="${ROOT}/answer"
+  printf 'yes\n' > "$HKV_PUBLISH_CONFIRM_FILE"
+  saved_tmpdir="${TMPDIR:-}"
+  TMPDIR="${ROOT}/not-tmp"
+  export TMPDIR
+  mkdir -p "$TMPDIR"
+  publish "${ARGS[@]}" --yes --allow-published
+  if [ -n "$saved_tmpdir" ]; then TMPDIR="$saved_tmpdir"; export TMPDIR; else unset TMPDIR; fi
+  assert_rc 1 "exits 1 when the override is outside the temp directory"
+  assert_has "${ROOT}/err" "confirmation file override is test-only" "says the hook is test-only"
+  assert_lacks "${ROOT}/gh.log" "release upload" "an out-of-tree override uploads nothing"
+  unset HKV_PUBLISH_CONFIRM_FILE
 }
 
 test_checksum_mismatch_fails() {
