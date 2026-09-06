@@ -1386,8 +1386,12 @@ SensorIrqTask(void *pvParameters)
 {
     (void)pvParameters;
     while (true) {
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        sensor_process_irq_events();
+        /* Bounded wait, not portMAX_DELAY: a stopped measurement stops the INT
+         * line too, so the recovery check has to run off a timeout as well. */
+        if (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(AS7058_SENSOR_TASK_POLL_MS)) > 0) {
+            sensor_process_irq_events();
+        }
+        sensor_service_recovery();
     }
 }
 
@@ -2333,12 +2337,20 @@ report_extra_sensor(void)
     hkv_log_u32("isr_int_lo_ms", sensor_get_as7058_isr_min_interval_ms());
     hkv_log_u32("isr_int_hi_ms", sensor_get_as7058_isr_max_interval_ms());
     /* A queued read that errors or times out is reported here, not just to the
-     * chiplib: the chiplib's own response is to stop the measurement, which
-     * looks like a dead sensor rather than a bus fault. `bus_sync` counts the
-     * reads that took the blocking fallback, which after boot should stay
-     * flat. See #65. */
+     * chiplib: the chiplib's own response is to stop the measurement, so
+     * without this the fault would only show up as a silenced sensor.
+     * `bus_sync` counts the reads that took the blocking fallback, which after
+     * boot should stay flat. See #65. */
     hkv_log_u32("bus_err", sensor_bus_get_error_count());
     hkv_log_u32("bus_sync", sensor_bus_get_fallback_count());
+    /* `bus_reset` counts IOM rebuilds after a read timed out with its transfer
+     * still outstanding; each one costs the reads taken until the IOM went
+     * quiet. See #67. */
+    hkv_log_u32("bus_reset", sensor_bus_get_reset_count());
+    /* `sens_restart` counts measurements restarted after the chiplib stopped
+     * one on a read error. It should track bus_err; a bus_err that leaves it
+     * flat means the stream is dead, not just gapped. See #67. */
+    hkv_log_u32("sens_restart", sensor_get_restart_count());
     sensor_reset_as7058_isr_interval_stats();
 }
 

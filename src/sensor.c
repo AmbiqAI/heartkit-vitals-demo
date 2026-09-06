@@ -76,6 +76,15 @@ static volatile uint32_t g_ecg_drop_count = 0;
 static TaskHandle_t g_sensor_irq_task_handle = NULL;
 static sensor_context_t *g_sensorCtx = NULL;
 
+/* Restart bookkeeping, touched only from the sensor task (the chiplib callback
+ * runs there too, under as7058_osal_interrupt_callback). See #67. */
+static volatile bool g_restart_pending = false;
+static volatile uint32_t g_restart_count = 0;
+static volatile uint32_t g_restart_failures = 0;
+static volatile TickType_t g_restart_due_tick = 0;
+/* Last bus rebuild observed by the recovery service. Sensor task only. */
+static uint32_t g_bus_rebuilds_seen = 0;
+
 /* AS7058 INT GPIO ISR-to-ISR interval tracking, exposed via ReportTask's
  * once/sec breadcrumb: confirms whether the sensor's INT line is firing at
  * a uniform, expected cadence (normal FIFO-watermark batching -- e.g. one
@@ -298,7 +307,20 @@ sensor_as7058_callback(err_code_t error,
     M_UNUSED_PARAM(sensor_events);
     M_UNUSED_PARAM(p_cb_param);
 
-    if (error != ERR_SUCCESS || p_fifo_data == NULL || fifo_data_size == 0) {
+    if (error != ERR_SUCCESS) {
+        /* as7058_callback_t contract: a non-success error means the chiplib is
+         * stopping the measurement. Nothing else restarts it, so latch the
+         * request and let the task drive it once the bus has settled. A later
+         * error must not re-arm a request that is already waiting: that would
+         * push the due tick out and defeat the backoff. */
+        if (!g_restart_pending) {
+            g_restart_pending = true;
+            g_restart_due_tick = xTaskGetTickCount() + pdMS_TO_TICKS(AS7058_RESTART_INTERVAL_MS);
+        }
+        return;
+    }
+
+    if (p_fifo_data == NULL || fifo_data_size == 0) {
         return;
     }
 
@@ -564,6 +586,87 @@ sensor_stop(void)
         return result;
     }
     return result;
+}
+
+/* Attempts are spaced by the plain interval until the failure budget is spent,
+ * then by the long backoff: a sensor that is not coming back costs one attempt
+ * per backoff instead of latching the restart off for good. See #67. */
+static TickType_t
+sensor_restart_next_due(void)
+{
+    uint32_t ms = (g_restart_failures >= AS7058_RESTART_MAX_FAILURES) ? AS7058_RESTART_BACKOFF_MS
+                                                                     : AS7058_RESTART_INTERVAL_MS;
+    return xTaskGetTickCount() + pdMS_TO_TICKS(ms);
+}
+
+void
+sensor_service_recovery(void)
+{
+    err_code_t result;
+    uint32_t rebuilds;
+    bool spent;
+
+    if (!g_restart_pending) {
+        return;
+    }
+    if ((int32_t)(xTaskGetTickCount() - g_restart_due_tick) < 0) {
+        return;
+    }
+    /* A wedged bus refuses every queued read and the chiplib's restart path
+     * issues none, so the rebuild has to be driven from here. Nothing can be
+     * attempted over a bus that is still wedged, so it costs no attempt and
+     * the backoff, which spaces attempts, must not space the next look. */
+    if (!sensor_bus_recover_if_wedged()) {
+        g_restart_due_tick = xTaskGetTickCount() + pdMS_TO_TICKS(AS7058_RESTART_INTERVAL_MS);
+        return;
+    }
+
+    /* Sampled before the rebuild clears the count, so the recovery line below
+     * still reports an attempt that was made on the backoff. */
+    spent = (g_restart_failures >= AS7058_RESTART_MAX_FAILURES);
+
+    /* A rebuild means a different bus from the one the failures were counted
+     * against. Tracked across calls because a task-context read can drive the
+     * rebuild between service ticks. */
+    rebuilds = sensor_bus_get_reset_count();
+    if (rebuilds != g_bus_rebuilds_seen) {
+        g_bus_rebuilds_seen = rebuilds;
+        g_restart_failures = 0;
+    }
+
+    /* Spaced before the attempt, not after, so a slow attempt cannot turn into
+     * a tight retry loop on a bus that is still failing. */
+    g_restart_due_tick = sensor_restart_next_due();
+
+    /* The stop the chiplib ran on the failing bus may not have taken, and
+     * as7058_start_measurement rejects a start unless the library is back in
+     * its configuration state. The profile registers survive a stop, so the
+     * restart is stop + start rather than a full reconfigure. */
+    (void)as7058_stop_measurement();
+
+    result = sensor_start();
+    if (result == ERR_SUCCESS) {
+        g_restart_pending = false;
+        g_restart_failures = 0;
+        g_restart_count++;
+        if (spent) {
+            nsx_printf("AS7058 measurement restart recovered on the backoff retry.\n");
+        }
+        return;
+    }
+
+    g_restart_failures++;
+    if (g_restart_failures == AS7058_RESTART_MAX_FAILURES) {
+        nsx_printf("AS7058 measurement restart failed %lu times; backing off to one attempt per %lu ms.\n",
+                   (uint32_t)g_restart_failures, (uint32_t)AS7058_RESTART_BACKOFF_MS);
+    }
+    g_restart_due_tick = sensor_restart_next_due();
+}
+
+uint32_t
+sensor_get_restart_count(void)
+{
+    return g_restart_count;
 }
 
 uint32_t

@@ -390,6 +390,17 @@ extern "C" {
 #define AS7058_SENSOR_TASK_STACK_WORDS (1024)
 #define AS7058_SENSOR_TASK_PRIORITY (2)
 
+/* The chiplib stops the measurement when a FIFO read fails, so the sensor task
+ * cannot wait on the INT notification alone: it would never wake again. See
+ * #67. */
+#define AS7058_SENSOR_TASK_POLL_MS (250)
+#define AS7058_RESTART_INTERVAL_MS (1000)
+#define AS7058_RESTART_MAX_FAILURES (5)
+/* Spacing once the consecutive-failure budget is spent: long enough that a
+ * sensor that is not coming back costs almost nothing, short enough that one
+ * that does (cable reseated, supply settled) recovers without a reset. */
+#define AS7058_RESTART_BACKOFF_MS (30000)
+
 ///////////////////////////////////////////////////////////////////////////////
 // Preprocess Configuration
 ///////////////////////////////////////////////////////////////////////////////
