@@ -55,6 +55,7 @@ import argparse
 import hashlib
 import json
 import math
+import re
 import sys
 from pathlib import Path
 
@@ -62,27 +63,101 @@ import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# src/constants.h
-ECG_TARGET_RATE = 100
-NORM_STD_EPS = np.float32(0.001)
-ECG_DEN_WINDOW_LEN = 256
-ECG_DEN_PAD_LEN = 25
-ECG_DEN_VALID_LEN = ECG_DEN_WINDOW_LEN - 2 * ECG_DEN_PAD_LEN
-ECG_SEG_WINDOW_LEN = 256
-ECG_SEG_PAD_LEN = 25
-ECG_ARR_WINDOW_LEN = 500
-ECG_ARR_THRESHOLD = 0.4
+CONSTANTS_SOURCE = "src/constants.h"
+SOS_SOURCE = "src/store.c"
 
-# src/store.c: generate_arm_biquad_sos(0.5, 30, 100, order=3), {b0,b1,b2,a1,a2}
+# Literal text as spelled in the firmware, so --verify-sources can grep for it
+# and a drifting #define shows up as a diff in the sidecar.
+CONSTANT_LITERALS = {
+    "NORM_STD_EPS": "0.001",
+    "ECG_TARGET_RATE": "100",
+    "ECG_DEN_WINDOW_LEN": "256",
+    "ECG_DEN_PAD_LEN": "25",
+    "ECG_SEG_WINDOW_LEN": "256",
+    "ECG_SEG_PAD_LEN": "25",
+    "ECG_ARR_WINDOW_LEN": "500",
+    "ECG_ARR_THRESHOLD": "0.4",
+}
+DERIVED_LITERALS = {
+    "ECG_DEN_VALID_LEN": "ECG_DEN_WINDOW_LEN - 2 * ECG_DEN_PAD_LEN",
+    "ECG_SEG_VALID_LEN": "ECG_SEG_WINDOW_LEN - 2 * ECG_SEG_PAD_LEN",
+}
+
+ECG_TARGET_RATE = int(CONSTANT_LITERALS["ECG_TARGET_RATE"])
+NORM_STD_EPS = np.float32(CONSTANT_LITERALS["NORM_STD_EPS"])
+ECG_DEN_WINDOW_LEN = int(CONSTANT_LITERALS["ECG_DEN_WINDOW_LEN"])
+ECG_DEN_PAD_LEN = int(CONSTANT_LITERALS["ECG_DEN_PAD_LEN"])
+ECG_DEN_VALID_LEN = ECG_DEN_WINDOW_LEN - 2 * ECG_DEN_PAD_LEN
+ECG_SEG_WINDOW_LEN = int(CONSTANT_LITERALS["ECG_SEG_WINDOW_LEN"])
+ECG_SEG_PAD_LEN = int(CONSTANT_LITERALS["ECG_SEG_PAD_LEN"])
+ECG_SEG_VALID_LEN = ECG_SEG_WINDOW_LEN - 2 * ECG_SEG_PAD_LEN
+ECG_ARR_WINDOW_LEN = int(CONSTANT_LITERALS["ECG_ARR_WINDOW_LEN"])
+ECG_ARR_THRESHOLD = float(CONSTANT_LITERALS["ECG_ARR_THRESHOLD"])
+
+DERIVED_VALUES = {
+    "ECG_DEN_VALID_LEN": ECG_DEN_VALID_LEN,
+    "ECG_SEG_VALID_LEN": ECG_SEG_VALID_LEN,
+}
+
+# src/store.c ecgSos: generate_arm_biquad_sos(0.5, 30, 100, order=3), {b0,b1,b2,a1,a2}
 # per stage with the CMSIS sign convention (a coefficients already negated).
-ECG_SOS = np.array(
-    [
-        [0.2467691808982006, 0.4935383617964012, 0.2467691808982006, -0.4141296048598937, -0.36229096617676754],
-        [1.0, 0.0, -1.0, 0.8213745394235588, 0.14232107570294283],
-        [1.0, -2.0, 1.0, 1.9684516644108876, -0.9694342914476478],
-    ],
-    dtype=np.float32,
-)
+ECG_SOS_LITERALS = [
+    ["0.2467691808982006", "0.4935383617964012", "0.2467691808982006", "-0.4141296048598937", "-0.36229096617676754"],
+    ["1.0", "0.0", "-1.0", "0.8213745394235588", "0.14232107570294283"],
+    ["1.0", "-2.0", "1.0", "1.9684516644108876", "-0.9694342914476478"],
+]
+ECG_SOS = np.array([[float(v) for v in stage] for stage in ECG_SOS_LITERALS], dtype=np.float32)
+
+
+def verify_sources() -> list[str]:
+    """Grep the firmware for every literal mirrored here; return the mismatches."""
+    problems: list[str] = []
+    header = REPO_ROOT / CONSTANTS_SOURCE
+    store = REPO_ROOT / SOS_SOURCE
+    for path in (header, store):
+        if not path.is_file():
+            problems.append(f"{path} not found; cannot verify the values mirrored from it")
+    if problems:
+        return problems
+
+    header_text = header.read_text()
+    for name, literal in {**CONSTANT_LITERALS, **DERIVED_LITERALS}.items():
+        pattern = rf"#define\s+{re.escape(name)}\s*\(\s*{re.escape(literal)}\s*\)"
+        if not re.search(pattern, header_text):
+            problems.append(
+                f"{CONSTANTS_SOURCE}: no `#define {name} ({literal})`; "
+                f"make_golden.py mirrors {name} = {literal} and is now out of date"
+            )
+
+    # One match over the whole coefficient block: the individual literals ("1.0",
+    # "0.0") are too common to grep for on their own.
+    flat = [value for stage in ECG_SOS_LITERALS for value in stage]
+    block = r",\s*".join(re.escape(value) for value in flat)
+    if not re.search(block, store.read_text()):
+        problems.append(
+            f"{SOS_SOURCE}: the ecgSos coefficient block does not match the "
+            f"{len(flat)} literals mirrored in make_golden.py ECG_SOS_LITERALS"
+        )
+    return problems
+
+
+def provenance() -> dict:
+    return {
+        "ecg_sos": [[float(v) for v in stage] for stage in ECG_SOS_LITERALS],
+        "constants": {
+            **{
+                name: float(literal) if "." in literal else int(literal)
+                for name, literal in CONSTANT_LITERALS.items()
+            },
+            **DERIVED_VALUES,
+        },
+        "source": {
+            "ecg_sos": f"{SOS_SOURCE} ecgSos",
+            **{name: CONSTANTS_SOURCE for name in CONSTANT_LITERALS},
+            **{name: f"{CONSTANTS_SOURCE} ({literal})" for name, literal in DERIVED_LITERALS.items()},
+        },
+    }
+
 
 SEG_CLASS_NAMES = ["NONE", "P-WAVE", "QRS", "T-WAVE"]
 ARR_CLASS_NAMES = ["SR", "SB", "AFIB", "GSVT"]
@@ -102,11 +177,30 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _sample(path: Path, row: str) -> np.float32 | None:
+    """Last column of a one- or two-column row; None if the cell is not numeric."""
+    fields = row.split(",")
+    if len(fields) not in (1, 2):
+        raise ValueError(f"{path.name}: expected a one- or two-column csv, got {len(fields)} columns in {row!r}")
+    try:
+        return np.float32(fields[-1].strip())
+    except ValueError:
+        return None
+
+
 def load_stimulus(path: Path) -> np.ndarray:
-    rows = path.read_text().strip().splitlines()
-    if rows and rows[0].lower().startswith("index"):
-        rows = rows[1:]
-    return np.array([np.float32(line.split(",")[1]) for line in rows], dtype=np.float32)
+    rows = [row for row in path.read_text().splitlines() if row.strip()]
+    samples = []
+    for lineno, row in enumerate(rows, start=1):
+        value = _sample(path, row)
+        if value is None:
+            if lineno == 1:
+                continue  # header row, any column names
+            raise ValueError(f"{path.name}: line {lineno} is not a number: {row!r}")
+        samples.append(value)
+    if not samples:
+        raise ValueError(f"{path.name}: no samples found")
+    return np.array(samples, dtype=np.float32)
 
 
 def standardize(x: np.ndarray) -> np.ndarray:
@@ -144,7 +238,7 @@ def denoise_model_input(raw_window: np.ndarray) -> np.ndarray:
 
 
 class TFLiteModel:
-    """Single-input/single-output LiteRT wrapper over an on-disk .tflite."""
+    """LiteRT wrapper over an on-disk .tflite."""
 
     def __init__(self, path: Path):
         from ai_edge_litert.interpreter import Interpreter
@@ -162,7 +256,14 @@ class TFLiteModel:
         return [np.array(self.interpreter.get_tensor(d["index"]), copy=True) for d in self.outputs]
 
     def quantize(self, detail: dict, values: np.ndarray) -> tuple[np.ndarray, int]:
-        """Mirror hkv_tensor_input_i8 / hkv_tensor_input_f32 from ecg_tensor_copy.h.
+        """Fill an input tensor from a host window the way the firmware does.
+
+        hkv_tensor_input_i8 / hkv_tensor_input_f32 (ecg_tensor_copy.h) fill
+        min(hostLen, tensorLen) elements and replicate the last written element
+        across the tail, so a tensor wider than the host window sees edge
+        padding; the arrhythmia path instead runs an inline loop bounded by
+        ECG_ARR_WINDOW_LEN (ecg_arrhythmia.cc), which is the same thing when the
+        window and the tensor are equal length.
 
         The firmware writes `(int8_t)(host[i] / scale + zeroPoint)`: a C cast,
         so truncation toward zero rather than round-to-nearest. Out-of-range
@@ -171,12 +272,18 @@ class TFLiteModel:
         """
         shape = tuple(int(d) for d in detail["shape"])
         dtype = detail["dtype"]
+        flat = values.astype(np.float32).reshape(-1)
+        target = int(np.prod(shape))
+        if flat.size < target:
+            flat = np.pad(flat, (0, target - flat.size), mode="edge")
+        elif flat.size > target:
+            flat = flat[:target]
         if dtype == np.float32:
-            return values.astype(np.float32).reshape(shape), 0
+            return flat.reshape(shape), 0
         scale, zero_point = detail["quantization"]
         if scale == 0.0:
             raise ValueError(f"{self.path.name}: non-float input without affine quantization")
-        raw = np.trunc(values.astype(np.float32) / np.float32(scale) + np.float32(zero_point))
+        raw = np.trunc(flat / np.float32(scale) + np.float32(zero_point))
         info = np.iinfo(dtype)
         clipped = int(np.count_nonzero((raw < info.min) | (raw > info.max)))
         return np.clip(raw, info.min, info.max).astype(dtype).reshape(shape), clipped
@@ -304,9 +411,13 @@ def generate(args: argparse.Namespace) -> int:
     cases = []
     for case_index, (start, path) in enumerate(zip(starts, case_paths(out, args.cases), strict=True)):
         values = build_case_input(args.model, raw, start, den)
-        model_input, clipped = model.quantize(model.inputs[0], values)
-        outputs = model.run([model_input])
-        arrays = {"input_0": model_input}
+        # Every input tensor is filled from the same case window: the ECG models
+        # are single-input, the loop only keeps the key naming honest.
+        filled = [model.quantize(detail, values) for detail in model.inputs]
+        clipped = sum(count for _, count in filled)
+        model_inputs = [array for array, _ in filled]
+        outputs = model.run(model_inputs)
+        arrays = {f"input_{idx}": array for idx, array in enumerate(model_inputs)}
         for idx, array in enumerate(outputs):
             arrays[f"output_{idx}"] = array
         np.savez(path, **arrays)
@@ -332,6 +443,7 @@ def generate(args: argparse.Namespace) -> int:
         "stimulus_stride": int(stride),
         "raw_samples_per_case": span,
         "layout": "one case per npz, keys input_N/output_N, model tensor shape and dtype",
+        "firmware": provenance(),
         "tensors": {
             **{f"input_{i}": tensor_meta(d) for i, d in enumerate(model.inputs)},
             **{f"output_{i}": tensor_meta(d) for i, d in enumerate(model.outputs)},
@@ -350,6 +462,12 @@ def check(args: argparse.Namespace) -> int:
         print(f"error: sidecar {sidecar} not found; generate before --check", file=sys.stderr)
         return 2
     meta = json.loads(sidecar.read_text())
+    if meta.get("model") != args.model:
+        print(
+            f"error: {sidecar} was generated for model {meta.get('model')!r}, not {args.model!r}",
+            file=sys.stderr,
+        )
+        return 2
     tflite_path = (REPO_ROOT / meta["model_path"]).resolve()
     if sha256_file(tflite_path) != meta["model_sha256"]:
         print(f"error: {tflite_path} no longer matches the sha256 recorded in the sidecar", file=sys.stderr)
@@ -391,9 +509,24 @@ def main() -> int:
         help="stimulus csv (index,value) at the pipeline's 100 Hz rate",
     )
     parser.add_argument("--check", action="store_true", help="reload the npz set and re-run the interpreter")
+    parser.add_argument(
+        "--no-verify-sources",
+        dest="verify_sources",
+        action="store_false",
+        help="skip grepping the firmware for the constants and filter coefficients mirrored here",
+    )
     args = parser.parse_args()
     if args.cases < 1:
         parser.error("--cases must be at least 1")
+    if Path(args.out).suffix != ".npz":
+        parser.error("--out must end in .npz so the sidecar sits beside the file np.savez writes")
+    if args.verify_sources:
+        problems = verify_sources()
+        if problems:
+            for problem in problems:
+                print(f"error: {problem}", file=sys.stderr)
+            print("re-sync make_golden.py with the firmware, or pass --no-verify-sources", file=sys.stderr)
+            return 2
     return check(args) if args.check else generate(args)
 
 
