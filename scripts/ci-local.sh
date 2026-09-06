@@ -12,7 +12,7 @@
 # Usage:
 #   scripts/ci-local.sh            # host tests + frozen sync + firmware build
 #   scripts/ci-local.sh tests      # host tests and release helper tests only
-#   scripts/ci-local.sh frozen     # frozen module sync check only
+#   scripts/ci-local.sh frozen     # frozen module sync + AOT regeneration check
 #   scripts/ci-local.sh build      # firmware build only
 #
 # CI_STRICT=1 turns every SKIPPED path into a failure (hosted CI sets it). See #6.
@@ -155,6 +155,19 @@ check_frozen_sync() {
     done
 }
 
+# The committed heliaAOT modules under modules/hkv_*_aot are generated, not
+# hand-written, so a hand edit there survives `nsx sync --frozen` (it hashes
+# what is committed). Re-running the converter is the only check that the
+# trees still match tools/aot/*.yaml. See #37.
+check_aot_modules() {
+    echo "==> AOT module regeneration check"
+    if ! command -v uv >/dev/null 2>&1; then
+        skipped "AOT module regeneration check (uv is not installed)" || return 1
+        return 0
+    fi
+    tools/aot/convert.sh --check
+}
+
 run_firmware_build() {
     echo "==> firmware build (board=${BOARD})"
     uv run nsx build --app-dir . --board "${BOARD}"
@@ -162,12 +175,13 @@ run_firmware_build() {
 
 case "$TARGET" in
     tests) run_host_tests; run_release_tests ;;
-    frozen) check_frozen_sync ;;
+    frozen) check_frozen_sync; check_aot_modules ;;
     build) run_firmware_build ;;
     all)
         run_host_tests
         run_release_tests
         check_frozen_sync
+        check_aot_modules
         run_firmware_build
         ;;
     *)

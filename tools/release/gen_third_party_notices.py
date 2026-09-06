@@ -227,7 +227,8 @@ def module_pins(lock: dict, boards: list[str]) -> dict[str, dict]:
     out: dict[str, dict] = {}
     for board in sorted(boards):
         for name, mod in sorted(targets[board].get("modules", {}).items()):
-            if mod.get("kind") != "git":
+            kind = mod.get("kind")
+            if kind not in ("git", "vendored"):
                 # `packaged` modules are not this repo's own files: nsx.lock
                 # records them as `project: neuralspotx, kind: packaged`, and
                 # `nsx sync` vendors them in from the neuralspotx packages, the
@@ -243,10 +244,19 @@ def module_pins(lock: dict, boards: list[str]) -> dict[str, dict]:
                 continue
             entry = out.setdefault(
                 vendored,
-                {"url": resolved.get("url", ""), "names": set(), "pins": set(), "boards": set()},
+                {
+                    "url": resolved.get("url", ""),
+                    "kind": kind,
+                    "names": set(),
+                    "pins": set(),
+                    "boards": set(),
+                },
             )
             entry["names"].add(name)
             entry["boards"].add(board)
+            if kind == "vendored":
+                # Committed in this repo: no upstream URL, no commit to pin to.
+                continue
             pin = resolved.get("tag") or resolved.get("commit") or mod.get("constraint") or ""
             commit = resolved.get("commit") or ""
             if pin and commit and pin != commit:
@@ -521,6 +531,10 @@ def render(boards: list[str], modules: dict[str, dict]) -> str:
     w("| --- | --- | --- |")
     for vendored in sorted(modules):
         info = modules[vendored]
+        if info.get("kind") == "vendored":
+            names = ", ".join(f"`{n}`" for n in sorted(info["names"]))
+            w(f"| `{vendored}` | committed in this repository ({names}) | n/a |")
+            continue
         url = info["url"] or "n/a"
         pins = ", ".join(f"`{p}`" for p in sorted(info["pins"])) or "n/a"
         w(f"| `{vendored}` | {url} | {pins} |")
@@ -568,9 +582,13 @@ def render(boards: list[str], modules: dict[str, dict]) -> str:
         w(f"### `{key}`")
         w("")
         info = modules[vendored]
-        pins = ", ".join(f"`{p}`" for p in sorted(info["pins"])) or "n/a"
         w(f"- Component path: `{key}`")
-        w(f"- Vendored from: {url or 'n/a'} at {pins} (`{vendored}`)")
+        if info.get("kind") == "vendored":
+            names = ", ".join(f"`{n}`" for n in sorted(info["names"]))
+            w(f"- Committed in this repository as {names} (`{vendored}`)")
+        else:
+            pins = ", ".join(f"`{p}`" for p in sorted(info["pins"])) or "n/a"
+            w(f"- Vendored from: {url or 'n/a'} at {pins} (`{vendored}`)")
         decl = declared_for(root_marker / key, declared)
         if decl:
             w(f"- Declared license: `{decl[0]}` (declared in `{decl[1]}`)")

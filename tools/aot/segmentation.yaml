@@ -1,0 +1,41 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, Ambiq
+#
+# heliaAOT conversion of the ECG segmentation model. Regenerate with
+# tools/aot/convert.sh; paths are relative to the repo root.
+#
+#   helia-aot 0.19.0
+#   assets/segmentation.tflite
+#     sha256 93c4493a1d09e1818abaffd74973d807b9e6830e5a03217b2c777abe1032e6fe
+#     (matches model_sha256 in tools/aot/golden/golden-seg.json)
+model:
+  path: assets/segmentation.tflite
+  subgraph: 0
+  name: hkv_segmentation
+module:
+  path: modules
+  type: nsx
+  name: hkv_segmentation_aot
+  prefix: hkv_segmentation
+platform:
+  name: apollo510b_evb
+memory:
+  # Mirrors the TFLM layout the adapters use today: weights cold in MRAM (XIP
+  # .rodata), working arena in shared SRAM. tools/aot/hkv_aot_attributes.h maps
+  # the SRAM arena onto the same `.shared` section as AM_SHARED_RW. TCM
+  # placement is a later optimization. The rule type is matched against the
+  # lowercase AIR tensor kind, so `CONSTANT` silently matches nothing.
+  tensors:
+  - type: scratch
+    attributes:
+      memory: SRAM
+  - type: constant
+    attributes:
+      memory: MRAM
+  # Emits <prefix>_residency.json next to the module as placement evidence.
+  dump_residency_json: true
+test:
+  enabled: true
+  golden_data: tools/aot/golden/golden-seg.npz
+  # int8 output, 1/256 scale: 1 LSB.
+  tolerance: 1

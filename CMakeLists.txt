@@ -40,6 +40,14 @@ target_include_directories(app_freertos_config INTERFACE
 )
 add_library(nsx::freertos_config ALIAS app_freertos_config)
 
+# The generated AOT modules leave their PUT_IN_* placement macros as no-ops and
+# expose this hook so the consumer picks the section. Must be set before the
+# bootstrap add_subdirectory()s the modules. See tools/aot/hkv_aot_attributes.h.
+set(HKV_SEGMENTATION_AOT_ATTRIBUTES_HEADER
+    "${CMAKE_CURRENT_LIST_DIR}/tools/aot/hkv_aot_attributes.h")
+set(HKV_ARRHYTHMIA_AOT_ATTRIBUTES_HEADER
+    "${CMAKE_CURRENT_LIST_DIR}/tools/aot/hkv_aot_attributes.h")
+
 nsx_bootstrap_app(
     APP_ROOT "${CMAKE_CURRENT_LIST_DIR}"
     BOARD "${NSX_BOARD}"
@@ -131,5 +139,17 @@ if(NSX_BOARD STREQUAL "apollo510b_evb")
         nsx::tileio_ble
     )
 endif()
+
+# The heliaAOT model modules are generated and vendored ahead of the adapters
+# that will call them, so nothing links them yet. Force them into the default
+# build so a regeneration that no longer compiles fails here rather than in the
+# PR that switches segmentation and arrhythmia over. See AmbiqAI/heartkit-vitals-demo#37.
+# `nsx build` names the app target, not `all`, so the dependency hangs off the
+# app rather than a custom ALL target.
+foreach(_aot_module hkv_segmentation_aot hkv_arrhythmia_aot)
+    if(TARGET ${_aot_module})
+        add_dependencies(heartkit-vitals-demo ${_aot_module})
+    endif()
+endforeach()
 
 nsx_finalize_app(heartkit-vitals-demo)
