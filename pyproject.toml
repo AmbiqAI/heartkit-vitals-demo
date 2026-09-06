@@ -7,5 +7,14 @@ dependencies = [
     "neuralspotx>=0.7.17",
 ]
 
+[dependency-groups]
+# Golden-vector generation for heliaAOT parity testing (tools/aot). Kept out of
+# the base dependencies: ai-edge-litert is a large host-only wheel and the
+# build/flash flow does not need it. See AmbiqAI/heartkit-vitals-demo#37.
+aot = [
+    "ai-edge-litert>=1.2.0",
+    "numpy>=1.26",
+]
+
 [tool.uv]
 package = false
