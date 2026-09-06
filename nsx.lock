@@ -3,12 +3,12 @@
 schema_version: 4
 targets:
   apollo510b_evb:
-    generated_at: '2026-09-02T04:26:37+00:00'
+    generated_at: '2026-09-06T16:05:52+00:00'
     nsx_tool:
       version: 0.1.0
     manifest:
       path: nsx.yml
-      hash: sha256:f8e4db745ab86ae46c0cfb16e3c79f547ab15d99e3467a76e2de036abebaa6f0
+      hash: sha256:c1b0db3f1ec879d011d3c034671299649dca4e5ddbde0c7aad05fa0a4289bee0
     target:
       board: apollo510b_evb
       soc: apollo510b
@@ -262,14 +262,14 @@ targets:
       nsx-cmsis-nn:
         project: ns-cmsis-nn
         kind: git
-        constraint: v7.29.2
+        constraint: v7.31.0
         resolved:
           url: https://github.com/AmbiqAI/ns-cmsis-nn.git
-          tag: v7.29.2
-          commit: 631726420b04860a5c4236956a3741ff5a96bd7f
+          tag: v7.31.0
+          commit: 9884d5fccab884c90c3d5e8865d5babbb1cabc63
           vendored_at: modules/ns-cmsis-nn
-          content_hash: sha256:2003657c0004f3b49f80928118ded71e4d9e53dc1ad7e51b8afc3149c74804b8
-          acquired_at: '2026-09-01T19:31:49+00:00'
+          content_hash: sha256:9f4755e7b84e0a145ad3a1a198d582a710ae1f2b60ba5b71a8045c5457a25a44
+          acquired_at: '2026-09-06T15:56:23+00:00'
       nsx-helia-rt:
         project: helia-rt
         kind: git
@@ -324,12 +324,12 @@ targets:
           content_hash: sha256:30536cc605875086789f0da628b5c4e9dab0ac9d0aa852a744e9ad5884c91d13
           acquired_at: '2026-07-20T22:17:00+00:00'
   apollo510_evb:
-    generated_at: '2026-09-02T04:26:37+00:00'
+    generated_at: '2026-09-06T16:05:57+00:00'
     nsx_tool:
       version: 0.1.0
     manifest:
       path: nsx.yml
-      hash: sha256:f8e4db745ab86ae46c0cfb16e3c79f547ab15d99e3467a76e2de036abebaa6f0
+      hash: sha256:c1b0db3f1ec879d011d3c034671299649dca4e5ddbde0c7aad05fa0a4289bee0
     target:
       board: apollo510_evb
       soc: apollo510
@@ -583,14 +583,14 @@ targets:
       nsx-cmsis-nn:
         project: ns-cmsis-nn
         kind: git
-        constraint: v7.29.2
+        constraint: v7.31.0
         resolved:
           url: https://github.com/AmbiqAI/ns-cmsis-nn.git
-          tag: v7.29.2
-          commit: 631726420b04860a5c4236956a3741ff5a96bd7f
+          tag: v7.31.0
+          commit: 9884d5fccab884c90c3d5e8865d5babbb1cabc63
           vendored_at: modules/ns-cmsis-nn
-          content_hash: sha256:2003657c0004f3b49f80928118ded71e4d9e53dc1ad7e51b8afc3149c74804b8
-          acquired_at: '2026-09-01T19:31:49+00:00'
+          content_hash: sha256:9f4755e7b84e0a145ad3a1a198d582a710ae1f2b60ba5b71a8045c5457a25a44
+          acquired_at: '2026-09-06T15:56:23+00:00'
       nsx-helia-rt:
         project: helia-rt
         kind: git
@@ -613,12 +613,12 @@ targets:
           content_hash: sha256:30536cc605875086789f0da628b5c4e9dab0ac9d0aa852a744e9ad5884c91d13
           acquired_at: '2026-07-20T22:17:00+00:00'
   apollo330mP_evb:
-    generated_at: '2026-09-02T04:26:38+00:00'
+    generated_at: '2026-09-06T16:05:57+00:00'
     nsx_tool:
       version: 0.1.0
     manifest:
       path: nsx.yml
-      hash: sha256:f8e4db745ab86ae46c0cfb16e3c79f547ab15d99e3467a76e2de036abebaa6f0
+      hash: sha256:c1b0db3f1ec879d011d3c034671299649dca4e5ddbde0c7aad05fa0a4289bee0
     target:
       board: apollo330mP_evb
       soc: apollo330P
@@ -872,14 +872,14 @@ targets:
       nsx-cmsis-nn:
         project: ns-cmsis-nn
         kind: git
-        constraint: v7.29.2
+        constraint: v7.31.0
         resolved:
           url: https://github.com/AmbiqAI/ns-cmsis-nn.git
-          tag: v7.29.2
-          commit: 631726420b04860a5c4236956a3741ff5a96bd7f
+          tag: v7.31.0
+          commit: 9884d5fccab884c90c3d5e8865d5babbb1cabc63
           vendored_at: modules/ns-cmsis-nn
-          content_hash: sha256:2003657c0004f3b49f80928118ded71e4d9e53dc1ad7e51b8afc3149c74804b8
-          acquired_at: '2026-09-01T19:31:49+00:00'
+          content_hash: sha256:9f4755e7b84e0a145ad3a1a198d582a710ae1f2b60ba5b71a8045c5457a25a44
+          acquired_at: '2026-09-06T15:56:23+00:00'
       nsx-helia-rt:
         project: helia-rt
         kind: git

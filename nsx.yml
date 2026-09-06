@@ -67,6 +67,11 @@ module_registry:
       url: https://github.com/AmbiqAI/helia-dsp.git
       revision: 9c18599bf7a734f4d9952e891ae42c38010981b8
       path: modules/helia-dsp
+    ns-cmsis-nn:
+      name: ns-cmsis-nn
+      url: https://github.com/AmbiqAI/ns-cmsis-nn.git
+      revision: v7.31.0
+      path: modules/ns-cmsis-nn
     nsx-tileio:
       name: nsx-tileio
       url: https://github.com/AmbiqAI/nsx-tileio.git
@@ -89,6 +94,10 @@ module_registry:
       project: helia-dsp
       revision: 9c18599bf7a734f4d9952e891ae42c38010981b8
       metadata: modules/helia-dsp/nsx-module.yaml
+    nsx-cmsis-nn:
+      project: ns-cmsis-nn
+      revision: v7.31.0
+      metadata: modules/ns-cmsis-nn/nsx/nsx-module.yaml
     nsx-tileio-usb:
       project: nsx-tileio
       revision: e3cfa78804d5cf16ccc62d640b258b115ca35074
