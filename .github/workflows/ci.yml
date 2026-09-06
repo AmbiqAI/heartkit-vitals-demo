@@ -11,12 +11,19 @@
 #
 # The firmware and notices jobs vendor private NSX module repositories and
 # need an NSX_MODULE_TOKEN repository secret with read access to them. A
-# missing secret fails those jobs with a clear message; it never skips them,
-# because a skipped build gate reads as a pass on the pull request.
+# missing secret fails those jobs with a clear message rather than skipping
+# them, because a skipped build gate reads as a pass on the pull request.
+#
+# The firmware matrix is the one deliberate skip: it does not run on a draft
+# pull request. A draft cannot merge, and ready_for_review reruns the matrix
+# before anyone reviews it; the ci:full label builds a draft on demand. The
+# skip still reports as a pass to any required check, so the safety comes from
+# the rerun, not from the gate. See #82.
 name: CI
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
   push:
     branches:
       - main
@@ -111,6 +118,12 @@ jobs:
 
   firmware:
     name: firmware (${{ matrix.board }})
+    # The event_name clause is load bearing: pull_request.draft is null on a
+    # push to main, so a draft-only test would disable the matrix there.
+    if: >-
+      github.event_name != 'pull_request'
+      || github.event.pull_request.draft == false
+      || contains(github.event.pull_request.labels.*.name, 'ci:full')
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
