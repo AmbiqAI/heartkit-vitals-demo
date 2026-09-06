@@ -3,7 +3,7 @@
 /**
  * @file ecg_segmentation.h
  * @author Adam Page (adam.page@ambiq.com)
- * @brief TFLM ECG segmentation
+ * @brief heliaAOT ECG segmentation
  * @version 1.0
  * @date 2023-12-13
  *
@@ -14,9 +14,9 @@
 #ifndef __HK_ECG_SEGMENTATION_H
 #define __HK_ECG_SEGMENTATION_H
 
+#include <stddef.h>
 #include <stdint.h>
 #include "arm_math.h"
-#include "tflm.h"
 
 /**
  * @brief Initialize ECG segmentation model
@@ -25,6 +25,20 @@
  */
 uint32_t
 ecg_segmentation_init();
+
+/**
+ * @brief Scratch arena bytes the segmentation model occupies.
+ *
+ * The AOT arena is planned at build time and is exact-fit, so used and size
+ * return the same number. Both are kept: the boot line prints used, the arena
+ * telemetry logs the pair -- see AmbiqAI/heartkit-vitals-demo#75. Model
+ * constants are not counted: they are executed in place from MRAM.
+ */
+size_t
+ecg_segmentation_arena_used();
+
+size_t
+ecg_segmentation_arena_size();
 
 /**
  * @brief Run ECG segmentation model

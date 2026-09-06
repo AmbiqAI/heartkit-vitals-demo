@@ -1579,6 +1579,7 @@ EcgProcessTask(void *pvParameters)
         // ECG ARRHYTHMIA + METRICS
         ///////////////////////////////////////////////////////////////////
         else if (MIN(ringbuffer_len(&rbEcgMet), ringbuffer_len(&rbEcgMaskMet)) >= ECG_MET_WINDOW_LEN) {
+            uint32_t arrErr = 0;
             tickStart = dwt_cycles();
             ringbuffer_peek(&rbEcgMet, ecgMetData, ECG_MET_WINDOW_LEN);
             ringbuffer_peek(&rbEcgMaskMet, ecgMaskMetData, ECG_MET_WINDOW_LEN);
@@ -1589,7 +1590,9 @@ EcgProcessTask(void *pvParameters)
                 ecgMetResults.arrhythmiaLabel =
                     ecgMetResults.hr < 40 ? ECG_ARR_SB : ecgMetResults.hr > 100 ? ECG_ARR_GSVT : ECG_ARR_SR;
             } else if (appState.arrMode == ArrhythmiaModeAi) {
-                ecgMetResults.arrhythmiaLabel = ecg_arrhythmia_inference(ecgMetData, ECG_ARR_THRESHOLD);
+                uint32_t arrLabel = ECG_ARR_INCONCLUSIVE;
+                arrErr = ecg_arrhythmia_inference(ecgMetData, ECG_ARR_THRESHOLD, &arrLabel);
+                ecgMetResults.arrhythmiaLabel = (float32_t)arrLabel;
             } else {
                 ecgMetResults.arrhythmiaLabel = 0;
             }
@@ -1610,6 +1613,10 @@ EcgProcessTask(void *pvParameters)
             send_ecg_metrics();
             if (err != 0) {
                 hkv_count(HKV_CNT_PIPE_ERR_ECG_MET);
+            }
+            if (arrErr != 0) {
+                hkv_count(HKV_CNT_PIPE_ERR_ECG_ARR);
+                HKV_TRACE_KV("ecg", "arr_err", arrErr);
             }
             HKV_TRACE_KV("ecg", "met_err", err);
         } else {

@@ -126,5 +126,7 @@ and multi-arena are later measured optimizations, not part of the parity run.
 - The generated context reports its `size` field as bytes while the value is in
   elements. A helia-aot documentation or field-naming fix, not a demo-side one.
 - Filed upstream from this work: AmbiqAI/helia-aot#388 and
-  AmbiqAI/ns-cmsis-nn#468 (the MEAN and requantize rounding forms above), and
-  AmbiqAI/helia-aot#389 (float MUL broadcast).
+  AmbiqAI/ns-cmsis-nn#468 (the MEAN and requantize rounding forms above),
+  AmbiqAI/helia-aot#389 (float MUL broadcast), AmbiqAI/helia-aot#390 (the I/O
+  `size` field units above), and AmbiqAI/helia-aot#391 (dynamic tensor
+  warning).

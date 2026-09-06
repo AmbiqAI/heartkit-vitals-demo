@@ -3,7 +3,7 @@
 /**
  * @file ecg_arrhythmia.cc
  * @author Adam Page (adam.page@ambiq.com)
- * @brief TFLM ECG arrhythmia
+ * @brief heliaAOT ECG arrhythmia
  * @version 1.0
  * @date 2023-12-13
  *
@@ -19,99 +19,86 @@
 #include "pk_ecg.h"
 // NSX runtime
 #include "nsx_core.h"
-// TFLM
-#include "tensorflow/lite/micro/micro_interpreter.h"
-#include "tensorflow/lite/micro/tflite_bridge/micro_error_reporter.h"
-#include "tensorflow/lite/schema/schema_generated.h"
+// heliaAOT
+#include "hkv_arrhythmia_model.h"
 // Locals
-#include "tflm.h"
 #include "store.h"
 #include "constants.h"
-#include "ecg_arrhythmia_flatbuffer.h"
 #include "ecg_arrhythmia.h"
+#include "ecg_tensor_copy.h"
 
-static constexpr int arrTensorArenaSize = 1024 * ECG_ARR_MODEL_SIZE_KB;
-AM_SHARED_RW alignas(16) static uint8_t arrTensorArena[arrTensorArenaSize];
-tf_model_context_t ecgArrModelCtx = {
-    .arenaSize = arrTensorArenaSize,
-    .arena = arrTensorArena,
-    .buffer = ecg_arrhythmia_flatbuffer,
-    .model = nullptr,
-    .input = nullptr,
-    .output = nullptr,
-    .interpreter = nullptr,
-};
+/* A model narrower than the host window cannot fill it. The generated I/O
+ * extents are compile-time constants, so what #36 caught at boot for
+ * segmentation is a build error for both models now. A wider one is filled by
+ * edge replication in the copy below, same as denoise and segmentation. */
+static_assert(hkv_arrhythmia_input_0_size >= ECG_ARR_WINDOW_LEN, "AOT arr input narrower than the host window");
+// Labels are the model's classes shifted by one, ECG_ARR_INCONCLUSIVE taking 0.
+static_assert(hkv_arrhythmia_output_0_size == ECG_ARR_GSVT, "AOT arr class count does not match the label map");
 
-uint32_t
-ecg_arrhythmia_init() {
+static hkv_arrhythmia_model_context_t ecgArrModelCtx = {.callback = nullptr};
 
-    size_t bytesUsed;
-    TfLiteStatus allocateStatus;
-    tf_model_context_t *ctx = &ecgArrModelCtx;
-
-    // Initialize TFLM backend
-    tflm_init_model(ctx);
-
-    // Load model
-    ctx->model = tflite::GetModel(ctx->buffer);
-    if (ctx->model->version() != TFLITE_SCHEMA_VERSION) {
-        TF_LITE_REPORT_ERROR(ctx->reporter, "Schema mismatch: given=%d != expected=%d.", ctx->model->version(), TFLITE_SCHEMA_VERSION);
-        return 1;
-    }
-    // Initialize interpreter
-    if (ctx->interpreter != nullptr) { ctx->interpreter->Reset();}
-    static tflite::MicroInterpreter arrhythmia_interpreter(ctx->model, *(ctx->resolver), ctx->arena, ctx->arenaSize, nullptr, ctx->profiler);
-    ctx->interpreter = &arrhythmia_interpreter;
-
-    // Allocate tensors
-    allocateStatus = ctx->interpreter->AllocateTensors();
-    if (allocateStatus != kTfLiteOk) {
-        TF_LITE_REPORT_ERROR(ctx->reporter, "AllocateTensors() failed");
-        return 1;
-    }
-
-    // Check arena size
-    bytesUsed = ctx->interpreter->arena_used_bytes();
-    nsx_printf("[ARR] Arena used: %d bytes\n", bytesUsed);
-    if (bytesUsed > ctx->arenaSize) {
-        TF_LITE_REPORT_ERROR(ctx->reporter, "Arena mismatch: given=%d < expected=%d bytes.", ctx->arenaSize, bytesUsed);
-        return 1;
-    }
-
-    // Store input and output pointers (assume single input/output tensor)
-    ctx->input = ctx->interpreter->input(0);
-    ctx->output = ctx->interpreter->output(0);
-    return 0;
+/* The I/O descriptor carries no dtype, so element width is the descriptor's
+ * byte extent over the I/O element count. This model is float in and out;
+ * a regeneration to int8 I/O would need the quantize/dequantize pair back. */
+static size_t
+arr_elem_width(hkv_arrhythmia_tensor_ident_t id, size_t elems) {
+    return elems > 0 ? hkv_arrhythmia_tensor_descriptors[id].size / elems : 0;
 }
 
 uint32_t
-ecg_arrhythmia_inference(float32_t *ecgIn, float32_t threshold) {
+ecg_arrhythmia_init() {
+    hkv_arrhythmia_model_context_t *ctx = &ecgArrModelCtx;
+
+    int32_t status = hkv_arrhythmia_model_init(ctx);
+    if (status != hkv_arrhythmia_status_ok) {
+        nsx_printf("[ARR] Model init failed: %d\n", (int)status);
+        return 1;
+    }
+
+    if ((arr_elem_width(ctx->inputs[0].id, hkv_arrhythmia_input_0_size) != sizeof(float32_t)) ||
+        (arr_elem_width(ctx->outputs[0].id, hkv_arrhythmia_output_0_size) != sizeof(float32_t))) {
+        nsx_printf("[ARR] Unexpected tensor element width\n");
+        return 1;
+    }
+
+    nsx_printf("[ARR] Arena used: %d bytes\n", (int)ecg_arrhythmia_arena_used());
+    return 0;
+}
+
+size_t
+ecg_arrhythmia_arena_used() {
+    return hkv_arrhythmia_arena_sram_size;
+}
+
+size_t
+ecg_arrhythmia_arena_size() {
+    return hkv_arrhythmia_arena_sram_size;
+}
+
+uint32_t
+ecg_arrhythmia_inference(float32_t *ecgIn, float32_t threshold, uint32_t *label) {
     float32_t yVal, yMax = 0;
     uint32_t yMaxIdx = 0;
-    tf_model_context_t *ctx = &ecgArrModelCtx;
+    hkv_arrhythmia_model_context_t *ctx = &ecgArrModelCtx;
 
-    // Copy input and quantize
-    for (size_t i = 0; i < ECG_ARR_WINDOW_LEN; i++) {
-        if (ctx->input->quantization.type == kTfLiteAffineQuantization) {
-            ctx->input->data.int8[i] = ecgIn[i] / ctx->input->params.scale + ctx->input->params.zero_point;
-        } else {
-            ctx->input->data.f[i] = ecgIn[i];
-        }
-    }
+    *label = ECG_ARR_INCONCLUSIVE;
+
+    // Copy input
+    hkv_tensor_input_f32((float32_t *)ctx->inputs[0].data, hkv_tensor_len(hkv_arrhythmia_input_0_size), ecgIn,
+                         hkv_host_len(ECG_ARR_WINDOW_LEN));
 
     // Invoke model
-    TfLiteStatus invokeStatus = ctx->interpreter->Invoke();
-    if (invokeStatus != kTfLiteOk) {
-        return invokeStatus;
+    int32_t runStatus = hkv_arrhythmia_model_run(ctx);
+    if (runStatus != hkv_arrhythmia_status_ok) {
+        /* Status codes share the label space, so returning one here reads
+         * downstream as a rhythm class. The label stays inconclusive. */
+        return (uint32_t)runStatus;
     }
 
-    // Copy output and dequantize
-    for (int i = 0; i < ctx->output->dims->data[1]; i++) { // CLASSES
-        if (ctx->output->quantization.type == kTfLiteAffineQuantization) {
-            yVal = ((float32_t)ctx->output->data.int8[i] - ctx->output->params.zero_point) * ctx->output->params.scale;
-        } else  {
-            yVal = ctx->output->data.f[i];
-        }
+    // Copy output
+    const float32_t *yOut = (const float32_t *)ctx->outputs[0].data;
+    for (int i = 0; i < hkv_arrhythmia_output_0_size; i++) { // CLASSES
+        yVal = yOut[i];
         if ((i == 0) || (yVal > yMax)) {
             yMax = yVal;
             yMaxIdx = i;
@@ -121,6 +108,6 @@ ecg_arrhythmia_inference(float32_t *ecgIn, float32_t threshold) {
 #if EN_MODEL_VERBOSE_LOGS
     nsx_printf("yMax=%f, yMaxIdx=%d\n", yMax, yMaxIdx);
 #endif
-    yMaxIdx = yMax > threshold ? yMaxIdx + 1 : 0;
-    return yMaxIdx;
+    *label = yMax > threshold ? yMaxIdx + 1 : ECG_ARR_INCONCLUSIVE;
+    return 0;
 }
