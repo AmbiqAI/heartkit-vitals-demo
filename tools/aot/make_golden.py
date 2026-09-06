@@ -251,14 +251,31 @@ def denoise_model_input(raw_window: np.ndarray) -> np.ndarray:
     return filtfilt(standardize(raw_window))
 
 
+def litert_version() -> str:
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        return version("ai-edge-litert")
+    except PackageNotFoundError:
+        return "unknown"
+
+
 class TFLiteModel:
-    """LiteRT wrapper over an on-disk .tflite."""
+    """LiteRT wrapper over an on-disk .tflite.
 
-    def __init__(self, path: Path):
-        from ai_edge_litert.interpreter import Interpreter
+    The default op resolver delegates to XNNPACK, whose int8 requantization
+    differs from the builtin reference kernels by several LSB on these models.
+    CMSIS-NN implements the reference semantics, so a golden set made under
+    XNNPACK cannot be reproduced by helia-rt or a heliaAOT module.
+    """
 
+    def __init__(self, path: Path, use_delegates: bool = False):
+        from ai_edge_litert.interpreter import Interpreter, OpResolverType
+
+        resolver = OpResolverType.AUTO if use_delegates else OpResolverType.BUILTIN_WITHOUT_DEFAULT_DELEGATES
+        self.op_resolver = resolver.name.lower()
         self.path = path
-        self.interpreter = Interpreter(model_path=str(path))
+        self.interpreter = Interpreter(model_path=str(path), experimental_op_resolver_type=resolver)
         self.interpreter.allocate_tensors()
         self.inputs = self.interpreter.get_input_details()
         self.outputs = self.interpreter.get_output_details()
@@ -419,8 +436,12 @@ def generate(args: argparse.Namespace) -> int:
         return 2
     starts = [k * stride for k in range(args.cases)]
 
-    model = TFLiteModel(tflite_path)
-    den = model if args.model == "den" else TFLiteModel((REPO_ROOT / MODELS["den"]["tflite"]).resolve())
+    model = TFLiteModel(tflite_path, args.delegate)
+    den = (
+        model
+        if args.model == "den"
+        else TFLiteModel((REPO_ROOT / MODELS["den"]["tflite"]).resolve(), args.delegate)
+    )
 
     cases = []
     for case_index, (start, path) in enumerate(zip(starts, case_paths(out, args.cases), strict=True)):
@@ -453,6 +474,10 @@ def generate(args: argparse.Namespace) -> int:
         "stimulus_path": repo_relative(args.stimulus),
         "stimulus_sha256": sha256_file(stimulus_path),
         "sample_rate_hz": ECG_TARGET_RATE,
+        "runtime": {
+            "ai_edge_litert": litert_version(),
+            "op_resolver": model.op_resolver,
+        },
         "num_cases": args.cases,
         "stimulus_stride": int(stride),
         "raw_samples_per_case": span,
@@ -487,7 +512,7 @@ def check(args: argparse.Namespace) -> int:
         print(f"error: {tflite_path} no longer matches the sha256 recorded in the sidecar", file=sys.stderr)
         return 1
 
-    model = TFLiteModel(tflite_path)
+    model = TFLiteModel(tflite_path, args.delegate)
     failures = 0
     for record in meta["cases"]:
         path = out.with_name(record["path"])
@@ -523,6 +548,11 @@ def main() -> int:
         help="stimulus csv (index,value) at the pipeline's 100 Hz rate",
     )
     parser.add_argument("--check", action="store_true", help="reload the npz set and re-run the interpreter")
+    parser.add_argument(
+        "--delegate",
+        action="store_true",
+        help="allow the default XNNPACK delegate (off: builtin reference int8 kernels only)",
+    )
     parser.add_argument(
         "--no-verify-sources",
         dest="verify_sources",

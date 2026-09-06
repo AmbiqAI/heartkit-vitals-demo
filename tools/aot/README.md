@@ -24,6 +24,11 @@ stored inputs, and fails unless every output is bit-identical:
 uv run --group aot python tools/aot/make_golden.py --model seg --out out/golden-seg.npz --check
 ```
 
+Every interpreter runs on LiteRT's builtin reference kernels with the default
+XNNPACK delegate disabled, because those are the int8 semantics helia-rt and
+heliaAOT match through CMSIS-NN; XNNPACK requantizes differently and its outputs
+differ by several LSB. `--delegate` opts back in for comparison only.
+
 Feed a file to the converter with `--test.golden-data`:
 
 ```sh
@@ -50,7 +55,8 @@ single-input.
 `--test.golden-data` unchanged. Cases 1..N-1 are written beside it as
 `<stem>_caseNN.npz`. A `<stem>.json` sidecar records the model and stimulus
 paths (relative to the repo root when they live inside it), the model sha256,
-case count, stimulus window indices, per-tensor shapes, dtypes and quantization
+case count, the ai-edge-litert version and op resolver used, stimulus window
+indices, per-tensor shapes, dtypes and quantization
 parameters, the filter coefficients and window constants mirrored from the
 firmware with the file each came from, and the argmax class (arrhythmia) or
 per-class sample histogram (segmentation) for every case.
