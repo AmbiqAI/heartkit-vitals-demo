@@ -160,6 +160,11 @@ green run mean the same thing.
 | `firmware` | `ubuntu-latest`, matrix over `apollo510b_evb`, `apollo510_evb`, `apollo330mP_evb` | frozen module sync, `scripts/ci-local.sh frozen`, per-board `nsx configure --frozen` and `nsx build`, uploads `firmware.bin` per board |
 | `notices` | `macos-latest` | frozen module sync, then `tools/release/gen_third_party_notices.py --check` |
 
+On a draft pull request the `firmware` matrix is skipped and `host` and
+`notices` still run, so review-stage pushes do not pay for three board builds.
+Marking the pull request ready for review reruns the matrix. To build a draft
+on demand, add the `ci:full` label. A push to `main` always runs the matrix.
+
 The `host` job runs a lock-consistency check, not a full lockfile gate. It
 holds no module credentials on purpose, so it cannot re-resolve module sources.
 It used to run `uv run nsx lock --app-dir . --check`, which printed
