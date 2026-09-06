@@ -64,12 +64,15 @@ the exported model.
   source. See `docs/as7058_profiles.md` for how to regenerate them.
 - `default_click_i2c_sensor_profile.json` and
   `default_evk_spi_sensor_profile.json` are the board-default register profiles
-  consumed by the same tool. TODO(verify): whether these two were authored at
-  Ambiq or derived from an ams-OSRAM preset.
+  consumed by the same tool. Both profiles were authored at Ambiq and are
+  licensed with this repository.
 
 ## Other assets
 
 - `ecg_stimulus.csv` is the synthetic ECG stimulus used when no sensor is
-  attached. TODO(verify): generator and source of the waveform.
+  attached. Generated with the physioKIT synthetic ECG generator
+  (AmbiqAI/physiokit) and licensed with physioKIT; the generator's reference
+  waveforms come from open PhysioNet datasets. No PhysioNet record is included
+  in this repository.
 - `dashboard.webp` and `overview-diagram.svg` are Ambiq-authored documentation
   images, licensed with this repository.
