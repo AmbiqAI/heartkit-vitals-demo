@@ -153,3 +153,30 @@ foreach(_aot_module hkv_segmentation_aot hkv_arrhythmia_aot)
 endforeach()
 
 nsx_finalize_app(heartkit-vitals-demo)
+
+# Bare-metal golden parity runner for the two heliaAOT modules. Off by default
+# because it is a second image for the same board, not a firmware feature: it
+# has no scheduler, no USB and no sensors, and the generated `_test_case_run()`
+# it calls resets DWT->CYCCNT, which the firmware's latency counters use.
+# See AmbiqAI/heartkit-vitals-demo#37 and tools/aot/README.md for the build
+# command (`nsx` has no -D passthrough, so the cache entry is set directly).
+option(HKV_BUILD_AOT_PARITY "Build the on-device heliaAOT golden parity runner" OFF)
+
+if(HKV_BUILD_AOT_PARITY)
+    add_executable(hkv_aot_parity
+        tools/aot/parity/main.c
+        tools/aot/parity/golden_seg_cases.c
+        tools/aot/parity/golden_arr_cases.c
+    )
+    target_include_directories(hkv_aot_parity PRIVATE
+        ${CMAKE_CURRENT_LIST_DIR}/src
+        ${CMAKE_CURRENT_LIST_DIR}/tools/aot/parity
+    )
+    target_link_libraries(hkv_aot_parity PRIVATE
+        nsx::board
+        nsx::runtime_core
+        nsx::hkv_segmentation_aot
+        nsx::hkv_arrhythmia_aot
+    )
+    nsx_finalize_app(hkv_aot_parity)
+endif()
