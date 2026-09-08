@@ -6,9 +6,8 @@
  *
  * These loops live in a header whose only includes are stdint, stddef and
  * constants.h, so tests/test_ecg_tensor_copy.c can drive them on the host
- * under ASan/UBSan. On device the bounds come from the TFLM tensor dims
- * (ecg_denoise.cc) or the generated compile-time extents (ecg_segmentation.cc,
- * ecg_arrhythmia.cc), where a bound taken from the tensor instead of the host
+ * under ASan/UBSan. On device the bounds come from generated compile-time
+ * extents, where a bound taken from the tensor instead of the host
  * array is a silent out-of-bounds write rather than a failing test.
  *
  * The deployed models are wider than the host windows, so every bound here is

@@ -3,7 +3,7 @@
 /**
  * @file ecg_denoise.h
  * @author Adam Page (adam.page@ambiq.com)
- * @brief TFLM ECG denoise
+ * @brief ECG denoise
  * @version 1.0
  * @date 2023-12-13
  *
@@ -16,10 +16,10 @@
 
 #include <stdint.h>
 #include <arm_math.h>
-#include "tflm.h"
+#include <stddef.h>
 
-/* Arena figures are read from here for the memory baseline. See #37. */
-extern tf_model_context_t ecgDenModelCtx;
+size_t ecg_denoise_arena_used();
+size_t ecg_denoise_arena_size();
 
 
 /**

@@ -42,6 +42,7 @@ run_host_tests() {
     cmake -S tests -B build/host
     cmake --build build/host
     ctest --test-dir build/host --output-on-failure
+    python3 -m unittest discover -s tools/aot -p 'test_*.py'
 }
 
 # The release helpers are bash, not C, so they sit outside the CTest project.
@@ -171,6 +172,7 @@ check_aot_modules() {
 run_firmware_build() {
     echo "==> firmware build (board=${BOARD})"
     uv run nsx build --app-dir . --board "${BOARD}"
+    bash scripts/check-aot-only.sh "build/${BOARD}/heartkit-vitals-demo"
 }
 
 case "$TARGET" in

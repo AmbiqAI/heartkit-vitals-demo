@@ -63,7 +63,6 @@
 #include "timebase.h"
 #include "tio_tx_sm.h"
 
-#include "tflm.h"
 #include "ecg_arrhythmia.h"
 #include "ecg_denoise.h"
 #include "ecg_segmentation.h"
@@ -2680,7 +2679,6 @@ main(void)
 
     NSX_TRY(sensor_init(&sensorCtx) != ERR_SUCCESS, "Sensor Init failed.\n");
 
-    NSX_TRY(tflm_init(), "TFLM Init Failed\n");
     NSX_TRY(ecg_denoise_init(), "ECG Denoise Init Failed\n");
     NSX_TRY(ecg_segmentation_init(), "ECG Segmentation Init Failed\n");
     NSX_TRY(ecg_arrhythmia_init(), "ECG Arrhythmia Init Failed\n");
@@ -2733,11 +2731,11 @@ main(void)
      * every conclusion drawn from it is provisional. */
     hkv_log_boot();
 
-    /* Constant after AllocateTensors, so once is enough; emitted after the
+    /* Constant after model initialization, so once is enough; emitted after the
      * boot line to keep that line first in a capture. */
     hkv_log_begin("model");
-    hkv_log_u32("den_arena_used", (uint32_t)ecgDenModelCtx.arenaUsed);
-    hkv_log_u32("den_arena_size", (uint32_t)ecgDenModelCtx.arenaSize);
+    hkv_log_u32("den_arena_used", (uint32_t)ecg_denoise_arena_used());
+    hkv_log_u32("den_arena_size", (uint32_t)ecg_denoise_arena_size());
     hkv_log_u32("seg_arena_used", (uint32_t)ecg_segmentation_arena_used());
     hkv_log_u32("seg_arena_size", (uint32_t)ecg_segmentation_arena_size());
     hkv_log_u32("arr_arena_used", (uint32_t)ecg_arrhythmia_arena_used());

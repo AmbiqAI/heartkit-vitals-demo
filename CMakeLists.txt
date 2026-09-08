@@ -4,8 +4,9 @@ cmake_minimum_required(VERSION 3.24)
 project(heartkit-vitals-demo LANGUAGES C CXX ASM)
 
 set(NSX_BOARD "apollo510b_evb" CACHE STRING "Target board")
+set(ARM_NN_ENABLE_F32 ON CACHE BOOL "Enable FP32 kernels" FORCE)
 
-# __FILE__ in the vendored TFLM kernels otherwise bakes the builder's absolute
+# __FILE__ in vendored sources otherwise bakes the builder's absolute
 # checkout path into every shipped binary. Applied at directory scope, before
 # nsx_bootstrap_app() runs its add_subdirectory() calls, so the module targets
 # inherit it: the module trees are vendored by `nsx sync` and are not editable
@@ -48,6 +49,9 @@ set(HKV_SEGMENTATION_AOT_ATTRIBUTES_HEADER
 set(HKV_ARRHYTHMIA_AOT_ATTRIBUTES_HEADER
     "${CMAKE_CURRENT_LIST_DIR}/tools/aot/hkv_aot_attributes.h")
 
+set(HKV_DENOISE_AOT_ATTRIBUTES_HEADER
+    "${CMAKE_CURRENT_LIST_DIR}/tools/aot/hkv_aot_attributes.h")
+
 nsx_bootstrap_app(
     APP_ROOT "${CMAKE_CURRENT_LIST_DIR}"
     BOARD "${NSX_BOARD}"
@@ -61,7 +65,6 @@ add_executable(heartkit-vitals-demo
     src/sensor_bus.c
     src/store.c
     src/metrics.c
-    src/tflm.cc
     src/ecg_denoise.cc
     src/ecg_segmentation.cc
     src/ecg_arrhythmia.cc
@@ -129,9 +132,7 @@ target_link_libraries(heartkit-vitals-demo PRIVATE
     nsx::as7058_i2c
     nsx::as7058_spi
     nsx::physiokit
-    # Denoise is still a flatbuffer through the TFLM interpreter; segmentation
-    # and arrhythmia are the generated modules below.
-    nsx::helia_rt
+    nsx::hkv_denoise_aot
     nsx::hkv_segmentation_aot
     nsx::hkv_arrhythmia_aot
     nsx::tileio_usb
@@ -146,7 +147,7 @@ endif()
 
 nsx_finalize_app(heartkit-vitals-demo)
 
-# Bare-metal golden parity runner for the two heliaAOT modules. Off by default
+# Bare-metal golden parity runner for the heliaAOT modules. Off by default
 # because it is a second image for the same board, not a firmware feature: it
 # has no scheduler, no USB and no sensors, and the generated `_test_case_run()`
 # it calls resets DWT->CYCCNT, which the firmware's latency counters use.
@@ -156,7 +157,8 @@ option(HKV_BUILD_AOT_PARITY "Build the on-device heliaAOT golden parity runner" 
 
 # Declared unconditionally so that -D on a cache with the parity image off is a
 # visible setting rather than a silent no-op on the next configure.
-option(HKV_PARITY_TFLM "Also run the parity cases through the TFLM runtime" ON)
+option(HKV_PARITY_TFLM "Also run the parity cases through the TFLM runtime" OFF)
+set(HKV_PARITY_HELIA_RT_ROOT "" CACHE PATH "Explicit heliaRT checkout for the optional TFLM reference")
 option(HKV_PARITY_DUMP_OPS "Dump every segmentation operator output over SWO" OFF)
 
 # The dump replaces the timed pass, so the TFLM reference has nothing to
@@ -172,6 +174,8 @@ if(HKV_BUILD_AOT_PARITY)
         tools/aot/parity/main.c
         tools/aot/parity/golden_seg_cases.c
         tools/aot/parity/golden_arr_cases.c
+        tools/aot/parity/golden_den_cases.c
+        tools/aot/parity/denoise.c
     )
     target_include_directories(hkv_aot_parity PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}/src
@@ -183,20 +187,24 @@ if(HKV_BUILD_AOT_PARITY)
         nsx::power
         nsx::hkv_segmentation_aot
         nsx::hkv_arrhythmia_aot
+        nsx::hkv_denoise_aot
     )
     # The gate reference: the same flatbuffers through TFLM in this same image,
     # so an AOT/TFLM difference cannot be blamed on the host runtime or on a
-    # different operating point. src/tflm.cc is linked verbatim to keep the op
-    # resolver identical to the firmware's; the model wrappers next to it are
-    # not, because they pull store.h and the FreeRTOS-scheduled app state --
-    # tools/aot/parity/tflm_ref.cc mirrors their init and invoke instead.
+    # different operating point. The reference resolver is retained under
+    # tools/aot/parity so production does not depend on interpreter headers.
     if(HKV_PARITY_TFLM)
+        if(NOT EXISTS "${HKV_PARITY_HELIA_RT_ROOT}/nsx/CMakeLists.txt")
+            message(FATAL_ERROR "TFLM parity requires -DHKV_PARITY_HELIA_RT_ROOT=<heliaRT checkout>")
+        endif()
+        set(NSX_BOARD_FLAGS_TARGET nsx::board_flags)
+        add_subdirectory("${HKV_PARITY_HELIA_RT_ROOT}/nsx" "${CMAKE_BINARY_DIR}/parity_helia_rt")
         target_sources(hkv_aot_parity PRIVATE
             tools/aot/parity/tflm_ref.cc
-            src/tflm.cc
+            tools/aot/parity/tflm.cc
         )
         target_compile_definitions(hkv_aot_parity PRIVATE HKV_PARITY_TFLM=1)
-        # helia_dsp for arm_math.h, which src/tflm.h includes. The firmware
+        # helia_dsp for arm_math.h, which the reference helper includes. The firmware
         # picks it up transitively through nsx::physiokit; this image has no
         # reason to link the physiology layer.
         target_link_libraries(hkv_aot_parity PRIVATE nsx::helia_rt nsx::helia_dsp)

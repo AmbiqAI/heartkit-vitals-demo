@@ -10,7 +10,9 @@
 #   cmake --build build/host
 #   ctest --test-dir build/host --output-on-failure
 cmake_minimum_required(VERSION 3.20)
-project(hkv_host_tests C)
+project(hkv_host_tests C CXX)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -49,3 +51,9 @@ foreach(test_src ${HKV_TEST_SOURCES})
     target_link_options(${test_name} PRIVATE ${HKV_SAN_FLAGS})
     add_test(NAME ${test_name} COMMAND ${test_name})
 endforeach()
+
+add_executable(test_denoise_adapter test_denoise_adapter.cc ${HKV_SRC_DIR}/ecg_denoise.cc)
+target_include_directories(test_denoise_adapter PRIVATE fakes ${HKV_SRC_DIR})
+target_compile_options(test_denoise_adapter PRIVATE ${HKV_TEST_FLAGS})
+target_link_options(test_denoise_adapter PRIVATE ${HKV_SAN_FLAGS})
+add_test(NAME test_denoise_adapter COMMAND test_denoise_adapter)

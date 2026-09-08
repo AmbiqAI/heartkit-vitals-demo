@@ -45,6 +45,7 @@
 
 #include "golden_arr_cases.h"
 #include "golden_seg_cases.h"
+#include "denoise.h"
 
 #if defined(HKV_PARITY_TFLM)
 #include "tflm_ref.h"
@@ -539,6 +540,7 @@ print_report(int32_t segSelf, int32_t arrSelf)
         for (int ref = REF_FIRST; ref < REF_COUNT; ref++) { print_mode_ref((run_mode_t)mode, (ref_t)ref); }
         print_cycles((run_mode_t)mode);
     }
+    hkv_den_parity_report();
     nsx_printf("PARITY_DONE\r\n");
 }
 
@@ -551,6 +553,7 @@ run_pass(run_mode_t mode)
     sync_core_clock();
     dwt_enable();
     modeClockHz[mode] = SystemCoreClock;
+    hkv_den_parity_run(mode);
 
     segInitRc[mode] = (uint32_t)hkv_segmentation_model_init(&segCtx);
     if (segInitRc[mode] == hkv_segmentation_status_ok) {
@@ -615,6 +618,7 @@ main(void)
     int32_t tflmRc = hkv_tflm_ref_init();
     tflmSegInitRc = tflmRc == 0 ? hkv_tflm_ref_seg_init() : tflmRc;
     tflmArrInitRc = tflmRc == 0 ? hkv_tflm_ref_arr_init() : tflmRc;
+    if (tflmRc == 0) { hkv_den_parity_init(); }
 #endif
 
     segSelf = hkv_segmentation_test_case_init();

@@ -19,18 +19,25 @@ cd "$REPO_ROOT"
 
 HELIA_AOT_VERSION="0.19.0"
 PYTHON_VERSION="3.12"
-MODELS="segmentation arrhythmia"
+MODELS="segmentation arrhythmia denoise"
 
 aot_convert() {
     # $1 = yaml config, $2 = output parent directory
-    uv tool run --from "helia-aot==${HELIA_AOT_VERSION}" --python "${PYTHON_VERSION}" \
+    local version="${HELIA_AOT_VERSION}"
+    if [[ "$1" == */denoise.yaml ]]; then version="0.21.0"; fi
+    uv tool run --from "helia-aot==${version}" --python "${PYTHON_VERSION}" \
         helia-aot convert --path "$1" --module.path "$2"
+    if [[ "$1" == */denoise.yaml ]]; then
+        # Private parameters otherwise collide across models; see AmbiqAI/helia-aot#407.
+        patch --batch --fuzz=0 -p1 -d "$2/hkv_denoise_aot" < tools/aot/denoise-private-params.patch
+    fi
 }
 
 module_name() {
     case "$1" in
         segmentation) echo "hkv_segmentation_aot" ;;
         arrhythmia) echo "hkv_arrhythmia_aot" ;;
+        denoise) echo "hkv_denoise_aot" ;;
         *) echo "unknown model: $1" >&2; return 1 ;;
     esac
 }

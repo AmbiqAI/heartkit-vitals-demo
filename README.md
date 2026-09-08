@@ -5,7 +5,7 @@ running the whole time and a live browser dashboard showing both the signals and
 what the silicon is doing to produce them.
 
 HeartKit Vitals Demo is an NSX firmware application. It captures ECG and PPG
-from an AS7058 sensor, runs DSP and TFLM ECG pipelines on-device, computes
+from an AS7058 sensor, runs DSP and AOT ECG pipelines on-device, computes
 heart-rate, HRV, pulse-rate, and SpO2 metrics, and streams everything to the
 Tileio web dashboard over USB. Apollo510B also supports Tileio over BLE.
 

@@ -1,0 +1,552 @@
+{
+  "arenas": {
+    "constant": [
+      {
+        "alignment": 16,
+        "kind": "cold",
+        "memory": "mram",
+        "region_id": 1,
+        "source_memory": "mram",
+        "tensor_count": 33,
+        "total_size": 11892,
+        "used": 11892
+      }
+    ],
+    "persistent": [],
+    "scratch": [
+      {
+        "alignment": 16,
+        "memory": "sram",
+        "region_id": 0,
+        "total_size": 3145728,
+        "used": 65600
+      }
+    ]
+  },
+  "module_prefix": "hkv_denoise",
+  "plan_hash": "02d29fc56add9d56",
+  "schema_version": 3,
+  "tensor_layout_hash": "ecb7a65e9372c59a",
+  "tensors": [
+    {
+      "id": "0",
+      "memory": "sram",
+      "offset": 0,
+      "role": "scratch",
+      "size": 1024,
+      "source_memory": "sram"
+    },
+    {
+      "id": "1",
+      "memory": "mram",
+      "offset": 32,
+      "role": "constant",
+      "size": 4,
+      "source_memory": "mram"
+    },
+    {
+      "id": "2",
+      "memory": "mram",
+      "offset": 80,
+      "role": "constant",
+      "size": 4,
+      "source_memory": "mram"
+    },
+    {
+      "id": "3",
+      "memory": "mram",
+      "offset": 128,
+      "role": "constant",
+      "size": 32,
+      "source_memory": "mram"
+    },
+    {
+      "id": "4",
+      "memory": "mram",
+      "offset": 384,
+      "role": "constant",
+      "size": 32,
+      "source_memory": "mram"
+    },
+    {
+      "id": "5",
+      "memory": "mram",
+      "offset": 544,
+      "role": "constant",
+      "size": 16,
+      "source_memory": "mram"
+    },
+    {
+      "id": "6",
+      "memory": "mram",
+      "offset": 688,
+      "role": "constant",
+      "size": 32,
+      "source_memory": "mram"
+    },
+    {
+      "id": "7",
+      "memory": "mram",
+      "offset": 1248,
+      "role": "constant",
+      "size": 64,
+      "source_memory": "mram"
+    },
+    {
+      "id": "8",
+      "memory": "mram",
+      "offset": 1760,
+      "role": "constant",
+      "size": 64,
+      "source_memory": "mram"
+    },
+    {
+      "id": "9",
+      "memory": "mram",
+      "offset": 2336,
+      "role": "constant",
+      "size": 32,
+      "source_memory": "mram"
+    },
+    {
+      "id": "10",
+      "memory": "mram",
+      "offset": 2880,
+      "role": "constant",
+      "size": 64,
+      "source_memory": "mram"
+    },
+    {
+      "id": "11",
+      "memory": "mram",
+      "offset": 4480,
+      "role": "constant",
+      "size": 96,
+      "source_memory": "mram"
+    },
+    {
+      "id": "12",
+      "memory": "mram",
+      "offset": 5248,
+      "role": "constant",
+      "size": 96,
+      "source_memory": "mram"
+    },
+    {
+      "id": "13",
+      "memory": "mram",
+      "offset": 6496,
+      "role": "constant",
+      "size": 48,
+      "source_memory": "mram"
+    },
+    {
+      "id": "14",
+      "memory": "mram",
+      "offset": 7696,
+      "role": "constant",
+      "size": 96,
+      "source_memory": "mram"
+    },
+    {
+      "id": "15",
+      "memory": "mram",
+      "offset": 10864,
+      "role": "constant",
+      "size": 128,
+      "source_memory": "mram"
+    },
+    {
+      "id": "16",
+      "memory": "mram",
+      "offset": 0,
+      "role": "constant",
+      "size": 28,
+      "source_memory": "mram"
+    },
+    {
+      "id": "17",
+      "memory": "mram",
+      "offset": 48,
+      "role": "constant",
+      "size": 28,
+      "source_memory": "mram"
+    },
+    {
+      "id": "18",
+      "memory": "mram",
+      "offset": 160,
+      "role": "constant",
+      "size": 224,
+      "source_memory": "mram"
+    },
+    {
+      "id": "19",
+      "memory": "mram",
+      "offset": 1312,
+      "role": "constant",
+      "size": 448,
+      "source_memory": "mram"
+    },
+    {
+      "id": "20",
+      "memory": "mram",
+      "offset": 4576,
+      "role": "constant",
+      "size": 672,
+      "source_memory": "mram"
+    },
+    {
+      "id": "21",
+      "memory": "mram",
+      "offset": 11888,
+      "role": "constant",
+      "size": 4,
+      "source_memory": "mram"
+    },
+    {
+      "id": "22",
+      "memory": "mram",
+      "offset": 96,
+      "role": "constant",
+      "size": 32,
+      "source_memory": "mram"
+    },
+    {
+      "id": "23",
+      "memory": "mram",
+      "offset": 416,
+      "role": "constant",
+      "size": 128,
+      "source_memory": "mram"
+    },
+    {
+      "id": "24",
+      "memory": "mram",
+      "offset": 560,
+      "role": "constant",
+      "size": 128,
+      "source_memory": "mram"
+    },
+    {
+      "id": "25",
+      "memory": "mram",
+      "offset": 736,
+      "role": "constant",
+      "size": 512,
+      "source_memory": "mram"
+    },
+    {
+      "id": "26",
+      "memory": "mram",
+      "offset": 1824,
+      "role": "constant",
+      "size": 512,
+      "source_memory": "mram"
+    },
+    {
+      "id": "27",
+      "memory": "mram",
+      "offset": 2368,
+      "role": "constant",
+      "size": 512,
+      "source_memory": "mram"
+    },
+    {
+      "id": "28",
+      "memory": "mram",
+      "offset": 2944,
+      "role": "constant",
+      "size": 1536,
+      "source_memory": "mram"
+    },
+    {
+      "id": "29",
+      "memory": "mram",
+      "offset": 5344,
+      "role": "constant",
+      "size": 1152,
+      "source_memory": "mram"
+    },
+    {
+      "id": "30",
+      "memory": "mram",
+      "offset": 6544,
+      "role": "constant",
+      "size": 1152,
+      "source_memory": "mram"
+    },
+    {
+      "id": "31",
+      "memory": "mram",
+      "offset": 7792,
+      "role": "constant",
+      "size": 3072,
+      "source_memory": "mram"
+    },
+    {
+      "id": "32",
+      "memory": "mram",
+      "offset": 10992,
+      "role": "constant",
+      "size": 896,
+      "source_memory": "mram"
+    },
+    {
+      "id": "35",
+      "memory": "mram",
+      "offset": 720,
+      "role": "constant",
+      "size": 4,
+      "source_memory": "mram"
+    },
+    {
+      "id": "37",
+      "memory": "sram",
+      "offset": 0,
+      "role": "scratch",
+      "size": 1024,
+      "source_memory": "sram"
+    },
+    {
+      "id": "38",
+      "memory": "sram",
+      "offset": 1024,
+      "role": "scratch",
+      "size": 1024,
+      "source_memory": "sram"
+    },
+    {
+      "id": "39",
+      "memory": "sram",
+      "offset": 0,
+      "role": "scratch",
+      "size": 1024,
+      "source_memory": "sram"
+    },
+    {
+      "id": "40",
+      "memory": "sram",
+      "offset": 1024,
+      "role": "scratch",
+      "size": 8192,
+      "source_memory": "sram"
+    },
+    {
+      "id": "41",
+      "memory": "sram",
+      "offset": 9216,
+      "role": "scratch",
+      "size": 8192,
+      "source_memory": "sram"
+    },
+    {
+      "id": "42",
+      "memory": "sram",
+      "offset": 0,
+      "role": "scratch",
+      "size": 32,
+      "source_memory": "sram"
+    },
+    {
+      "id": "43",
+      "memory": "sram",
+      "offset": 32,
+      "role": "scratch",
+      "size": 16,
+      "source_memory": "sram"
+    },
+    {
+      "id": "44",
+      "memory": "sram",
+      "offset": 0,
+      "role": "scratch",
+      "size": 32,
+      "source_memory": "sram"
+    },
+    {
+      "id": "45",
+      "memory": "sram",
+      "offset": 32,
+      "role": "scratch",
+      "size": 32,
+      "source_memory": "sram"
+    },
+    {
+      "id": "46",
+      "memory": "sram",
+      "offset": 0,
+      "role": "scratch",
+      "size": 32,
+      "source_memory": "sram"
+    },
+    {
+      "id": "47",
+      "memory": "sram",
+      "offset": 32,
+      "role": "scratch",
+      "size": 8192,
+      "source_memory": "sram"
+    },
+    {
+      "id": "48",
+      "memory": "sram",
+      "offset": 8224,
+      "role": "scratch",
+      "size": 16384,
+      "source_memory": "sram"
+    },
+    {
+      "id": "49",
+      "memory": "sram",
+      "offset": 24608,
+      "role": "scratch",
+      "size": 16384,
+      "source_memory": "sram"
+    },
+    {
+      "id": "50",
+      "memory": "sram",
+      "offset": 0,
+      "role": "scratch",
+      "size": 64,
+      "source_memory": "sram"
+    },
+    {
+      "id": "51",
+      "memory": "sram",
+      "offset": 64,
+      "role": "scratch",
+      "size": 32,
+      "source_memory": "sram"
+    },
+    {
+      "id": "52",
+      "memory": "sram",
+      "offset": 0,
+      "role": "scratch",
+      "size": 64,
+      "source_memory": "sram"
+    },
+    {
+      "id": "53",
+      "memory": "sram",
+      "offset": 64,
+      "role": "scratch",
+      "size": 64,
+      "source_memory": "sram"
+    },
+    {
+      "id": "54",
+      "memory": "sram",
+      "offset": 0,
+      "role": "scratch",
+      "size": 64,
+      "source_memory": "sram"
+    },
+    {
+      "id": "55",
+      "memory": "sram",
+      "offset": 64,
+      "role": "scratch",
+      "size": 16384,
+      "source_memory": "sram"
+    },
+    {
+      "id": "56",
+      "memory": "sram",
+      "offset": 16448,
+      "role": "scratch",
+      "size": 24576,
+      "source_memory": "sram"
+    },
+    {
+      "id": "57",
+      "memory": "sram",
+      "offset": 41024,
+      "role": "scratch",
+      "size": 24576,
+      "source_memory": "sram"
+    },
+    {
+      "id": "58",
+      "memory": "sram",
+      "offset": 0,
+      "role": "scratch",
+      "size": 96,
+      "source_memory": "sram"
+    },
+    {
+      "id": "59",
+      "memory": "sram",
+      "offset": 96,
+      "role": "scratch",
+      "size": 48,
+      "source_memory": "sram"
+    },
+    {
+      "id": "60",
+      "memory": "sram",
+      "offset": 0,
+      "role": "scratch",
+      "size": 96,
+      "source_memory": "sram"
+    },
+    {
+      "id": "61",
+      "memory": "sram",
+      "offset": 96,
+      "role": "scratch",
+      "size": 96,
+      "source_memory": "sram"
+    },
+    {
+      "id": "62",
+      "memory": "sram",
+      "offset": 0,
+      "role": "scratch",
+      "size": 96,
+      "source_memory": "sram"
+    },
+    {
+      "id": "63",
+      "memory": "sram",
+      "offset": 96,
+      "role": "scratch",
+      "size": 24576,
+      "source_memory": "sram"
+    },
+    {
+      "id": "64",
+      "memory": "sram",
+      "offset": 24672,
+      "role": "scratch",
+      "size": 32768,
+      "source_memory": "sram"
+    },
+    {
+      "id": "65",
+      "memory": "sram",
+      "offset": 0,
+      "role": "scratch",
+      "size": 1024,
+      "source_memory": "sram"
+    },
+    {
+      "id": "66",
+      "memory": "sram",
+      "offset": 0,
+      "role": "scratch",
+      "size": 1024,
+      "source_memory": "sram"
+    },
+    {
+      "id": "conv_2d_28_scratch",
+      "memory": "sram",
+      "offset": 1024,
+      "role": "scratch",
+      "size": 896,
+      "source_memory": "sram"
+    }
+  ]
+}
