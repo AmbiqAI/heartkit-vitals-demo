@@ -7,10 +7,13 @@ nsx-as7058/
 nsx-board-apollo330mp-evb/
 nsx-board-apollo510-evb/
 nsx-board-apollo510b-evb/
+nsx-gpio/
+nsx-interrupt/
 nsx-physiokit/
 nsx-pmu-armv8m/
 nsx-sensors/
 nsx-tileio/
+nsx-timer/
 nsx-tooling/
 
 # Vendored modules (committed in this app) are NOT ignored:
