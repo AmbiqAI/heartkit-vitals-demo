@@ -27,6 +27,16 @@ set(HKV_TEST_FLAGS -Wall -Wextra -Werror -g ${HKV_SAN_FLAGS})
 
 enable_testing()
 
+foreach(part APOLLO510B APOLLO510 APOLLO330P)
+    set(test_name test_battery_${part})
+    add_executable(${test_name} test_battery_model.c)
+    target_include_directories(${test_name} PRIVATE ${HKV_SRC_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(${test_name} PRIVATE AM_PART_${part})
+    target_compile_options(${test_name} PRIVATE ${HKV_TEST_FLAGS})
+    target_link_options(${test_name} PRIVATE ${HKV_SAN_FLAGS})
+    add_test(NAME ${test_name} COMMAND ${test_name})
+endforeach()
+
 # Unit under test. Compiled per test binary so each test gets a clean copy.
 #
 # Linking ringbuffer.c into every test is harmless for the ones that do not

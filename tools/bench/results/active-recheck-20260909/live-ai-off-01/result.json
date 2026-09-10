@@ -1,0 +1,22 @@
+{
+  "ai": "off",
+  "uio_state": "0600000000000000",
+  "means_SI": {
+    "voltage": 1.8089531896078586,
+    "current": 0.005771903250652552,
+    "power": 0.010440797277655825
+  },
+  "block_power_W": [
+    0.010450410979947075,
+    0.010435492934344336,
+    0.010437437320930883,
+    0.010433777887042611,
+    0.010446867266014218
+  ],
+  "analyzed_seconds": [
+    5,
+    30
+  ],
+  "usb_summary": "summary: packets=1612 bytes=412672 crc_errors=0 duration=50.1s",
+  "sha256": "b00d8f79810f95b611fad18c52bffdd32cd8daed9f81e16efe66ba0016e85c9f"
+}

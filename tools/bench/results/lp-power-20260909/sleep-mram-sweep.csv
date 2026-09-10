@@ -1,0 +1,4 @@
+capture,start_s,end_s,voltage_V,current_mA,power_mW,gate_high_fraction
+sleep-single-mram01.jls,30,55,1.8103626413,0.6754092938,1.2227537379,1
+sleep-mram-lpr01.jls,30,55,1.8103615198,0.5475230701,0.9912327839,1
+sleep-mram-lpr02.jls,30,55,1.8104253640,0.5477485587,0.9916759905,1

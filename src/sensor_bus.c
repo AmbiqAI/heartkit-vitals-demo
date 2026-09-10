@@ -29,8 +29,14 @@
     #include "nsx_core.h"
     #include "nsx_i2c_register_driver.h"
 
-    #if I2C_IOM != 1
-        #error "sensor_bus.c defines the IOM1 ISR; give it the matching handler if I2C_IOM moves."
+    #if I2C_IOM == 1
+        #define SENSOR_BUS_ISR am_iomaster1_isr
+        #define SENSOR_BUS_IRQn IOMSTR1_IRQn
+    #elif I2C_IOM == 2
+        #define SENSOR_BUS_ISR am_iomaster2_isr
+        #define SENSOR_BUS_IRQn IOMSTR2_IRQn
+    #else
+        #error "No sensor bus interrupt mapping for I2C_IOM"
     #endif
 
 /* Command queue entries are written by the CPU and fetched by the command
@@ -182,7 +188,7 @@ sensor_bus_recover(void)
 }
 
 void
-am_iomaster1_isr(void)
+SENSOR_BUS_ISR(void)
 {
     uint32_t status;
 
@@ -233,9 +239,9 @@ sensor_bus_init(nsx_as7058_i2c_transport_t *p_transport)
 
     /* Below configMAX_SYSCALL_INTERRUPT_PRIORITY so the completion callback
      * may use the FromISR API. */
-    NVIC_SetPriority(IOMSTR1_IRQn, AM_IRQ_PRIORITY_DEFAULT);
-    NVIC_ClearPendingIRQ(IOMSTR1_IRQn);
-    NVIC_EnableIRQ(IOMSTR1_IRQn);
+    NVIC_SetPriority(SENSOR_BUS_IRQn, AM_IRQ_PRIORITY_DEFAULT);
+    NVIC_ClearPendingIRQ(SENSOR_BUS_IRQn);
+    NVIC_EnableIRQ(SENSOR_BUS_IRQn);
 
     s_ready = true;
     nsx_printf("sensor_bus: async reads on IOM%d, cq_words=%u rx_bytes=%u\n", (int)p_cfg->iom,

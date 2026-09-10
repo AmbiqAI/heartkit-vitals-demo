@@ -52,6 +52,10 @@
 #include "pk_ppg.h"
 
 #include "constants.h"
+#include "battery_model.h"
+#if defined(AM_PART_APOLLO330P)
+#include "am_bsp.h"
+#endif
 #include "metrics.h"
 #include "nstdb_noise.h"
 #include "obs.h"
@@ -165,21 +169,7 @@ ips_from_delta_us(uint32_t deltaUs)
     return 2.0e6f / (float32_t)MAX(deltaUs, 1u);
 }
 
-/* Inference power at a given operating point, in mW. THE ONLY PLACE the LP/HP
- * inference constants are selected between: the three IPS/W tiles and the
- * battery model both call this, so the pair in constants.h is never duplicated
- * at a use site. HP is measurably LESS efficient per inference than LP
- * (16.7 vs 5.5 mW, #18 runlogs), so a tile pinned to the LP figure over-states
- * HP efficiency -- see issue #25 AC5.
- *
- * TAKES THE MODE, does not read it. appState.speedMode is a live dashboard
- * control (TIO_UIO_SPEED_MODE_IDX -> set_speed_mode ->
- * nsx_power_set_performance_mode) and can change between any two reads, so a
- * caller that also needs the mode for something else (CpuProcessTask needs it
- * for compute power too) must read it ONCE and pass the same value here.
- * Otherwise one published window can mix an LP compute figure with an HP
- * inference figure. The uint8_t read itself needs no lock -- single aligned
- * byte -- and the worst case is a tile that is one sample stale. */
+/* Read the operating point once so a mode change cannot mix profile values. */
 static inline float32_t
 inference_power_mw(bool hpMode)
 {
@@ -1758,37 +1748,12 @@ PpgProcessTask(void *pvParameters)
 // legacy's CpuProcessTask.
 
 ///////////////////////////////////////////////////////////////////////////////
-// Battery model -- three MCU states (issue #17)
+// Battery projection
 ///////////////////////////////////////////////////////////////////////////////
-//
-// MCU energy only, sensor excluded. Scope, sources, the margin and the
-// deployment-projection caveat on the sleep term are all documented beside the
-// constants in constants.h; read that header before changing anything here.
-//
-//   idleFrac      = 1 - busy
-//   inferenceFrac = sum over stages of (duration_i x runRate_i), clamped <= busy
-//   computeFrac   = busy - inferenceFrac, clamped >= 0
-//   avgPower_mW   = (inf x INFERENCE + cmp x COMPUTE + idle x SLEEP) / MARGIN
-//   batteryDays   = BATT_POWER_CAP / avgPower_mW / 24
-//
-// `busy` is cpuPercUtil, the MEASURED 30 s rolling utilisation, the same figure
-// the TileIO CPU packet carries. Everything the core runs is billed: the
-// inference share at inference power and the remainder, transport included, at
-// compute power (issues #8, #65). One measured figure therefore drives both the
-// dashboard tile and this estimate. The duty-cycle projection is reported
-// separately and never feeds this model.
-//
-// The sleep term assumes a quiet bus: with the async sensor read the task is
-// blocked while the IOM moves the FIFO, so that time is billed as idle even
-// though the peripheral is active.
-//
-// THE MODEL FOLLOWS THE OPERATING POINT. INFERENCE and COMPUTE are read per
-// window from the LP/HP constant pair that matches `appState.speedMode`, the
-// dashboard control that calls nsx_power_set_performance_mode() at runtime.
-// Without that, switching to high performance would REPORT more battery life:
-// the same work finishes ~2.6x faster, so both `busy` and the derived
-// inference duty fall, while the real draw is ~3x higher. SLEEP is shared
-// between the two -- Sleep 1 does not depend on the run clock.
+// Busy time comes from runtime statistics; stage weights come from timed run
+// counts. Their rolling windows must stay aligned. Async IOM activity can
+// overlap idle time, so quiet sleep remains a deployment assumption, not a
+// measurement of the streaming application. See AmbiqAI/heartkit-vitals-demo#68.
 
 /**
  * @brief Wall-time fraction one pipeline stage spent running, over a window.
@@ -1874,6 +1839,9 @@ CpuProcessTask(void *pvParameters)
      * both terms of the model describe the same 30 s window. */
     float32_t infFracRolling[kCpuStatsRollingSeconds] = {0};
     float32_t infFracRollingSum = 0.0f;
+    cpu_rolling_t denDutyRolling = {};
+    cpu_rolling_t segDutyRolling = {};
+    cpu_rolling_t arrDutyRolling = {};
     uint32_t prevDenRuns = g_hkv_counters[HKV_CNT_PIPE_DEN_RUNS];
     uint32_t prevSegRuns = g_hkv_counters[HKV_CNT_PIPE_SEG_RUNS];
     uint32_t prevMetRuns = g_hkv_counters[HKV_CNT_PIPE_MET_RUNS];
@@ -2046,6 +2014,9 @@ CpuProcessTask(void *pvParameters)
             cpu_rolling_put(&capRolling, cpuUtilRollingIndex, rollingFilled, capSecondAvg);
             cpu_rolling_put(&txRolling, cpuUtilRollingIndex, rollingFilled, txSecondAvg);
             cpu_rolling_put(&projInfRolling, cpuUtilRollingIndex, rollingFilled, projInfPctInstant);
+            cpu_rolling_put(&denDutyRolling, cpuUtilRollingIndex, rollingFilled, denFrac);
+            cpu_rolling_put(&segDutyRolling, cpuUtilRollingIndex, rollingFilled, segFrac);
+            cpu_rolling_put(&arrDutyRolling, cpuUtilRollingIndex, rollingFilled, metFrac);
             if (cpuUtilRollingCount < kCpuStatsRollingSeconds) {
                 cpuUtilRolling[cpuUtilRollingIndex] = cpuUtilSecondAvg;
                 cpuUtilRollingSum += cpuUtilSecondAvg;
@@ -2074,52 +2045,13 @@ CpuProcessTask(void *pvParameters)
                                                    100.0f * infFracRollingSum / windowCount, transportPerc);
             appMetResults.cpuProjPerc = hkv_cpu_proj_pct(capturePerc, projInfRolling.sum / windowCount);
 
-            /* Three-state split. See the header above CpuProcessTask and the
-             * sourced constants in constants.h. */
-            float32_t busyFrac = appMetResults.cpuPercUtil / 100.0f;
-            if (busyFrac < 0.0f) {
-                busyFrac = 0.0f;
-            } else if (busyFrac > 1.0f) {
-                busyFrac = 1.0f;
-            }
-            float32_t inferenceFrac = infFracRollingSum / (float32_t)cpuUtilRollingCount;
-            /* Clamped to busy, not asserted equal to it: the two come from
-             * independent measurements (FreeRTOS run-time stats vs DWT +
-             * counters) and nothing guarantees they agree. Over-clamping bills
-             * the excess at inference power, which is the conservative
-             * direction. */
-            if (inferenceFrac < 0.0f) {
-                inferenceFrac = 0.0f;
-            } else if (inferenceFrac > busyFrac) {
-                inferenceFrac = busyFrac;
-            }
-            float32_t computeFrac = busyFrac - inferenceFrac;
-            if (computeFrac < 0.0f) {
-                computeFrac = 0.0f;
-            }
-            const float32_t idleFrac = 1.0f - busyFrac;
-
-            /* Operating point, read once per window. appState.speedMode is a
-             * live dashboard control (TIO_UIO_SPEED_MODE_IDX -> set_speed_mode
-             * -> nsx_power_set_performance_mode), so the busy-state figures
-             * have to follow it or HP mode reports MORE battery life than LP
-             * while drawing ~3x the power. Sleep power is shared. See the
-             * constant pairs and their sources in constants.h. */
-            const bool hpMode = (appState.speedMode != 0);
-            const float32_t inferencePowerMw = inference_power_mw(hpMode);
-            const float32_t computePowerMw =
-                hpMode ? (float32_t)MCU_COMPUTE_POWER_MW_HP : (float32_t)MCU_COMPUTE_POWER_MW_LP;
-
-            const float32_t avgPower = (inferenceFrac * inferencePowerMw + computeFrac * computePowerMw +
-                                        idleFrac * (float32_t)MCU_SLEEP_POWER_MW) /
-                                       (float32_t)SYSTEM_POWER_MARGIN;
-
-            appMetResults.battInferenceFrac = inferenceFrac;
-            appMetResults.battAvgPowerMw = avgPower;
-            /* avgPower is bounded below by idle power for any real fraction set,
-             * so the guard is defensive against a constant being zeroed rather
-             * than a reachable state. */
-            appMetResults.batteryDays = (avgPower > 0.0f) ? ((float32_t)BATT_POWER_CAP / avgPower / 24.0f) : 0.0f;
+            const hkv_battery_estimate_t battery = hkv_battery_estimate(
+                hkv_battery_profile(appState.speedMode != 0), appMetResults.cpuPercUtil / 100.0f,
+                denDutyRolling.sum / windowCount, segDutyRolling.sum / windowCount,
+                arrDutyRolling.sum / windowCount);
+            appMetResults.battInferenceFrac = battery.inference_fraction;
+            appMetResults.battAvgPowerMw = battery.average_mw;
+            appMetResults.batteryDays = battery.days;
 
             send_cpu_metrics();
         }
@@ -2673,6 +2605,13 @@ main(void)
             "SPI Init Failed\n");
 #else
     NSX_TRY(nsx_i2c_interface_init(&nsxI2cCfg, AS7058_I2C_SPEED_HZ) != NSX_STATUS_SUCCESS, "I2C Init Failed\n");
+#if defined(AM_PART_APOLLO330P)
+    /* The generic BSP IOM helper omits the click-specific pins; see #37. */
+    NSX_TRY(am_hal_gpio_pinconfig(AM_BSP_GPIO_IOM2_SCL_CB, g_AM_BSP_GPIO_IOM2_SCL_CB) != AM_HAL_STATUS_SUCCESS,
+            "Click SCL Init Failed\n");
+    NSX_TRY(am_hal_gpio_pinconfig(AM_BSP_GPIO_IOM2_SDA_CB, g_AM_BSP_GPIO_IOM2_SDA_CB) != AM_HAL_STATUS_SUCCESS,
+            "Click SDA Init Failed\n");
+#endif
 #endif
 
     NSX_TRY(rtos_time_init(), "RTOS Timer Init failed.\n");

@@ -38,64 +38,11 @@ extern "C" {
 #endif
 
 ///////////////////////////////////////////////////////////////////////////////
-// Battery / power model (issue #17; figures verified in issue #18)
+// Power assumptions for efficiency metrics and battery-profile fallbacks.
 ///////////////////////////////////////////////////////////////////////////////
-//
-// WHAT THIS MODELS -- MCU ENERGY ONLY. SENSOR POWER IS DELIBERATELY EXCLUDED.
-// Sensor power depends on LED count, drive strength and sampling duty, none of
-// which are properties of the MCU. Excluding it keeps the figure honest about
-// what is being claimed and comparable across use cases. Anywhere this number
-// is displayed it must read "MCU energy only, sensor excluded; estimated from
-// datasheet and bench figures" or it will be quoted as a product spec.
-//
-// THREE STATES. Time is split into inference / general compute / sleep, and
-// each is billed at its own figure (see main.cc CpuProcessTask). The previous
-// two-state model billed all busy time -- transport, DSP, ring copies -- at
-// inference power.
-//
-// THE OPERATING POINT IS A RUNTIME CONTROL, SO THE FIGURES COME IN PAIRS.
-// `appState.speedMode` is exposed on the dashboard UIO surface next to the
-// battery tile (TIO_UIO_SPEED_MODE_IDX) and switches the SoC between
-// NSX_POWER_PERF_LOW (96 MHz) and NSX_POWER_PERF_HIGH (250 MHz) at runtime
-// (main.cc set_speed_mode). Every busy-state figure below therefore exists in
-// an LP and an HP variant and CpuProcessTask selects the pair that matches the
-// live speed mode. A single LP-only set would move the tile the WRONG way in HP
-// mode: HP finishes the same work ~2.6x faster, so measured busy time and the
-// derived inference duty both fall, and billing that smaller busy fraction at
-// LP power reports MORE battery life at ~3x the actual draw. The sleep figure
-// is shared: System Sleep 1 does not depend on the run clock.
-//
-// THE SLEEP TERM IS A DEPLOYMENT PROJECTION, NOT A MEASUREMENT OF THIS BUILD.
-// The demo does not sleep: FreeRTOSConfig.h sets `configUSE_TICKLESS_IDLE 0`,
-// so idle time is spent spinning in the idle task at run power, not in Sleep 1.
-// The idle term states what the same workload would draw if the port slept.
-// The busy fraction, by contrast, IS measured: `cpuPercUtil`, the 30 s rolling
-// utilisation, so everything the core runs is billed at active power. See #65.
-//
-// SLEEP 1, NOT DEEP SLEEP, DELIBERATELY. The sensor wakes the MCU ~7.7 times
-// per second. Sleep 1 keeps HFRC running so a wake is cheap; deep sleep at that
-// cadence pays an HFRC restart per wake, and the datasheet publishes no wake
-// energy, so its 36 uW steady-state figure is not the whole cost. Sleep 1 is
-// both the conservative and the honest choice at this wake rate.
-//
-// WHERE THE INFERENCE FIGURES ARE OPTIMISTIC -- STATED, NOT BURIED. Each
-// inference figure is the LOWER of the two models that were actually measured:
-// LP 5.5 mW is segmentation (5.496) and not arrhythmia (5.743), ~4.5%
-// optimistic against the higher measurement; HP 16.7 mW is segmentation
-// (16.697) and not arrhythmia (17.698), ~5.7% optimistic on the same basis.
-// The selection rule is deliberate and identical in both sets -- segmentation
-// is the stage that runs most often -- but it is a choice, not an average.
-// Separately, ecg_denoise, which is the MOST FREQUENTLY EXECUTED stage and the
-// largest single contributor to inference duty, has NO power measurement in
-// either column; it is billed at the segmentation figure. If denoise is more
-// expensive than segmentation, this model understates power and overstates
-// battery days, and nothing in the code can detect that.
-//
-// METHODOLOGY NOTE -- MIXED MEASUREMENT DOMAINS, STATED NOT BLENDED. The
-// datasheet figures below are SoC-only at VDD 1.8 V. The inference figures are
-// apollo510_evb BOARD-LEVEL measurements. Mixing the two is acceptable at demo
-// precision, where order-of-magnitude is the bar, but it is a known
-// inconsistency and is recorded here rather than hidden in the arithmetic.
+// The AP510B LP battery profile is separate from the IPS/W assumptions below.
+// Its quiet-idle projection excludes sensor supply power; see
+// battery_model.h and AmbiqAI/heartkit-vitals-demo#68.
 
 #if defined(AM_PART_APOLLO510B)
 
@@ -158,9 +105,8 @@ extern "C" {
  *         i.e. the LOWER of the two, because segmentation is the stage that
  *         runs most often. ecg_denoise power was not captured in that run
  *         (all-zero row) in either column, so denoise -- the most frequently
- *         executed stage -- is billed at the segmentation figure. See the
- *         optimism note in the header above; both of these are choices that
- *         push the reported battery life up, not down.
+ *         executed stage -- is billed at the segmentation figure in these
+ *         fallback profiles. See AmbiqAI/heartkit-vitals-demo#18.
  * Conditions: apollo510_evb, TFLM, AS R5.3.0, gcc 14.3, EVB BOARD-LEVEL. */
 #define MCU_INFERENCE_POWER_MW_LP (5.5)
 #define MCU_INFERENCE_POWER_MW_HP (16.7)
@@ -196,13 +142,15 @@ extern "C" {
 
 #endif
 
-/* Battery capacity assumption -- 2 cells x 225 mAh x 3.3 V = 1485 mWh. This is
- * a BATTERY ASSUMPTION for the demo form factor, not a silicon claim and not a
- * measurement. Change it with the pack, and note that battery days scales
- * linearly with it. */
-#define BATT_POWER_CAP (1485)
+/* Nominal pack energy in mWh, not measured usable energy; see #68.
+ * CR2032 nominal voltage: https://data.energizer.com/pdfs/cr2032.pdf */
+#define BATT_POWER_CAP (2.0 * 225.0 * 3.0)
 
+#if defined(AM_PART_APOLLO330P)
+#define I2C_IOM (2)
+#else
 #define I2C_IOM (1)
+#endif
 #define I2C_SPEED_HZ (100000)
 #define MAX86150_ADDR (0x5E)
 #define LEDSTICK_ADDR (0x23)
@@ -220,7 +168,11 @@ extern "C" {
 #endif
 
 #if AS7058_BOARD_PROFILE == AS7058_PROFILE_CLICK_I2C
+#if defined(AM_PART_APOLLO330P)
+#define AS7058_OSAL_INT_PIN 107
+#else
 #define AS7058_OSAL_INT_PIN 50
+#endif
 #else
 #define AS7058_OSAL_INT_PIN 2
 #endif

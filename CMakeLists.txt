@@ -147,6 +147,31 @@ endif()
 
 nsx_finalize_app(heartkit-vitals-demo)
 
+option(HKV_BUILD_LP_POWER_TEST "Build the GPIO-gated LP power test" OFF)
+if(HKV_BUILD_LP_POWER_TEST)
+    if(NOT NSX_BOARD STREQUAL "apollo510b_evb")
+        message(FATAL_ERROR "LP power test requires apollo510b_evb")
+    endif()
+    add_executable(hkv_lp_power
+        tools/bench/lp_power.c
+        tools/aot/parity/golden_den_cases.c
+        tools/aot/parity/golden_seg_cases.c
+        tools/aot/parity/golden_arr_cases.c
+    )
+    target_include_directories(hkv_lp_power PRIVATE tools/aot/parity)
+    target_link_libraries(hkv_lp_power PRIVATE
+        nsx::board nsx::runtime_core nsx::power
+        nsx::hkv_denoise_aot nsx::hkv_segmentation_aot nsx::hkv_arrhythmia_aot
+    )
+    nsx_finalize_app(hkv_lp_power)
+    add_executable(hkv_sleep_baseline tools/bench/sleep_baseline.c)
+    target_link_libraries(hkv_sleep_baseline PRIVATE
+        nsx::board nsx::runtime_core nsx::power
+    )
+    nsx_finalize_app(hkv_sleep_baseline)
+    include(tools/bench/sleep_minimal.cmake)
+endif()
+
 # Bare-metal golden parity runner for the heliaAOT modules. Off by default
 # because it is a second image for the same board, not a firmware feature: it
 # has no scheduler, no USB and no sensors, and the generated `_test_case_run()`
