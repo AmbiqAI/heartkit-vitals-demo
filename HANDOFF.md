@@ -3,12 +3,14 @@
 ## Goal and boundaries
 
 Complete the AOT migration and prepare local changes for review under issues
-#37 and #68. No push, PR update, merge, release, packaging or scheduled work
-without approval. Work only in this worktree and the paired TileIO worktree.
+#37 and #68. Owner approved branch push and draft PR update; those are published.
+No merge, release, packaging or scheduled work without approval.
+Work only in this worktree and the paired TileIO worktree.
 
 Branch: work/aot-021-denoise. Base: 04207dc. Migration commits: d0a4afc and
 cb5c565. Existing draft PR: https://github.com/AmbiqAI/heartkit-vitals-demo/pull/85.
-Its earlier passing CI applies to cb5c565, not the subsequent local changes.
+PR85 now includes implementation head3de37f6 and links TileIO draft PR44.
+Its earlier passing CI applies to cb5c565; check hosted CI on the published head.
 Local commits are approved; consult git log for their final IDs.
 
 ## Done
@@ -106,4 +108,4 @@ mechanical diff. Never stage modules/helia-rt, the optional external reference.
 Paired UI: tileio/.claude/worktrees/vitals-dashboard-labels,
 branch codex/vitals-dashboard-labels. Its root HANDOFF owns dashboard status.
 Next: inspect local commits, complete remaining hardware checks, obtain approval
-before publishing either repo. No release authority has been given.
+before merging or releasing either repo. Draft PR publication is complete.
