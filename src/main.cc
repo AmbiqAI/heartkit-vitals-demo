@@ -53,6 +53,7 @@
 
 #include "constants.h"
 #include "battery_model.h"
+#include "inference_timing.h"
 #if defined(AM_PART_APOLLO330P)
 #include "am_bsp.h"
 #endif
@@ -158,15 +159,6 @@ dwt_delta_us(uint32_t startCycles)
      * switch is scaled by whichever value is live when it FINISHES, so that
      * one measurement is wrong; the next one is right. Accepted. */
     return deltaCycles / (SystemCoreClock / 1000000);
-}
-
-/* Legacy IPS scale: 2e6/deltaUs (legacy main.cc used 2000000.0/deltaUs with a
- * true-microsecond ticker) -- the host dashboard expects this scale. Guarded
- * against deltaUs==0 (fast DSP paths + coarse cycle->us division). */
-static inline float32_t
-ips_from_delta_us(uint32_t deltaUs)
-{
-    return 2.0e6f / (float32_t)MAX(deltaUs, 1u);
 }
 
 /* Read the operating point once so a mode change cannot mix profile values. */
@@ -1755,48 +1747,8 @@ PpgProcessTask(void *pvParameters)
 // overlap idle time, so quiet sleep remains a deployment assumption, not a
 // measurement of the streaming application. See AmbiqAI/heartkit-vitals-demo#68.
 
-/**
- * @brief Wall-time fraction one pipeline stage spent running, over a window.
- *
- * Both inputs are already measured, so nothing here is assumed: `ips` is the
- * stage's last DWT-timed duration in the legacy 2e6/deltaUs scale (see
- * ips_from_delta_us), which inverts to duration_s = 2/ips; `runsDelta` is that
- * stage's own run counter over `windowSec`, so the cadence is derived rather
- * than hardcoded at the nominal 2 s. A stage that stalls drops out of the sum
- * by itself, because its run counter stops advancing.
- *
- * A stage switched to DSP or OFF does NOT drop out. Its hkv_count() still
- * fires, and metrics_capture_ecg() runs unconditionally in the metrics branch,
- * so the stage keeps reporting a (much shorter) DWT duration and that time is
- * billed at inference power. This OVER-bills DSP and off modes, which is the
- * conservative direction, and it is deliberate: the counters stay a
- * measurement of what the pipeline actually did rather than a function of the
- * mode flags. Do not gate the counters on mode to "fix" this.
- *
- * Returns 0 whenever the stage did not run in this window. The ips <= 0 guard
- * is defensive only: store.c seeds all three *Ips at 1.0, so it never fires in
- * practice, and 1.0 is a legitimate ips (a 2 s stage) and cannot be used as a
- * cold-start sentinel. Cold start is handled instead by publishing each run
- * counter AFTER its duration, so runsDelta cannot count a run whose duration
- * has not been written yet. That ordering is NOT a property of the source
- * layout: the *Ips stores are non-volatile and the counter increments are
- * volatile, which C does not order against each other, and GCC was measured
- * reordering one of the three. It is enforced by an explicit
- * `__asm volatile("" ::: "memory")` barrier at each of the three sites in
- * EcgProcessTask. Removing a barrier reintroduces the poisoned first sample.
- *
- * Caveat worth knowing: `ips` is the LAST duration, not the window mean, so a
- * stage whose cost varies is billed at its most recent cost. The 30 s rolling
- * average downstream absorbs most of that.
- */
-static inline float32_t
-stage_duty_frac(uint32_t runsDelta, float32_t ips, float32_t windowSec)
-{
-    if (runsDelta == 0u || ips <= 0.0f || windowSec <= 0.0f) {
-        return 0.0f;
-    }
-    return (2.0f / ips) * ((float32_t)runsDelta / windowSec);
-}
+/* DSP/off paths still count as stage work and use the stage power profile.
+ * See AmbiqAI/heartkit-vitals-demo#68. */
 
 /* One attribution term's 30 s history, advanced from the SAME ring index and
  * fill state as the utilisation ring so every term describes one window. See #8. */
@@ -1967,29 +1919,8 @@ CpuProcessTask(void *pvParameters)
             /* Inference duty for this window: each stage's own measured run
              * rate x its own measured duration. Counters are free-running and
              * never reset by the reporter, so a local delta is the window. */
-            /* TIMEBASE -- THE TWO TERMS MUST STAY ON THE SAME CLOCK.
-             * Both sides of the duty ratio are derived from SystemCoreClock,
-             * and that is what makes this correct in HP mode rather than a
-             * coincidence worth preserving deliberately:
-             *   - the numerator, 2/ips, comes from dwt_delta_us() (main.cc
-             *     :152), which divides DWT cycles by SystemCoreClock;
-             *   - the denominator comes from the FreeRTOS tick, and
-             *     configCPU_CLOCK_HZ is also SystemCoreClock.
-             * HISTORY, and why the invariant is still worth stating. Before
-             * issue #25 nothing updated SystemCoreClock on a performance-mode
-             * change, so it stayed at 96 MHz while the core ran at 250 MHz: in
-             * HP mode the measured durations AND this window were both
-             * over-reported by the same 250/96 = 2.604x and the factors
-             * CANCELLED, which is the only reason the duty was right. Issue
-             * #25 removed the need for that cancellation --
-             * timebase_sync_to_core_clock() now makes SystemCoreClock truthful
-             * and holds the tick at 1 ms -- so both terms are individually
-             * correct and the ratio is correct for the honest reason.
-             * The invariant survives the fix: DO NOT move this window to a
-             * different clock (RTC / STIMER) from the one dwt_delta_us()
-             * divides by. If the two ever disagree again, HP duty skews,
-             * inferenceFrac clamps to busy, and everything gets billed at
-             * inference power. They have to change together. */
+            /* DWT duration and reporting ticks must share the synchronized
+             * core timebase across speed changes. See AmbiqAI/heartkit-vitals-demo#25. */
             const TickType_t windowEndTicks = xTaskGetTickCount();
             const float32_t publishWindowSec =
                 (float32_t)(uint32_t)(windowEndTicks - publishWindowStart) / (float32_t)configTICK_RATE_HZ;

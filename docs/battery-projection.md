@@ -50,8 +50,10 @@ supply energy and usable coin-cell capacity remain outside this validation.
 Deep sleep is not assumed.
 
 Only the AP510B LP battery profile changes. HP and the AP510/AP330 profiles use
-their existing constants. The three IPS/W metrics are unchanged and keep
-their separate power assumptions. No TileIO template or release is modified.
+their existing constants. The three IPS/W metrics use conventional inferences
+per second and retain their separate power assumptions. Stage duty is
+`runs / (IPS * window_seconds)`, so normalizing throughput does not change
+the battery projection.
 
 ## Implementation and validation
 

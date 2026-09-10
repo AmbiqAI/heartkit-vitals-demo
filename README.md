@@ -218,8 +218,9 @@ sensor or battery characterization. HP and other-board power profiles retain
 their separate assumptions. Historical battery results above use an older profile.
 
 **AI Throughput.** Inferences per second expressed as
-`2e6 / duration`, the scale the host dashboard expects (`ips_from_delta_us` in
-`src/main.cc`). This is a **throughput figure, not a run rate**. It answers "how
+`1e6 / duration_us` (`ips_from_delta_us` in `src/inference_timing.h`).
+Duration includes the timed pipeline stage's overhead.
+This is a **throughput figure, not a run rate**. It answers "how
 fast does this model execute when it executes", not "how often does it execute".
 The models actually run about once every 2 seconds. Do not read the tile as the
 model firing hundreds of times a second.

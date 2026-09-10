@@ -1,12 +1,25 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2026, Ambiq
 #include "battery_model.h"
+#include "inference_timing.h"
 #include "test_assert.h"
 
 int main(void)
 {
+    CHECK_NEAR(ips_from_delta_us(10000u), 100.0f, 0.001f);
+    CHECK_NEAR(ips_from_delta_us(20000u), 50.0f, 0.001f);
+    CHECK_NEAR(ips_from_delta_us(0u), 1000000.0f, 0.001f);
+    CHECK_NEAR(stage_duty_frac(15u, ips_from_delta_us(20000u), 30.0f), 0.01f, 0.00001f);
+    CHECK_NEAR(stage_duty_frac(0u, 50.0f, 30.0f), 0.0f, 0.00001f);
+    CHECK_NEAR(stage_duty_frac(1u, 0.0f, 30.0f), 0.0f, 0.00001f);
+    CHECK_NEAR(stage_duty_frac(1u, 50.0f, 0.0f), 0.0f, 0.00001f);
     const hkv_battery_profile_t lp = hkv_battery_profile(false);
     const hkv_battery_profile_t hp = hkv_battery_profile(true);
+    const float measuredDuty = stage_duty_frac(15u, ips_from_delta_us(20000u), 30.0f);
+    const hkv_battery_estimate_t measured = hkv_battery_estimate(lp, .13f, measuredDuty, .03f, .0035f);
+    const hkv_battery_estimate_t expectedDuty = hkv_battery_estimate(lp, .13f, .01f, .03f, .0035f);
+    CHECK_NEAR(measured.days, expectedDuty.days, 0.0001f);
+    CHECK_NEAR(measured.average_mw, expectedDuty.average_mw, 0.0001f);
     CHECK_NEAR(lp.capacity_mwh, 1350.0f, 0.001f);
     CHECK_NEAR(hp.sleep_mw, MCU_SLEEP_POWER_MW, 0.0001f);
     CHECK_NEAR(hp.compute_mw, MCU_COMPUTE_POWER_MW_HP, 0.0001f);

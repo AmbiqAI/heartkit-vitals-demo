@@ -13,6 +13,15 @@ Local commits are approved; consult git log for their final IDs.
 
 ## Done
 
+- IPS normalization uses 1e6/duration_us for all three models and 1/IPS for
+  stage duty. Live IPS and IPS/W are halved; battery duty/projection, model
+  latency and relative gains are unchanged. Shared inference_timing.h is used
+  by firmware and host regression tests. Scale-compatibility notes removed.
+  Historical capture figures remain records of their original builds.
+  All three board builds and eleven sanitizer tests pass after this correction.
+  Corrected binaries have not been flashed; older hardware evidence does not
+  validate this image. Dashboard needs no numeric conversion or range change.
+
 - Production denoise uses AOT 0.21.0; segmentation/arrhythmia retain accepted
   AOT 0.19.0 outputs. ns-cmsis-nn 7.32.0; production manifest/lock excludes
   heliaRT/TFLM. Denoise linkage workaround tracks helia-aot#407.
