@@ -10,6 +10,7 @@ visibility or rewrite history in this task.
 - Base: main `71232cd`, following PR #85 and firmware v5.2.0.
 - Branch: `codex/public-readiness`. Tracking: issue #86, following issue #41.
   Owner approved issue creation and cleanup PR publication.
+- Cleanup PR: https://github.com/AmbiqAI/heartkit-vitals-demo/pull/87.
 - Owner approved inclusion of AS7058 presets and generated profiles.
 - Gitleaks 8.30.1 scanned all fetched refs with `--all --full-history`,
   full redaction, and inline allow comments ignored on September 11, 2026:
@@ -27,7 +28,7 @@ security contact; an outside researcher may not have an Ambiq representative.
 
 ## Next steps
 
-- Publish cleanup PR and review hosted checks. Keep #86 open for the remaining
+- Review PR #87 and hosted checks. Keep #86 open for the remaining
   public-promotion gates.
 - Owner decision: retain or redact historical attribution trailers and internal
   policy discussion in issue #41. No detected credential justifies blanket
