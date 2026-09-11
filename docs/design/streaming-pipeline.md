@@ -141,7 +141,7 @@ exact gap width from a sequence delta.
 
 Total ~24 pkt/s, ~6.1 kB/s - **the same as today**. A 72-byte payload in a
 256-byte frame is 72% padding; at 6 kB/s on a full-speed bulk link that is
-irrelevant and is the correct trade. Do not "optimise" it back.
+irrelevant and is the correct trade. Do not "optimize" it back.
 
 ### 3.5 Buffer sizing, derived rather than picked
 
@@ -174,7 +174,7 @@ large rare packets and is the wrong shape for small frequent ones. Keep the
 `nsx_usb_vendor_write_available()` pre-check (`tio_usb.c:369-371`) untouched; it
 is the only thing preventing a 5 s blocking timeout in `nsx_usb_vendor_send()`.
 
-### 3.7 Not-connected behaviour
+### 3.7 Not-connected behavior
 
 Gate at the tee, not the enqueue: when no sink is attached, discard-in-place
 instead of pushing to TX rings, and skip packing/CRC/enqueue entirely. Metrics
@@ -206,11 +206,11 @@ second one. UIO stays alive in both directions regardless.
 Reconciles both design passes. Each step is independently buildable, flashable,
 reviewable.
 
-| # | Step | Behaviour change? |
+| # | Step | Behavior change? |
 |---|---|---|
 | 0 | Land the issue #4 PR (`4-usb-busy-handling`) unmodified | already scoped |
 | 1 | Host test harness (`tests/`, plain CMake, no framework) + `ringbuffer` full-wrap fix + `push_overwrite()` | correctness only |
-| 2 | Observability: log serialisation, always-on counters, flag polarity, line format | yes (output) |
+| 2 | Observability: log serialization, always-on counters, flag polarity, line format | yes (output) |
 | 3 | Latency-budget constants + **rate-matched emission** - THE FIX | **yes - gaps disappear; ECG delay grows ~2 s** |
 | 4 | Ring resize per 3.5 + drop-oldest everywhere | yes (bounded backlog, SRAM freed) |
 | 5 | Transport extraction into `tio_stream.{c,h}` + split queues + simplified BUSY (subsumes issue #5's extraction bullet) | yes (USB stall no longer costs BLE) |
