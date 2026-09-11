@@ -39,7 +39,7 @@ modules:
 - name: nsx-power
 - name: nsx-as7058
 - name: nsx-physiokit
-- name: nsx-helia-rt
+- name: nsx-cmsis-nn
 - name: nsx-tileio-usb
 - name: nsx-tileio-ble
   boards:
@@ -50,6 +50,9 @@ modules:
   source:
     vendored: true
 - name: hkv_arrhythmia_aot
+  source:
+    vendored: true
+- name: hkv_denoise_aot
   source:
     vendored: true
 features: {}
@@ -78,7 +81,7 @@ module_registry:
     ns-cmsis-nn:
       name: ns-cmsis-nn
       url: https://github.com/AmbiqAI/ns-cmsis-nn.git
-      revision: v7.31.0
+      revision: v7.32.0
       path: modules/ns-cmsis-nn
     nsx-tileio:
       name: nsx-tileio
@@ -104,7 +107,7 @@ module_registry:
       metadata: modules/helia-dsp/nsx-module.yaml
     nsx-cmsis-nn:
       project: ns-cmsis-nn
-      revision: v7.31.0
+      revision: v7.32.0
       metadata: modules/ns-cmsis-nn/nsx/nsx-module.yaml
     nsx-tileio-usb:
       project: nsx-tileio

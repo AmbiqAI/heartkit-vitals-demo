@@ -1,17 +1,17 @@
 # heliaAOT model modules
 
-`modules/hkv_segmentation_aot/` and `modules/hkv_arrhythmia_aot/` are generated
+`modules/hkv_denoise_aot/`, `modules/hkv_segmentation_aot/`, and `modules/hkv_arrhythmia_aot/` are generated
 C, committed to the repo. They are declared in `nsx.yml` as `source: {vendored:
 true}`, so `nsx sync` never touches them and `nsx.lock` pins the content hash of
 each directory.
 
-The modules compile as part of the firmware build but nothing links them yet;
-the segmentation and arrhythmia adapters still call TFLM. See
-AmbiqAI/heartkit-vitals-demo#37.
+All three production adapters use these modules. The production manifest and
+ELF have no heliaRT/TFLM dependency. TFLM is an opt-in parity reference only.
+See AmbiqAI/heartkit-vitals-demo#37 and [denoise validation](denoise-validation.md).
 
 ## Memory layout
 
-The first AOT build mirrors what TFLM does today: weights cold in MRAM as XIP
+The AOT layout matches the parity reference: weights cold in MRAM as XIP
 `.rodata`, working arena in shared SRAM. The YAML rules place the `constant`
 tensors in MRAM and the `scratch` tensors in SRAM; the generator then emits
 `<prefix>_arena_sram_buffer` guarded by `<PREFIX>_PUT_IN_SRAM`, which defaults
@@ -19,7 +19,7 @@ to a no-op. `hkv_aot_attributes.h` defines those macros as
 `__attribute__((section(".shared")))`, the same section `AM_SHARED_RW` puts the
 TFLM arenas in, and the app `CMakeLists.txt` force-includes it through each
 module's `<MODULE>_ATTRIBUTES_HEADER` variable before the modules are added.
-Neither model has `persistent` tensors, so no rule is needed for that kind.
+The models have no `persistent` tensors, so no rule is needed for that kind.
 Moving the arenas to TCM is a later optimization.
 
 ## Regenerate
@@ -29,8 +29,11 @@ tools/aot/convert.sh
 ```
 
 Converts `assets/segmentation.tflite` and `assets/arrhythmia.tflite` with
-helia-aot 0.19.0 using `segmentation.yaml` / `arrhythmia.yaml`, then re-runs
-`nsx lock`. Commit both the module trees and `nsx.lock`.
+helia-aot 0.19.0 using `segmentation.yaml` / `arrhythmia.yaml`, and
+`assets/denoise.tflite` with 0.21.0 using `denoise.yaml`, then re-runs
+`nsx lock`. Denoise conversion applies `denoise-private-params.patch` for
+[helia-aot#407](https://github.com/AmbiqAI/helia-aot/issues/407).
+Commit the module trees and `nsx.lock`.
 
 ## Check
 
@@ -53,14 +56,14 @@ feeds the generated on-device test case; `golden-<m>_caseNN.npz` are consumed
 by the on-device parity runner below. Each model also has a
 `golden-<m>.json` sidecar carrying the model sha256, the stimulus sha256,
 tensor shapes and quantization, and the firmware constants the stimulus was
-preprocessed with. `den` fixtures are included for completeness; denoise stays
-on TFLM.
+preprocessed with. Denoise fixtures feed the explicit parity runner rather than
+a generated self-test.
 
 `golden/` is committed here; `tools/aot/make_golden.py` regenerates it.
 
 Tolerances: segmentation 1 (int8 output, 1 LSB); arrhythmia 0.008 (float32
-softmax, about 2 LSB of the int8 1/256 probability scale). Choosing a
-`--test.tolerance` for the converted module is out of scope here.
+softmax, about 2 LSB of the int8 1/256 probability scale). Denoise gates each
+sample at abs(error) <= 1e-5 + 1e-5 * abs(reference), with finite output required.
 
 ### Generate
 
@@ -154,7 +157,7 @@ read from `SystemCoreClock` after that mode's switch. Numerics are recompared in
 both modes; the AOT kernels are the same code at either clock, so a mode-only
 difference would be a finding.
 
-`golden_seg_cases.c/.h` and `golden_arr_cases.c/.h` are generated and committed:
+`golden_den_cases.c/.h`, `golden_seg_cases.c/.h`, and `golden_arr_cases.c/.h` are generated and committed:
 
 ```sh
 python3 tools/aot/golden_to_c.py            # regenerate
@@ -165,11 +168,18 @@ Build, flash, capture and report:
 
 ```sh
 uv run nsx configure --app-dir . --board apollo510b_evb
-cmake build/apollo510b_evb -DHKV_BUILD_AOT_PARITY=ON
+cmake build/apollo510b_evb -DHKV_BUILD_AOT_PARITY=ON -DHKV_PARITY_TFLM=ON \
+  -DHKV_PARITY_HELIA_RT_ROOT=/absolute/path/to/helia-rt
 uv run nsx flash --app-dir . --board apollo510b_evb --target hkv_aot_parity
 python3 tools/bench/swo_capture.py 30 parity.log --app-dir . --board apollo510b_evb
 python3 tools/aot/parity_report.py parity.log
+python3 tools/aot/denoise_report.py parity.log
 ```
+
+The reference checkout must be supplied separately; it is not acquired by the
+production manifest. The accepted reference is AmbiqAI/helia-rt at
+`c1b97f4a49ab` (`helia-rt-v1.16.0`); use its complete source checkout, including
+submodules. Set `HKV_BUILD_AOT_PARITY=OFF` for production-only builds.
 
 `nsx` has no `-D` passthrough, so the option is set once in the CMake cache; it
 persists for later `nsx build`/`nsx flash --target hkv_aot_parity` runs.
@@ -194,13 +204,13 @@ reported as a separate table:
 - `ref=tflm` **gates**. It runs the same flatbuffers through the TFLM
   interpreter in the same image, on the same silicon, at the same operating
   point, so a difference is attributable to the AOT compiler and nothing else.
-  Built by default; `-DHKV_PARITY_TFLM=OFF` drops it, and `parity_report.py`
-  then exits 1 because the gate cannot be evaluated.
+  Opt in with `-DHKV_PARITY_TFLM=ON` and an explicit reference checkout.
+  Without it, `parity_report.py` exits 1 because the gate cannot be evaluated.
 - `ref=golden` is **informational**. It is the host LiteRT capture, so it also
   carries LiteRT-vs-TFLM kernel differences that this runner is not asked to
   gate.
 
-`src/tflm.cc` is linked verbatim so the op resolver matches the firmware's.
+`tools/aot/parity/tflm.cc` retains the pre-migration firmware resolver.
 `src/ecg_segmentation.cc` and `src/ecg_arrhythmia.cc` are not: they pull
 `store.h` and `pk_ecg.h`, i.e. the FreeRTOS-scheduled app state this bare-metal
 image cannot stand up. `tools/aot/parity/tflm_ref.cc` mirrors their init and

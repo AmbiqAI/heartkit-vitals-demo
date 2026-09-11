@@ -1,0 +1,2 @@
+capture,start_s,end_s,voltage_V,current_mA,power_mW,gate_high_fraction
+sleep-minimal02.jls,30,60,1.8104060481,0.8367216323,1.5148240614,1.0

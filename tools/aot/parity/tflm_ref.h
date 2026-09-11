@@ -30,6 +30,8 @@ int32_t hkv_tflm_ref_init(void);
 int32_t hkv_tflm_ref_seg_init(void);
 
 int32_t hkv_tflm_ref_arr_init(void);
+int32_t hkv_tflm_ref_den_init(void);
+int32_t hkv_tflm_ref_den_run(const float *in, int inLen, float *out, int outLen, uint32_t *cycles);
 
 /**
  * @brief Run one segmentation case.

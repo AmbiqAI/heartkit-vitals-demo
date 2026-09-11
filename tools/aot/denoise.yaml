@@ -1,0 +1,21 @@
+model:
+  path: assets/denoise.tflite
+  name: hkv_denoise
+module:
+  path: modules
+  type: nsx
+  name: hkv_denoise_aot
+  prefix: hkv_denoise
+platform:
+  name: apollo510b_evb
+memory:
+  tensors:
+  - type: scratch
+    attributes:
+      memory: SRAM
+  - type: constant
+    attributes:
+      memory: MRAM
+  dump_residency_json: true
+test:
+  enabled: false

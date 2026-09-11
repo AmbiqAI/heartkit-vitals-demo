@@ -109,8 +109,6 @@ REQUIRED_PATHS = [
     "modules/helia-dsp/LICENSE",
     "modules/helia-dsp/Ne10/LICENSE",
     "modules/helia-dsp/ComputeLibrary/LICENSE.txt",
-    "modules/helia-rt/LICENSE",
-    "modules/helia-rt/THIRD_PARTY_NOTICES.md",
     "modules/ns-cmsis-nn/LICENSE",
     "modules/ns-cmsis-nn/NOTICE",
     "modules/ns-cmsis-nn/LICENSES/Apache-2.0.txt",

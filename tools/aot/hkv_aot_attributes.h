@@ -15,5 +15,6 @@
 
 #define HKV_SEGMENTATION_PUT_IN_SRAM __attribute__((section(".shared")))
 #define HKV_ARRHYTHMIA_PUT_IN_SRAM   __attribute__((section(".shared")))
+#define HKV_DENOISE_PUT_IN_SRAM      __attribute__((section(".shared")))
 
 #endif // HKV_AOT_ATTRIBUTES_H

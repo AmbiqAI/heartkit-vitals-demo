@@ -139,15 +139,14 @@ the `*_ips` rates.
 | `den_lat_max_us` | `cpu` | Denoise model invoke duration, maximum within the report interval |
 | `seg_lat_max_us` | `cpu` | Segmentation model invoke duration, maximum within the report interval |
 | `arr_lat_max_us` | `cpu` | Arrhythmia model invoke duration, maximum within the report interval |
-| `den_arena_used` | `model` | Denoise TFLM arena bytes reported by `arena_used_bytes()` |
-| `den_arena_size` | `model` | Denoise TFLM arena bytes configured |
+| `den_arena_used` | `model` | Denoise heliaAOT scratch arena bytes |
+| `den_arena_size` | `model` | Denoise heliaAOT scratch arena bytes, equal to used |
 | `seg_arena_used` | `model` | Segmentation heliaAOT scratch arena bytes |
 | `seg_arena_size` | `model` | Segmentation heliaAOT scratch arena bytes, equal to used |
 | `arr_arena_used` | `model` | Arrhythmia heliaAOT scratch arena bytes |
 | `arr_arena_size` | `model` | Arrhythmia heliaAOT scratch arena bytes, equal to used |
 
-The denoise pair is a measurement against a hand-sized budget; the AOT pairs are
-one planned number reported twice. See "Model arenas" below.
+Each AOT pair is one planned number reported twice. See "Model arenas" below.
 
 The maxima are reset after every `cpu` line and again on a `speed_mode` change,
 so each report describes its own interval at one operating point rather than
@@ -187,24 +186,19 @@ the supported substitution point.
 
 ### Model arenas
 
-The three ECG models do not share a runtime. Denoise is a TFLite flatbuffer
-executed by the TFLM interpreter, so its `[DEN] Arena used` boot line is the
-interpreter's own `arena_used_bytes()` against the arena `ECG_DEN_MODEL_SIZE_KB`
-reserves: used is the measurement and size is the budget, and the gap between
-them is headroom that has to be sized by hand.
-
-Segmentation and arrhythmia run as heliaAOT modules
-(`modules/hkv_segmentation_aot`, `modules/hkv_arrhythmia_aot`). Their memory is
+All three ECG models run as heliaAOT modules
+(`modules/hkv_denoise_aot`, `modules/hkv_segmentation_aot`,
+`modules/hkv_arrhythmia_aot`). Their memory is
 planned when the module is generated, so `ecg_segmentation_arena_used()` and
 `ecg_segmentation_arena_size()` return the same number, the generated
 `hkv_segmentation_arena_sram_size`: the scratch arena is exact-fit and there is
-no headroom to size. A model that no longer fits fails to generate, not to boot.
+no interpreter headroom to size. The linker checks the combined image's fit.
 
 That number counts scratch only. The weights sit in a separate const arena
 (`hkv_*_arena_const_mram_size`) that the kernels read in place from MRAM, so it
 costs `.rodata` rather than SRAM and is not part of the arena figures. The
 scratch arenas are placed in `.shared` by `tools/aot/hkv_aot_attributes.h`,
-which is the section the TFLM arenas use through `AM_SHARED_RW`.
+which is also used by the optional TFLM parity reference through `AM_SHARED_RW`.
 
 ## Continuous Integration
 

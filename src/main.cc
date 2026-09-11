@@ -52,6 +52,11 @@
 #include "pk_ppg.h"
 
 #include "constants.h"
+#include "battery_model.h"
+#include "inference_timing.h"
+#if defined(AM_PART_APOLLO330P)
+#include "am_bsp.h"
+#endif
 #include "metrics.h"
 #include "nstdb_noise.h"
 #include "obs.h"
@@ -63,7 +68,6 @@
 #include "timebase.h"
 #include "tio_tx_sm.h"
 
-#include "tflm.h"
 #include "ecg_arrhythmia.h"
 #include "ecg_denoise.h"
 #include "ecg_segmentation.h"
@@ -157,30 +161,7 @@ dwt_delta_us(uint32_t startCycles)
     return deltaCycles / (SystemCoreClock / 1000000);
 }
 
-/* Legacy IPS scale: 2e6/deltaUs (legacy main.cc used 2000000.0/deltaUs with a
- * true-microsecond ticker) -- the host dashboard expects this scale. Guarded
- * against deltaUs==0 (fast DSP paths + coarse cycle->us division). */
-static inline float32_t
-ips_from_delta_us(uint32_t deltaUs)
-{
-    return 2.0e6f / (float32_t)MAX(deltaUs, 1u);
-}
-
-/* Inference power at a given operating point, in mW. THE ONLY PLACE the LP/HP
- * inference constants are selected between: the three IPS/W tiles and the
- * battery model both call this, so the pair in constants.h is never duplicated
- * at a use site. HP is measurably LESS efficient per inference than LP
- * (16.7 vs 5.5 mW, #18 runlogs), so a tile pinned to the LP figure over-states
- * HP efficiency -- see issue #25 AC5.
- *
- * TAKES THE MODE, does not read it. appState.speedMode is a live dashboard
- * control (TIO_UIO_SPEED_MODE_IDX -> set_speed_mode ->
- * nsx_power_set_performance_mode) and can change between any two reads, so a
- * caller that also needs the mode for something else (CpuProcessTask needs it
- * for compute power too) must read it ONCE and pass the same value here.
- * Otherwise one published window can mix an LP compute figure with an HP
- * inference figure. The uint8_t read itself needs no lock -- single aligned
- * byte -- and the worst case is a tile that is one sample stale. */
+/* Read the operating point once so a mode change cannot mix profile values. */
 static inline float32_t
 inference_power_mw(bool hpMode)
 {
@@ -1246,6 +1227,9 @@ send_ecg_signals(void)
     }
 }
 
+/* Display rates must not reuse bypass timings needed by battery duty accounting. */
+static volatile float g_aiIps[3] = {NAN, NAN, NAN};
+
 static void
 send_ecg_metrics(void)
 {
@@ -1254,13 +1238,14 @@ send_ecg_metrics(void)
     buffer[1] = ecgMetResults.hrv;
     buffer[2] = ecgMetResults.denoiseCossim;
     buffer[3] = ecgMetResults.arrhythmiaLabel;
-    buffer[4] = ecgMetResults.denoiseIps;
-    buffer[5] = ecgMetResults.segmentIps;
-    buffer[6] = ecgMetResults.arrhythmiaIps;
+    buffer[4] = ai_display_rate(g_aiIps[0], appState.denoiseMode == DenoiseModeAi);
+    buffer[5] = ai_display_rate(g_aiIps[1], appState.segMode == SegmentationModeAi);
+    buffer[6] = ai_display_rate(g_aiIps[2], appState.arrMode == ArrhythmiaModeAi);
     buffer[7] = ecgMetResults.qos;
-    buffer[8] = ecgMetResults.denoiseuIpspw;
-    buffer[9] = ecgMetResults.segmentuIpspw;
-    buffer[10] = ecgMetResults.arrhythmiaIpspw;
+    const float powerMw = inference_power_mw(appState.speedMode != 0);
+    buffer[8] = 1.0e3f * buffer[4] / powerMw;
+    buffer[9] = 1.0e3f * buffer[5] / powerMw;
+    buffer[10] = 1.0e3f * buffer[6] / powerMw;
     pack_and_enqueue_tio_packet(0, 1, buffer, 11 * sizeof(float32_t));
 }
 
@@ -1375,6 +1360,10 @@ send_cpu_signals(void)
 static void
 send_cpu_metrics(void)
 {
+    appMetResults.avgAiIps = ai_average_rate(
+        ai_display_rate(g_aiIps[0], appState.denoiseMode == DenoiseModeAi),
+        ai_display_rate(g_aiIps[1], appState.segMode == SegmentationModeAi),
+        ai_display_rate(g_aiIps[2], appState.arrMode == ArrhythmiaModeAi));
     float32_t buffer[3];
     buffer[0] = appMetResults.cpuPercUtil;
     buffer[1] = appMetResults.batteryDays;
@@ -1495,6 +1484,7 @@ EcgProcessTask(void *pvParameters)
             ringbuffer_seek(&rbEcgDen, ECG_DEN_VALID_LEN);
 
             ecgMetResults.denoiseIps = ips_from_delta_us(dwt_delta_us(tickStart));
+            g_aiIps[0] = ai_display_rate(ecgMetResults.denoiseIps, modelLatUs > 0 && err == 0);
             ecgMetResults.denoiseLatUs = modelLatUs;
             ecgMetResults.denoiseLatMaxUs = MAX(ecgMetResults.denoiseLatMaxUs, modelLatUs);
             /* Publish the run counter AFTER the duration it belongs to, never
@@ -1580,6 +1570,7 @@ EcgProcessTask(void *pvParameters)
             ringbuffer_seek(&rbEcgSeg, ECG_SEG_VALID_LEN);
 
             ecgMetResults.segmentIps = ips_from_delta_us(dwt_delta_us(tickStart));
+            g_aiIps[1] = ai_display_rate(ecgMetResults.segmentIps, modelLatUs > 0 && err == 0);
             ecgMetResults.segmentLatUs = modelLatUs;
             ecgMetResults.segmentLatMaxUs = MAX(ecgMetResults.segmentLatMaxUs, modelLatUs);
             /* Counter after duration, barrier required -- see the denoise
@@ -1624,6 +1615,7 @@ EcgProcessTask(void *pvParameters)
             ringbuffer_seek(&rbEcgMaskMet, ECG_MET_VALID_LEN);
 
             ecgMetResults.arrhythmiaIps = ips_from_delta_us(dwt_delta_us(tickStart));
+            g_aiIps[2] = ai_display_rate(ecgMetResults.arrhythmiaIps, modelLatUs > 0 && arrErr == 0);
             ecgMetResults.arrhythmiaLatUs = modelLatUs;
             ecgMetResults.arrhythmiaLatMaxUs = MAX(ecgMetResults.arrhythmiaLatMaxUs, modelLatUs);
             /* Counter after duration, barrier required -- see the denoise
@@ -1759,80 +1751,15 @@ PpgProcessTask(void *pvParameters)
 // legacy's CpuProcessTask.
 
 ///////////////////////////////////////////////////////////////////////////////
-// Battery model -- three MCU states (issue #17)
+// Battery projection
 ///////////////////////////////////////////////////////////////////////////////
-//
-// MCU energy only, sensor excluded. Scope, sources, the margin and the
-// deployment-projection caveat on the sleep term are all documented beside the
-// constants in constants.h; read that header before changing anything here.
-//
-//   idleFrac      = 1 - busy
-//   inferenceFrac = sum over stages of (duration_i x runRate_i), clamped <= busy
-//   computeFrac   = busy - inferenceFrac, clamped >= 0
-//   avgPower_mW   = (inf x INFERENCE + cmp x COMPUTE + idle x SLEEP) / MARGIN
-//   batteryDays   = BATT_POWER_CAP / avgPower_mW / 24
-//
-// `busy` is cpuPercUtil, the MEASURED 30 s rolling utilisation, the same figure
-// the TileIO CPU packet carries. Everything the core runs is billed: the
-// inference share at inference power and the remainder, transport included, at
-// compute power (issues #8, #65). One measured figure therefore drives both the
-// dashboard tile and this estimate. The duty-cycle projection is reported
-// separately and never feeds this model.
-//
-// The sleep term assumes a quiet bus: with the async sensor read the task is
-// blocked while the IOM moves the FIFO, so that time is billed as idle even
-// though the peripheral is active.
-//
-// THE MODEL FOLLOWS THE OPERATING POINT. INFERENCE and COMPUTE are read per
-// window from the LP/HP constant pair that matches `appState.speedMode`, the
-// dashboard control that calls nsx_power_set_performance_mode() at runtime.
-// Without that, switching to high performance would REPORT more battery life:
-// the same work finishes ~2.6x faster, so both `busy` and the derived
-// inference duty fall, while the real draw is ~3x higher. SLEEP is shared
-// between the two -- Sleep 1 does not depend on the run clock.
+// Busy time comes from runtime statistics; stage weights come from timed run
+// counts. Their rolling windows must stay aligned. Async IOM activity can
+// overlap idle time, so quiet sleep remains a deployment assumption, not a
+// measurement of the streaming application. See AmbiqAI/heartkit-vitals-demo#68.
 
-/**
- * @brief Wall-time fraction one pipeline stage spent running, over a window.
- *
- * Both inputs are already measured, so nothing here is assumed: `ips` is the
- * stage's last DWT-timed duration in the legacy 2e6/deltaUs scale (see
- * ips_from_delta_us), which inverts to duration_s = 2/ips; `runsDelta` is that
- * stage's own run counter over `windowSec`, so the cadence is derived rather
- * than hardcoded at the nominal 2 s. A stage that stalls drops out of the sum
- * by itself, because its run counter stops advancing.
- *
- * A stage switched to DSP or OFF does NOT drop out. Its hkv_count() still
- * fires, and metrics_capture_ecg() runs unconditionally in the metrics branch,
- * so the stage keeps reporting a (much shorter) DWT duration and that time is
- * billed at inference power. This OVER-bills DSP and off modes, which is the
- * conservative direction, and it is deliberate: the counters stay a
- * measurement of what the pipeline actually did rather than a function of the
- * mode flags. Do not gate the counters on mode to "fix" this.
- *
- * Returns 0 whenever the stage did not run in this window. The ips <= 0 guard
- * is defensive only: store.c seeds all three *Ips at 1.0, so it never fires in
- * practice, and 1.0 is a legitimate ips (a 2 s stage) and cannot be used as a
- * cold-start sentinel. Cold start is handled instead by publishing each run
- * counter AFTER its duration, so runsDelta cannot count a run whose duration
- * has not been written yet. That ordering is NOT a property of the source
- * layout: the *Ips stores are non-volatile and the counter increments are
- * volatile, which C does not order against each other, and GCC was measured
- * reordering one of the three. It is enforced by an explicit
- * `__asm volatile("" ::: "memory")` barrier at each of the three sites in
- * EcgProcessTask. Removing a barrier reintroduces the poisoned first sample.
- *
- * Caveat worth knowing: `ips` is the LAST duration, not the window mean, so a
- * stage whose cost varies is billed at its most recent cost. The 30 s rolling
- * average downstream absorbs most of that.
- */
-static inline float32_t
-stage_duty_frac(uint32_t runsDelta, float32_t ips, float32_t windowSec)
-{
-    if (runsDelta == 0u || ips <= 0.0f || windowSec <= 0.0f) {
-        return 0.0f;
-    }
-    return (2.0f / ips) * ((float32_t)runsDelta / windowSec);
-}
+/* DSP/off paths still count as stage work and use the stage power profile.
+ * See AmbiqAI/heartkit-vitals-demo#68. */
 
 /* One attribution term's 30 s history, advanced from the SAME ring index and
  * fill state as the utilisation ring so every term describes one window. See #8. */
@@ -1875,6 +1802,9 @@ CpuProcessTask(void *pvParameters)
      * both terms of the model describe the same 30 s window. */
     float32_t infFracRolling[kCpuStatsRollingSeconds] = {0};
     float32_t infFracRollingSum = 0.0f;
+    cpu_rolling_t denDutyRolling = {};
+    cpu_rolling_t segDutyRolling = {};
+    cpu_rolling_t arrDutyRolling = {};
     uint32_t prevDenRuns = g_hkv_counters[HKV_CNT_PIPE_DEN_RUNS];
     uint32_t prevSegRuns = g_hkv_counters[HKV_CNT_PIPE_SEG_RUNS];
     uint32_t prevMetRuns = g_hkv_counters[HKV_CNT_PIPE_MET_RUNS];
@@ -2000,29 +1930,8 @@ CpuProcessTask(void *pvParameters)
             /* Inference duty for this window: each stage's own measured run
              * rate x its own measured duration. Counters are free-running and
              * never reset by the reporter, so a local delta is the window. */
-            /* TIMEBASE -- THE TWO TERMS MUST STAY ON THE SAME CLOCK.
-             * Both sides of the duty ratio are derived from SystemCoreClock,
-             * and that is what makes this correct in HP mode rather than a
-             * coincidence worth preserving deliberately:
-             *   - the numerator, 2/ips, comes from dwt_delta_us() (main.cc
-             *     :152), which divides DWT cycles by SystemCoreClock;
-             *   - the denominator comes from the FreeRTOS tick, and
-             *     configCPU_CLOCK_HZ is also SystemCoreClock.
-             * HISTORY, and why the invariant is still worth stating. Before
-             * issue #25 nothing updated SystemCoreClock on a performance-mode
-             * change, so it stayed at 96 MHz while the core ran at 250 MHz: in
-             * HP mode the measured durations AND this window were both
-             * over-reported by the same 250/96 = 2.604x and the factors
-             * CANCELLED, which is the only reason the duty was right. Issue
-             * #25 removed the need for that cancellation --
-             * timebase_sync_to_core_clock() now makes SystemCoreClock truthful
-             * and holds the tick at 1 ms -- so both terms are individually
-             * correct and the ratio is correct for the honest reason.
-             * The invariant survives the fix: DO NOT move this window to a
-             * different clock (RTC / STIMER) from the one dwt_delta_us()
-             * divides by. If the two ever disagree again, HP duty skews,
-             * inferenceFrac clamps to busy, and everything gets billed at
-             * inference power. They have to change together. */
+            /* DWT duration and reporting ticks must share the synchronized
+             * core timebase across speed changes. See AmbiqAI/heartkit-vitals-demo#25. */
             const TickType_t windowEndTicks = xTaskGetTickCount();
             const float32_t publishWindowSec =
                 (float32_t)(uint32_t)(windowEndTicks - publishWindowStart) / (float32_t)configTICK_RATE_HZ;
@@ -2047,6 +1956,9 @@ CpuProcessTask(void *pvParameters)
             cpu_rolling_put(&capRolling, cpuUtilRollingIndex, rollingFilled, capSecondAvg);
             cpu_rolling_put(&txRolling, cpuUtilRollingIndex, rollingFilled, txSecondAvg);
             cpu_rolling_put(&projInfRolling, cpuUtilRollingIndex, rollingFilled, projInfPctInstant);
+            cpu_rolling_put(&denDutyRolling, cpuUtilRollingIndex, rollingFilled, denFrac);
+            cpu_rolling_put(&segDutyRolling, cpuUtilRollingIndex, rollingFilled, segFrac);
+            cpu_rolling_put(&arrDutyRolling, cpuUtilRollingIndex, rollingFilled, metFrac);
             if (cpuUtilRollingCount < kCpuStatsRollingSeconds) {
                 cpuUtilRolling[cpuUtilRollingIndex] = cpuUtilSecondAvg;
                 cpuUtilRollingSum += cpuUtilSecondAvg;
@@ -2075,56 +1987,16 @@ CpuProcessTask(void *pvParameters)
                                                    100.0f * infFracRollingSum / windowCount, transportPerc);
             appMetResults.cpuProjPerc = hkv_cpu_proj_pct(capturePerc, projInfRolling.sum / windowCount);
 
-            /* Three-state split. See the header above CpuProcessTask and the
-             * sourced constants in constants.h. */
-            float32_t busyFrac = appMetResults.cpuPercUtil / 100.0f;
-            if (busyFrac < 0.0f) {
-                busyFrac = 0.0f;
-            } else if (busyFrac > 1.0f) {
-                busyFrac = 1.0f;
-            }
-            float32_t inferenceFrac = infFracRollingSum / (float32_t)cpuUtilRollingCount;
-            /* Clamped to busy, not asserted equal to it: the two come from
-             * independent measurements (FreeRTOS run-time stats vs DWT +
-             * counters) and nothing guarantees they agree. Over-clamping bills
-             * the excess at inference power, which is the conservative
-             * direction. */
-            if (inferenceFrac < 0.0f) {
-                inferenceFrac = 0.0f;
-            } else if (inferenceFrac > busyFrac) {
-                inferenceFrac = busyFrac;
-            }
-            float32_t computeFrac = busyFrac - inferenceFrac;
-            if (computeFrac < 0.0f) {
-                computeFrac = 0.0f;
-            }
-            const float32_t idleFrac = 1.0f - busyFrac;
-
-            /* Operating point, read once per window. appState.speedMode is a
-             * live dashboard control (TIO_UIO_SPEED_MODE_IDX -> set_speed_mode
-             * -> nsx_power_set_performance_mode), so the busy-state figures
-             * have to follow it or HP mode reports MORE battery life than LP
-             * while drawing ~3x the power. Sleep power is shared. See the
-             * constant pairs and their sources in constants.h. */
-            const bool hpMode = (appState.speedMode != 0);
-            const float32_t inferencePowerMw = inference_power_mw(hpMode);
-            const float32_t computePowerMw =
-                hpMode ? (float32_t)MCU_COMPUTE_POWER_MW_HP : (float32_t)MCU_COMPUTE_POWER_MW_LP;
-
-            const float32_t avgPower = (inferenceFrac * inferencePowerMw + computeFrac * computePowerMw +
-                                        idleFrac * (float32_t)MCU_SLEEP_POWER_MW) /
-                                       (float32_t)SYSTEM_POWER_MARGIN;
-
-            appMetResults.battInferenceFrac = inferenceFrac;
-            appMetResults.battAvgPowerMw = avgPower;
-            /* avgPower is bounded below by idle power for any real fraction set,
-             * so the guard is defensive against a constant being zeroed rather
-             * than a reachable state. */
-            appMetResults.batteryDays = (avgPower > 0.0f) ? ((float32_t)BATT_POWER_CAP / avgPower / 24.0f) : 0.0f;
+            const hkv_battery_estimate_t battery = hkv_battery_estimate(
+                hkv_battery_profile(appState.speedMode != 0), appMetResults.cpuPercUtil / 100.0f,
+                denDutyRolling.sum / windowCount, segDutyRolling.sum / windowCount,
+                arrDutyRolling.sum / windowCount);
+            appMetResults.battInferenceFrac = battery.inference_fraction;
+            appMetResults.battAvgPowerMw = battery.average_mw;
+            appMetResults.batteryDays = battery.days;
 
             send_cpu_metrics();
         }
-        appMetResults.avgAiIps = (ecgMetResults.denoiseIps + ecgMetResults.segmentIps + ecgMetResults.arrhythmiaIps) / 3.0f;
 
         ringbuffer_push(&rbEcgCpuTx, &ecgTaskPerc, 1);
         ringbuffer_push(&rbPpgCpuTx, &ppgTaskPerc, 1);
@@ -2674,13 +2546,19 @@ main(void)
             "SPI Init Failed\n");
 #else
     NSX_TRY(nsx_i2c_interface_init(&nsxI2cCfg, AS7058_I2C_SPEED_HZ) != NSX_STATUS_SUCCESS, "I2C Init Failed\n");
+#if defined(AM_PART_APOLLO330P)
+    /* The generic BSP IOM helper omits the click-specific pins; see #37. */
+    NSX_TRY(am_hal_gpio_pinconfig(AM_BSP_GPIO_IOM2_SCL_CB, g_AM_BSP_GPIO_IOM2_SCL_CB) != AM_HAL_STATUS_SUCCESS,
+            "Click SCL Init Failed\n");
+    NSX_TRY(am_hal_gpio_pinconfig(AM_BSP_GPIO_IOM2_SDA_CB, g_AM_BSP_GPIO_IOM2_SDA_CB) != AM_HAL_STATUS_SUCCESS,
+            "Click SDA Init Failed\n");
+#endif
 #endif
 
     NSX_TRY(rtos_time_init(), "RTOS Timer Init failed.\n");
 
     NSX_TRY(sensor_init(&sensorCtx) != ERR_SUCCESS, "Sensor Init failed.\n");
 
-    NSX_TRY(tflm_init(), "TFLM Init Failed\n");
     NSX_TRY(ecg_denoise_init(), "ECG Denoise Init Failed\n");
     NSX_TRY(ecg_segmentation_init(), "ECG Segmentation Init Failed\n");
     NSX_TRY(ecg_arrhythmia_init(), "ECG Arrhythmia Init Failed\n");
@@ -2733,11 +2611,11 @@ main(void)
      * every conclusion drawn from it is provisional. */
     hkv_log_boot();
 
-    /* Constant after AllocateTensors, so once is enough; emitted after the
+    /* Constant after model initialization, so once is enough; emitted after the
      * boot line to keep that line first in a capture. */
     hkv_log_begin("model");
-    hkv_log_u32("den_arena_used", (uint32_t)ecgDenModelCtx.arenaUsed);
-    hkv_log_u32("den_arena_size", (uint32_t)ecgDenModelCtx.arenaSize);
+    hkv_log_u32("den_arena_used", (uint32_t)ecg_denoise_arena_used());
+    hkv_log_u32("den_arena_size", (uint32_t)ecg_denoise_arena_size());
     hkv_log_u32("seg_arena_used", (uint32_t)ecg_segmentation_arena_used());
     hkv_log_u32("seg_arena_size", (uint32_t)ecg_segmentation_arena_size());
     hkv_log_u32("arr_arena_used", (uint32_t)ecg_arrhythmia_arena_used());

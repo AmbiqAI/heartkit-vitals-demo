@@ -1,0 +1,86 @@
+--- a/src/hkv_denoise_conv_2d_3.c
++++ b/src/hkv_denoise_conv_2d_3.c
+@@ -58,1 +58,1 @@
+-const cmsis_nn_conv_params_f32 conv_2d_3_params = {
++static const cmsis_nn_conv_params_f32 conv_2d_3_params = {
+--- a/src/hkv_denoise_conv_2d_6.c
++++ b/src/hkv_denoise_conv_2d_6.c
+@@ -58,1 +58,1 @@
+-const cmsis_nn_conv_params_f32 conv_2d_6_params = {
++static const cmsis_nn_conv_params_f32 conv_2d_6_params = {
+--- a/src/hkv_denoise_conv_2d_7.c
++++ b/src/hkv_denoise_conv_2d_7.c
+@@ -58,1 +58,1 @@
+-const cmsis_nn_conv_params_f32 conv_2d_7_params = {
++static const cmsis_nn_conv_params_f32 conv_2d_7_params = {
+--- a/src/hkv_denoise_conv_2d_11.c
++++ b/src/hkv_denoise_conv_2d_11.c
+@@ -58,1 +58,1 @@
+-const cmsis_nn_conv_params_f32 conv_2d_11_params = {
++static const cmsis_nn_conv_params_f32 conv_2d_11_params = {
+--- a/src/hkv_denoise_conv_2d_14.c
++++ b/src/hkv_denoise_conv_2d_14.c
+@@ -58,1 +58,1 @@
+-const cmsis_nn_conv_params_f32 conv_2d_14_params = {
++static const cmsis_nn_conv_params_f32 conv_2d_14_params = {
+--- a/src/hkv_denoise_conv_2d_15.c
++++ b/src/hkv_denoise_conv_2d_15.c
+@@ -58,1 +58,1 @@
+-const cmsis_nn_conv_params_f32 conv_2d_15_params = {
++static const cmsis_nn_conv_params_f32 conv_2d_15_params = {
+--- a/src/hkv_denoise_conv_2d_19.c
++++ b/src/hkv_denoise_conv_2d_19.c
+@@ -58,1 +58,1 @@
+-const cmsis_nn_conv_params_f32 conv_2d_19_params = {
++static const cmsis_nn_conv_params_f32 conv_2d_19_params = {
+--- a/src/hkv_denoise_conv_2d_22.c
++++ b/src/hkv_denoise_conv_2d_22.c
+@@ -58,1 +58,1 @@
+-const cmsis_nn_conv_params_f32 conv_2d_22_params = {
++static const cmsis_nn_conv_params_f32 conv_2d_22_params = {
+--- a/src/hkv_denoise_conv_2d_23.c
++++ b/src/hkv_denoise_conv_2d_23.c
+@@ -58,1 +58,1 @@
+-const cmsis_nn_conv_params_f32 conv_2d_23_params = {
++static const cmsis_nn_conv_params_f32 conv_2d_23_params = {
+--- a/src/hkv_denoise_conv_2d_27.c
++++ b/src/hkv_denoise_conv_2d_27.c
+@@ -58,1 +58,1 @@
+-const cmsis_nn_conv_params_f32 conv_2d_27_params = {
++static const cmsis_nn_conv_params_f32 conv_2d_27_params = {
+--- a/src/hkv_denoise_conv_2d_28.c
++++ b/src/hkv_denoise_conv_2d_28.c
+@@ -58,1 +58,1 @@
+-const cmsis_nn_conv_params_f32 conv_2d_28_params = {
++static const cmsis_nn_conv_params_f32 conv_2d_28_params = {
+--- a/src/hkv_denoise_depthwise_conv_2d_1.c
++++ b/src/hkv_denoise_depthwise_conv_2d_1.c
+@@ -57,1 +57,1 @@
+-const cmsis_nn_dw_conv_params_f32 depthwise_conv_2d_1_params = {
++static const cmsis_nn_dw_conv_params_f32 depthwise_conv_2d_1_params = {
+--- a/src/hkv_denoise_depthwise_conv_2d_2.c
++++ b/src/hkv_denoise_depthwise_conv_2d_2.c
+@@ -57,1 +57,1 @@
+-const cmsis_nn_dw_conv_params_f32 depthwise_conv_2d_2_params = {
++static const cmsis_nn_dw_conv_params_f32 depthwise_conv_2d_2_params = {
+--- a/src/hkv_denoise_depthwise_conv_2d_4.c
++++ b/src/hkv_denoise_depthwise_conv_2d_4.c
+@@ -57,1 +57,1 @@
+-const cmsis_nn_dw_conv_params_f32 depthwise_conv_2d_4_params = {
++static const cmsis_nn_dw_conv_params_f32 depthwise_conv_2d_4_params = {
+--- a/src/hkv_denoise_depthwise_conv_2d_12.c
++++ b/src/hkv_denoise_depthwise_conv_2d_12.c
+@@ -57,1 +57,1 @@
+-const cmsis_nn_dw_conv_params_f32 depthwise_conv_2d_12_params = {
++static const cmsis_nn_dw_conv_params_f32 depthwise_conv_2d_12_params = {
+--- a/src/hkv_denoise_depthwise_conv_2d_20.c
++++ b/src/hkv_denoise_depthwise_conv_2d_20.c
+@@ -57,1 +57,1 @@
+-const cmsis_nn_dw_conv_params_f32 depthwise_conv_2d_20_params = {
++static const cmsis_nn_dw_conv_params_f32 depthwise_conv_2d_20_params = {
+--- a/src/hkv_denoise_constants.c
++++ b/src/hkv_denoise_constants.c
+@@ -687,3 +687,2 @@
+     3, 47, -46, -68,
+ };
+-

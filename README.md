@@ -5,7 +5,7 @@ running the whole time and a live browser dashboard showing both the signals and
 what the silicon is doing to produce them.
 
 HeartKit Vitals Demo is an NSX firmware application. It captures ECG and PPG
-from an AS7058 sensor, runs DSP and TFLM ECG pipelines on-device, computes
+from an AS7058 sensor, runs DSP and AOT ECG pipelines on-device, computes
 heart-rate, HRV, pulse-rate, and SpO2 metrics, and streams everything to the
 Tileio web dashboard over USB. Apollo510B also supports Tileio over BLE.
 
@@ -180,7 +180,7 @@ tile derive from one measurement. A per-task breakdown and a deployment
 projection are emitted on the SWO `cpu` line as diagnostics; see
 `docs/developer.md`.
 
-Measured on `apollo510b_evb`, firmware 054c7ec (v5.1.0 pre-release), 180 s SWO
+Historical results on `apollo510b_evb`, firmware 054c7ec (v5.1.0 pre-release), 180 s SWO
 captures with the dashboard connected, 2026-09-05 (issues #65, #70):
 
 | Transport and mode | CPU | Battery est. | AI throughput |
@@ -201,43 +201,39 @@ second over USB in low power (issue #65), and a separate v5.0.0-era run put BLE
 at 37.7 percent against roughly 27 to 28 percent for USB (issue #19). Those
 figures are the record of those runs, not of this build.
 
-**MCU Battery Life (est., excl. sensor).** This is a **model, not a
-measurement**. It covers **MCU energy only; sensor power is deliberately
-excluded**, because sensor draw depends on LED count, drive strength, and
-sampling duty, none of which are properties of the MCU. The model splits time
-into inference, general compute, and sleep, and bills each at its own figure:
-sleep and per-MHz compute from the Apollo510B SoC Datasheet DS-A510B-1p1p0
-Table 39, inference from bench runlogs dated 2026-02-26. The busy fraction it
-bills is the measured CPU figure above, so everything the core runs, the demo
-transport included, is billed at active power, which means the estimate moves
-with the build. On firmware 054c7ec it models 36.3 days at 96 MHz over USB
-against a measured 16.1 percent busy fraction; on v5.0.0 it modelled about
-28 days, 27.7 days against a measured 30.5 percent busy fraction (issues #17,
-#25).
+**MCU Battery Life.** A duty-cycled MCU runtime projection using two coin cells
+(2 x 225 mAh at 3 V, 1.35 Wh nominal) and a 20% energy allowance. In AP510B LP
+mode, measured workload fractions weight each model's active power, other
+compute and quiet sleep. Runtime is usable energy divided by average power.
 
-It assumes a 1485 mWh budget (2 x 225 mAh at 3.3 V); the cell capacity is a
-chosen assumption, not a sourced figure (issue #18). The known errors run
-optimistic: the denoise stage has no power measurement and is billed at the
-segmentation figure, and the bench figures were taken on `apollo510_evb`.
+Model latency and memory benchmarks use heliaPROFILER (HPX). The battery
+profile uses separate GPIO-timed Joulescope JS110 captures on the MCU supply
+rail: repeated AOT inference including input-copy/loop overhead, a spin-loop
+proxy for other compute, and a quiet-sleep helper retaining sufficient memory
+capacity for the demo. See [measurement assumptions](docs/battery-projection.md).
 
-What it is not: it is not a product battery specification, it is not a system
-power measurement, and it is not a single-coin-cell figure. The sleep term is a
-projection rather than a measurement of this build, because the demo does not
-actually sleep, and it assumes a quiet bus: the sensor task is blocked while the
-IOM moves the sensor FIFO, so that transfer time is billed as idle.
+The projection assumes sleep between work periods, not continuous dashboard
+streaming. Sensor supply energy is excluded; the allowance does not replace
+sensor or battery characterization. HP and other-board power profiles retain
+their separate assumptions. Historical battery results above use an older profile.
 
-**AI Throughput (max sustained).** Inferences per second expressed as
-`2e6 / duration`, the scale the host dashboard expects (`ips_from_delta_us` in
-`src/main.cc`). This is a **throughput figure, not a run rate**. It answers "how
+**AI Throughput.** Inferences per second expressed as
+`1e6 / duration_us` (`ips_from_delta_us` in `src/inference_timing.h`).
+Duration includes the timed pipeline stage's overhead.
+The dashboard averages only AI-enabled models with a successful inference.
+Off and DSP stages report unavailable AI metrics; if none are available,
+AI Throughput displays "--". Internal stage timing still contributes to battery duty.
+This is a **throughput figure, not a run rate**. It answers "how
 fast does this model execute when it executes", not "how often does it execute".
 The models actually run about once every 2 seconds. Do not read the tile as the
 model firing hundreds of times a second.
 
-**Denoise Efficiency (est.)**, **Segment Efficiency (est.)**, and **Arrhythmia
-Efficiency (est.)**. AI efficiency in inferences per watt, one tile per model.
-Each is throughput divided by the modelled inference power, so all three inherit
-the estimate caveat from the battery model: the power term is the same modelled
-figure, from the same bench runlogs dated 2026-02-26.
+**Denoise Efficiency**, **Segment Efficiency**, and **Arrhythmia Efficiency**.
+AI efficiency in inferences per watt, one tile per model. Each is throughput
+divided by the modelled inference power from bench runlogs dated 2026-02-26.
+These power assumptions are separate from the AP510B LP battery profile.
+The dashboard converts the transmitted efficiency to microjoules per inference
+(`1e6 / IPS/W`, shown as `µJ/inf`); lower values indicate less energy per inference.
 
 **Speed toggle.** Switches the SoC at runtime between 96 MHz low-power and
 250 MHz high-performance operation. **Both modes are supported.** The default is

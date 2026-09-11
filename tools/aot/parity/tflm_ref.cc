@@ -5,7 +5,7 @@
  * @brief TFLM reference path for the parity runner.
  *
  * Mirrors ecg_segmentation_init()/ecg_arrhythmia_init() and the invoke halves
- * of their inference functions: same flatbuffers, same resolver (src/tflm.cc,
+ * of their inference functions: same flatbuffers, same resolver (tflm.cc,
  * linked as-is), same arena sizes from constants.h, same AM_SHARED_RW
  * placement, same input quantize and output handling. Those two .cc files are
  * not compiled in directly because they also pull store.h and pk_ecg.h, i.e.
@@ -22,6 +22,7 @@
 
 #include "constants.h"
 #include "ecg_arrhythmia_flatbuffer.h"
+#include "ecg_denoise_flatbuffer.h"
 #include "ecg_segmentation_flatbuffer.h"
 #include "tflm.h"
 
@@ -50,6 +51,17 @@ static tf_model_context_t arrCtx = {
     .arenaSize = arrTensorArenaSize,
     .arena = arrTensorArena,
     .buffer = ecg_arrhythmia_flatbuffer,
+    .model = nullptr,
+    .input = nullptr,
+    .output = nullptr,
+    .interpreter = nullptr,
+};
+
+AM_SHARED_RW alignas(16) static uint8_t denTensorArena[1024 * ECG_DEN_MODEL_SIZE_KB];
+static tf_model_context_t denCtx = {
+    .arenaSize = sizeof(denTensorArena),
+    .arena = denTensorArena,
+    .buffer = ecg_denoise_flatbuffer,
     .model = nullptr,
     .input = nullptr,
     .output = nullptr,
@@ -86,6 +98,31 @@ hkv_tflm_ref_seg_init(void) {
     static tflite::MicroInterpreter seg_interpreter(segCtx.model, *(segCtx.resolver), segCtx.arena, segCtx.arenaSize,
                                                     nullptr, segCtx.profiler);
     return finish_model(&segCtx, &seg_interpreter, "seg");
+}
+
+int32_t
+hkv_tflm_ref_den_init(void) {
+    tflm_init_model(&denCtx);
+    denCtx.model = tflite::GetModel(denCtx.buffer);
+    if (denCtx.model->version() != TFLITE_SCHEMA_VERSION) { return 1; }
+    static tflite::MicroInterpreter interpreter(denCtx.model, *denCtx.resolver, denCtx.arena,
+                                               denCtx.arenaSize, nullptr, denCtx.profiler);
+    return finish_model(&denCtx, &interpreter, "den");
+}
+
+int32_t
+hkv_tflm_ref_den_run(const float *in, int inLen, float *out, int outLen, uint32_t *cycles) {
+    if (denCtx.interpreter == nullptr || denCtx.input->type != kTfLiteFloat32 ||
+        denCtx.output->type != kTfLiteFloat32 ||
+        denCtx.input->bytes != (size_t)inLen * sizeof(float) ||
+        denCtx.output->bytes != (size_t)outLen * sizeof(float)) { return -1; }
+    memcpy(denCtx.input->data.f, in, denCtx.input->bytes);
+    uint32_t t0 = DWT->CYCCNT;
+    TfLiteStatus rc = denCtx.interpreter->Invoke();
+    *cycles = DWT->CYCCNT - t0;
+    if (rc != kTfLiteOk) { return (int32_t)rc; }
+    memcpy(out, denCtx.output->data.f, denCtx.output->bytes);
+    return 0;
 }
 
 int32_t

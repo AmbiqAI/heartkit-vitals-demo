@@ -8,7 +8,7 @@
 
 Reads `tools/aot/golden/golden-<m>.json` and the eight npz it lists, and writes
 `golden_<m>_cases.c/.h` holding the inputs and outputs in the model's native
-dtype (int8 for segmentation, float32 for arrhythmia). No dequantization and no
+dtype (int8 for segmentation, float32 for denoise and arrhythmia). No dequantization and no
 reshaping happens here: the runner memcpy's the input straight into the module's
 input tensor and compares raw output bytes, so any transform applied on the host
 would hide exactly the mismatch the runner exists to find.
@@ -33,6 +33,7 @@ OUT_DIR = REPO_ROOT / "tools" / "aot" / "parity"
 
 # model key -> (C identifier prefix, guard stem, human name)
 MODELS = {
+    "den": ("golden_den", "GOLDEN_DEN", "denoise"),
     "seg": ("golden_seg", "GOLDEN_SEG", "segmentation"),
     "arr": ("golden_arr", "GOLDEN_ARR", "arrhythmia"),
 }
