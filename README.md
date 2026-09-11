@@ -4,98 +4,120 @@ Powered by [heartKIT](https://ambiqai.github.io/heartkit/), accelerated with
 [heliaAOT](https://ambiqai.github.io/helia-aot/).
 
 Explore on-device AI for vital sign monitoring on Ambiq evaluation boards.
-This demo brings ECG and PPG signals, derived vitals, and AI performance metrics
-together in a live browser dashboard.
+View ECG and PPG waveforms, derived vitals, and AI performance together in a
+live browser dashboard.
 
-Three ECG models developed with heartKIT perform denoising, waveform
-segmentation, and arrhythmia classification. heliaAOT compiles the models into
-C modules that run directly in the firmware without an on-device model
-interpreter. See the [heartKIT documentation](https://ambiqai.github.io/heartkit/)
-for model development and the [heliaAOT documentation](https://ambiqai.github.io/helia-aot/)
-for ahead-of-time compilation and deployment.
+## What you can explore
 
-Built with neuralSPOT-X (NSX), the firmware captures signals from an AS7058
-sensor, processes them on-device, and streams results to the TileIO dashboard
-over USB. Apollo510B also supports BLE. The demo is for evaluation, not medical
-diagnosis.
+- **On-device signal processing.** Three ECG models developed with heartKIT
+  perform denoising, P-wave/QRS/T-wave segmentation, and arrhythmia classification.
+- **Compiled AI inference.** heliaAOT turns the models into C modules that run
+  directly in the firmware without an on-device model interpreter.
+- **Performance and energy tradeoffs.** Compare model modes, execution speed,
+  and energy per inference alongside CPU activity. Dashboard comparison slides
+  show heliaAOT versus TFLM reference results.
+- **Interactive evaluation.** View sensor signals or select stored stimuli,
+  adjust the available controls, and see the results without rebuilding firmware.
+- **A starting point for your application.** Use
+  [heartKIT](https://ambiqai.github.io/heartkit/) for model development,
+  [heliaAOT](https://ambiqai.github.io/helia-aot/) for compilation, and
+  [neuralSPOT-X (NSX)](https://ambiqai.github.io/neuralspotx/) for the firmware
+  build and deployment workflow.
 
-## What the demo shows
+The firmware processes signals on the board and sends results to
+[TileIO](https://ambiqai.github.io/tileio/) over USB, or BLE on Apollo510B.
 
-- ECG and PPG waveforms from the sensor, with stored stimuli available for testing.
-- Three ECG models running on-device: denoise, segmentation (P-wave, QRS,
-  T-wave), and arrhythmia classification. Segmentation bands are drawn on the
-  live trace.
-- Derived vitals: heart rate, HRV, pulse rate, SpO2, and PPG quality.
-- Device telemetry alongside the sensor signals: CPU utilization, a modeled
-  battery life, AI throughput, and AI efficiency.
-- Runtime controls for model modes and supported CPU operating modes.
+## What you need
 
-View signal processing and inference cost side by side to explore the tradeoffs
-between model performance, memory use, and energy consumption.
-
-## Hardware required
-
-| Board | SoC | Transport support |
+| Evaluation board | Connection | Release package folder |
 | --- | --- | --- |
-| `apollo510_evb` | Apollo510 | USB |
-| `apollo510b_evb` | Apollo510B | USB and BLE |
-| `apollo330mP_evb` | Apollo330P | USB |
+| Apollo510B EVB | USB or BLE | `v520/apollo510b/` |
+| Apollo510 EVB | USB | `v520/apollo510/` |
+| Apollo330 Plus EVB | USB | `v520/apollo330/` |
 
-`apollo510b_evb` is the default target and the one to use for a demo, because it
-is the only board with the BLE radio.
+Choose Apollo510B if you want to explore both USB and BLE. On Apollo330, use LP
+mode; its battery projection is not validated.
 
 You also need:
 
-- An AS7058 sensor. Sensor transport and profile selection are configured in
-  `src/constants.h` through `AS7058_BOARD_PROFILE` and `AS7058_APP_PROFILE`.
-- A USB cable for the data connection. This is what the browser talks to.
-- A SEGGER J-Link and the programming/debug USB connection, for flashing and SWO
-  only. Not needed once the board is flashed.
-- Chrome or Edge. Safari does not support WebUSB.
-
-Start with the prebuilt release package below, or build from source if you have
-access to the required dependencies.
+- A MIKROE Life Metrics Click sensor module based on the AS7058 for live ECG
+  and PPG input. See the [sensor profile guide](docs/as7058_profiles.md).
+- A data-capable USB cable.
+- SEGGER J-Link software and access to the board's programming/debug connection
+  for flashing.
+- Chrome or Edge for the dashboard.
 
 ## Quick start A: flash the prebuilt release binary
 
-No toolchain required. You need the SEGGER J-Link software installed and the
-EVB connected on its programming/debug USB port, powered on.
+No firmware toolchain is required.
 
 1. Download `heartkit-vitals-demo-v520-firmware.zip` from the
    [v5.2.0 release](https://github.com/AmbiqAI/heartkit-vitals-demo/releases/tag/v5.2.0).
-2. Unzip it, pick your board folder from the table below, and open it:
+2. Unzip the package and open the folder for your board from the table above.
+3. Power the board and connect its programming/debug USB port.
+4. Run the helper for your computer:
 
-   | Your EVB | Folder | Transports |
-   | --- | --- | --- |
-   | Apollo510B EVB | `v520/apollo510b/` | USB and BLE |
-   | Apollo510 EVB | `v520/apollo510/` | USB only |
-   | Apollo330 Plus EVB | `v520/apollo330/` | USB only |
+   - macOS: double-click `flash_mac.command`.
+   - Windows: run `flash_win.bat`.
+   - Linux: run `./flash_linux.sh`.
 
-   The Apollo510 and Apollo330 packages are USB only; BLE is available on the
-   Apollo510B alone. On the Apollo330, keep the speed toggle in low-power mode
-   only and do not quote the battery tile. Both points are covered under Board
-   differences below.
-3. Run the helper for your computer: double-click `flash_mac.command` on macOS,
-   run `flash_win.bat` on Windows, or run `./flash_linux.sh` on Linux.
-4. Wait for `Flash completed successfully.`, then move the USB cable to the data
-   connector.
+5. Wait for `Flash completed successfully.`, then connect the board's data
+   USB port to your computer.
 
-<!-- Maintainers: these J-Link values are resolved from the SoC facts file
-     (modules/nsx-ambiq-sdk/cmake/socs/facts/apollo510b.cmake) plus any board
-     override in boards/<board>/debug.cmake. They are duplicated here for
-     reader convenience only. If they change, update this line and
-     tools/release/package.sh together. -->
+For flashing troubleshooting, including macOS permissions and manual J-Link
+commands, see `v520/FLASH.md` in the package.
 
-If the helper does not run, flash from inside that same folder with
-`JLinkExe -nogui 1 -device AP510NFA-CBR -if SWD -speed 4000 -commandfile downloadfw.jlink`.
-The `apollo510b` and `apollo510` folders both use device `AP510NFA-CBR`; in the
-`apollo330` folder use `-device Apollo330P_510L` instead.
+## Connect with TileIO
 
-To confirm, check that the board enumerates as `heartkit-vitals-demo` on the
-WebUSB port. Full instructions, including the macOS Gatekeeper workaround, are
-in `v520/FLASH.md`.
+1. Open [TileIO](https://ambiqai.github.io/tileio/) and choose the built-in
+   **Vital Sign Monitoring** dashboard.
+2. In Settings, select **LIVE** API mode and reload if you changed it.
+3. Choose **Select Device**, select **USB**, and scan.
+4. Select the device named `heartkit-vitals-demo`, then connect.
+
+For Apollo510B over BLE, choose **BLE** instead of USB and follow the same
+selection flow.
+
+## Explore the dashboard
+
+Choose a sensor input or a stored stimulus using **Input Select**, then enable
+the AI modes you want to evaluate. Allow a few seconds for the processing
+windows to fill and the display to update.
+
+### Tiles glossary
+
+| Tile | What it shows |
+| --- | --- |
+| CPU Usage | Processor activity, including signal processing and dashboard communication. |
+| MCU Battery Life | Projected MCU runtime for a two-coin-cell scenario. |
+| AI Throughput | Average execution speed of active AI models, in inferences per second. |
+| Denoise, Segment, and Arrhythmia Efficiency | Energy per inference in `µJ/inf`. Lower is better. |
+| Heart Rate, HRV, Pulse Rate, and SpO2 | Vitals derived from the selected input signals. |
+| Denoise Similarity, Segmentation, and Arrhythmia Label | Signal comparison, waveform classification, and model output. |
+| PPG Quality | Quality indicator for the PPG signal. |
+
+Model efficiency tiles show `--` when the model is off, in DSP mode, or has
+not produced a valid result. AI Throughput shows `--` when no AI models have
+valid results.
+
+## Troubleshooting
+
+| Symptom | What to try |
+| --- | --- |
+| No device in the chooser | Check power and use a data-capable cable on the data connector, not the debug connector. |
+| Saved device will not connect | Disconnect and reconnect. If it still fails, use **Forget Device** and scan again. |
+| Connected but no updates | Confirm LIVE mode and the selected input, then reconnect. |
+| Model efficiency shows `--` | Enable that model's AI mode and wait for a result. |
+| Stale data after reopening a tab | Disconnect before closing the dashboard, or replug the data cable before reconnecting. |
+| BLE will not reconnect | Re-scan using BLE on Apollo510B. |
 
 ## Quick start B: build from source
+
+Source builds require authorized access to the private AS7058 driver dependency.
+Use the prebuilt package above if you do not have access.
+
+Follow the [developer guide](docs/developer.md) to install the prerequisites and
+set up the repository, then run:
 
 ```bash
 uv sync
@@ -104,181 +126,28 @@ uv run nsx build --app-dir . --board apollo510b_evb
 uv run nsx flash --app-dir . --board apollo510b_evb
 ```
 
-The built firmware is written to `build/<board>/heartkit-vitals-demo.bin`.
+Use `apollo510_evb` or `apollo330mP_evb` for the other boards. The firmware
+binary is written to `build/<board>/heartkit-vitals-demo.bin`.
 
-`pyproject.toml` requires `neuralspotx>=0.7.17`; `uv sync` handles this. Full
-build, flash, validation, and cleanup steps are in `docs/developer.md`.
+## Measurement and evaluation notes
 
-Building from source requires access to the private `nsx-as7058` module pinned
-in `nsx.lock`; without it `nsx configure` cannot fetch the AS7058 driver. For
-everyone else the prebuilt package in Quick start A is the supported path.
-
-## Connect with TileIO
-
-Open <https://ambiqai.github.io/tileio> in Chrome or Edge and select the
-built-in dashboard **Vital Sign Monitoring**.
-
-Check **Settings** first: API Mode must be **LIVE**, not **Emulate**. Emulate
-shows synthetic data and is not a demo of this firmware. Reload after changing
-it.
-
-**Over USB:**
-
-1. Move the USB cable to the board's data connector.
-2. Select Device, interface `usb`, Scan.
-3. Pick the Ambiq device. It enumerates with the product string
-   `heartkit-vitals-demo` (`src/main.cc`), vendor `Ambiq`.
-4. Select, then Connect. The dashboard should read Connected, and within about
-   10 seconds the waveforms move and the numeric tiles leave `--`.
-
-**Over BLE (`apollo510b_evb` only):**
-
-Same flow with interface `ble` instead of `usb`. Expect a higher CPU reading
-than USB; see the tiles glossary below.
-
-**The Forget Device snag.** If the board shows as already present but Connect
-fails, use **Forget Device**, then `usb` -> Scan -> select -> Connect. The Scan
-button is disabled while a stale device entry is active, so Forget is the only
-way out. This is the reliable recovery path and it was confirmed during USB
-validation. It is a stale-session recovery, not something every normal reconnect
-needs.
-
-## What you will see
-
-### Board differences
-
-The same firmware sources build for all three boards. The streaming pipeline,
-the sensor path, and the dashboard behave the same on every board. Only the
-points below differ.
-
-- **Transports.** `apollo510b_evb` supports USB and BLE. `apollo510_evb` and
-  `apollo330mP_evb` are USB only.
-- **Apollo510 figures are sourced.** The battery and clock figures used on the
-  Apollo510 come from its own datasheet, Apollo510 SoC Datasheet DS-A510-1p1p0
-  Table 39 p.250. The values are identical to the Apollo510B ones. The v5.0.0
-  timebase fix is active on this board and both speed modes work as they do on
-  the 510B.
-- **Apollo330: low-power mode only.** High-performance mode is not supported on
-  this board in v5.0.0. The timebase sync is a no-op there, so the toggle
-  selects 192 MHz and the timing-derived tiles misreport. Keep the speed toggle
-  in low-power mode.
-- **Apollo330: the battery tile is not sourced.** On this board the battery tile
-  uses unsourced fallback figures. Do not quote it. Sourced Apollo330 Plus
-  figures, from the preliminary Apollo330 Plus datasheet DS-A330PS-0p9p0, are
-  recorded for the follow-up release.
-- **Not flashed in this cycle.** The `apollo510` and `apollo330` packages were
-  not flashed on hardware in this release cycle. They are built from the same
-  sources as the Apollo510B package, and the Apollo510B hardware run is the
-  smoke test for that shared code. The board-specific paths listed above are
-  compile-time and documented, not exercised.
-
-Provenance: owner decisions recorded on issue #33 (2026-09-02), with the figure
-sourcing on issues #25 and #18.
-
-### Tiles glossary
-
-| Tile | What it shows |
-| --- | --- |
-| CPU Usage | Processor activity, including signal processing and dashboard communication. |
-| MCU Battery Life | Projected MCU runtime for a two-coin-cell scenario with idle periods between work. It excludes sensor power and is not measured battery life for continuous streaming. |
-| AI Throughput | Average execution speed of active AI models, in inferences per second. It is not how often the models run. |
-| Denoise, Segment, and Arrhythmia Efficiency | Energy per inference in `µJ/inf`, based on execution timing and reference power values. Lower is better. |
-| Heart Rate, HRV, Pulse Rate, and SpO2 | Vitals derived from the selected input signals. |
-| Denoise Similarity, Segmentation, and Arrhythmia Label | Signal comparison, waveform classification, and model output. |
-| PPG Quality | Quality indicator for the PPG signal. |
-
-Model efficiency tiles show `--` when the model is off, in DSP mode, or has not
-yet produced a valid result. AI Throughput shows `--` when no AI models have
-valid results. The speed control selects supported CPU operating modes; keep
-Apollo330 in LP mode.
-
-For calculation details and measurement context, see the
-[developer guide](docs/developer.md#dashboard-metric-calculations) and
-[battery assumptions](docs/battery-projection.md).
-
-### Expected behavior
-
-These are correct and should not be reported as faults.
-
-- **The ECG trace lags real time by roughly 2.5 to 5 seconds, by design.** The
-  delay comes from the AI denoise and segmentation windows. It is a deliberate
-  trade of a larger fixed delay for a hard bound on jitter (issue #12). On a
-  scrolling trace it is invisible, but if you tap the sensor and watch for a
-  response, expect a multi-second wait.
-- **A steady 10 packets per second** for the ECG and PPG signal slots, one
-  second of signal per second (issue #12). A counter occasionally reading 9 or
-  11 is a measurement artifact.
-- **Gaps are drawn only on real data loss.** The dashboard breaks the trace
-  honestly rather than drawing a smooth line across missing data. A gap after a
-  genuine stall is correct behavior. In hardware validation the demo recorded
-  zero visible ECG gaps over a 3-minute baseline and a 10-minute endurance run
-  (2026-09-01).
-
-## Troubleshooting
-
-| Symptom | Do this |
-| --- | --- |
-| Connect fails, device already listed, Scan is grayed out | **Forget Device**, then `usb` -> Scan -> select -> Connect. |
-| No device in the chooser | Check the cable is on the **data** connector, not the debug connector, and that the board is powered. |
-| Tiles stay at `--` | Confirm Settings -> API Mode is **LIVE**, not Emulate, and reload. |
-| Dashboard shows Connected but nothing moves | Replug the data cable, then reconnect. |
-| First data after reopening the dashboard looks stale | Close the tab cleanly with Disconnect, or replug the cable. See known limitations. |
-| BLE will not reconnect | Forget the device in the dashboard, then re-scan on interface `ble`. Only `apollo510b_evb` has BLE. |
-| USB error or disconnect mid-demo | Replug and reconnect. Streaming resumes at the normal rate; the firmware never bursts above real time to catch up. |
-
-## Observability
-
-Open the board-specific SWO viewer:
-
-```bash
-uv run nsx view --app-dir . --board apollo510b_evb
-```
-
-The firmware emits machine-parseable lines in the format:
-
-```
-HKV|<uptime_ms>|<seq>|<subsystem>|<k=v>...
-```
-
-The sequence number lets you tell a dropped SWO line apart from a firmware
-stall. See `src/obs.c` and issue #11 for the observability rework.
-
-Two build flags control what is emitted (`src/constants.h`):
-
-- `EN_APP_REPORT`, default `1`. The periodic subsystem report. This is the
-  always-on telemetry and it is what you normally read.
-- `EN_APP_TRACE`, default `0`. Ad hoc per-event lines. Off by default and
-  compiled out entirely, including the arguments.
-
-Counters are always compiled in regardless of the flags.
-
-## Design record
-
-`docs/design/streaming-pipeline.md` records the real-time streaming pipeline
-rework: the measured root cause of the original ECG gaps, the decision to trade
-fixed delay for bounded jitter, the no-catch-up policy, and the buffer sizing
-derivation.
-
-## Known limitations
-
-- **Stale first data after an unclean tab close (issue #13, open).** If the
-  browser tab is closed uncleanly with the USB cable left in, the device sees no
-  bus event, so the first data shown when the dashboard is reopened can be
-  stale. Using a clean Disconnect, or replugging the cable, avoids it.
-- **TimedSignal v2 deferred to v5.1 (issue #5, open).** Owner decision,
-  2026-09-01. The demo works correctly without it; the streaming fix landed
-  separately and is verified on hardware.
-- **Battery and efficiency figures are modeled, not measured.** See the tiles
-  glossary.
+- AI execution timing is measured. Energy per inference combines that timing
+  with reference power values; it is not a live power-meter reading.
+  AI Throughput describes execution speed, not how often models are scheduled.
+- Battery life is a workload-based MCU projection with idle periods between
+  work. It excludes sensor power and is not measured runtime of the continuously
+  streaming demo. See the [calculation and measurement assumptions](docs/battery-projection.md).
+- This is an evaluation demo, not a medical diagnostic device. Hardware coverage
+  varies by board and interface; see the [release validation record](docs/release-v5.2.0-validation.md).
 
 ## Documentation
 
-- `docs/fae-runbook.md` is the one-page demo runbook for trade shows.
-- `docs/developer.md` explains setup, build, flash, validation, and cleanup.
-- `docs/as7058_profiles.md` explains AS7058 sensor profiles and regeneration.
-- `docs/design/streaming-pipeline.md` is the streaming pipeline design record.
-- `DEVELOPMENT_STATUS.md` records current hardware validation and follow-up
-  engineering work.
+- [Developer guide](docs/developer.md): build, flash, diagnostics, and validation.
+- [Demo walkthrough](docs/fae-runbook.md): a short guide to presenting the demo.
+- [Sensor profiles](docs/as7058_profiles.md): sensor configuration and regeneration.
+- [Streaming design](docs/design/streaming-pipeline.md): buffering and timing details.
+- [Model provenance](assets/README.md): model inputs and licensing.
+- [Contributing](CONTRIBUTING.md) and [security reporting](SECURITY.md).
 
 ## License
 
@@ -298,17 +167,3 @@ generated from the modules pinned in `nsx.lock` by
 The AS7058 sensor driver is proprietary ams-OSRAM software. It is distributed
 in binary form only, as part of the prebuilt firmware, under Ambiq's agreement
 with ams-OSRAM; its source is not in this repository. See `NOTICE`.
-
-## Repository Layout
-
-- `boards/` contains the three NSX board definitions.
-- `src/` contains application and model-pipeline sources.
-- `assets/` contains model, dashboard, stimulus, and AS7058 profile inputs.
-- `nsx.yml` and `nsx.lock` define the reproducible NSX dependency closure.
-
-Downloaded dependencies in `modules/` and generated `cmake/nsx/` files are
-managed by the lockfile. The `modules/hkv_*_aot/` directories are committed
-model artifacts. Do not commit downloaded private dependency sources.
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution and build-access
-requirements, and [SECURITY.md](SECURITY.md) for private security reporting.
