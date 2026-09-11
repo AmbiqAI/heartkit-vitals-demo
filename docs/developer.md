@@ -1,4 +1,8 @@
-# Developer Guide
+# Vital Sign Monitoring Developer Guide
+
+The demo uses ECG models developed with
+[heartKIT](https://ambiqai.github.io/heartkit/) and compiled with
+[heliaAOT](https://ambiqai.github.io/helia-aot/).
 
 ## Prerequisites
 
@@ -88,6 +92,30 @@ an induced stall, counted drops past the hold watermark are designed
 behavior; see `docs/design/streaming-pipeline.md` section 7 for the full
 acceptance matrix.
 
+### Dashboard metric calculations
+
+The [README glossary](../README.md#tiles-glossary) describes the tiles for demo
+users. The details below are for interpreting firmware telemetry, not product
+performance specifications.
+
+- **CPU Usage:** `100 - idle` over the rolling window configured by
+  `kCpuStatsRollingSeconds` in `src/main.cc`. Dashboard transport work is
+  included. The same busy fraction is used by the battery projection.
+- **AI Throughput:** `1e6 / duration_us`, implemented by `ips_from_delta_us`
+  in `src/inference_timing.h`. This duration includes pipeline-stage overhead.
+  Only AI-enabled models with a successful inference contribute to the average.
+  Off and DSP stages report unavailable AI metrics but still contribute their
+  processing time to battery duty. Throughput is not invocation frequency.
+- **Model energy:** firmware transmits IPS/W using inference-power references
+  from the bench runlogs dated 2026-02-26. The dashboard converts this to
+  `µJ/inf = 1e6 / (IPS/W)`. These power references are separate from the
+  AP510B LP battery profile. This is not a live power-meter measurement.
+- **Battery projection:** workload fractions weight the model stages, other
+  compute, and quiet sleep. See [battery assumptions](battery-projection.md)
+  for capacity, allowance, power inputs, measurement methods, and scope.
+  heliaPROFILER latency/memory benchmarks and Joulescope MCU-rail captures
+  serve different purposes and should not be treated as interchangeable.
+
 ### CPU attribution
 
 The `cpu` line reports the measured CPU figure, a deployment projection and a
@@ -109,8 +137,10 @@ Settled means from 180 s captures on `apollo510b_evb`, firmware 054c7ec
 `avg_ips` 69; USB high performance `util` 8.0, `cpu_inf` 3.1, `batt_days` 27.8,
 `avg_ips` 198; BLE low power `util` 23.5, `cpu_inf` 9.8, `batt_days` 31.4,
 `avg_ips` 57. All three captures ended with zero missed samples and zero
-`bus_err`, `bus_reset`, `sens_restart` and stalls. Use these as the comparison
-baseline for the release gate below.
+`bus_err`, `bus_reset`, `sens_restart` and stalls. These are records of that
+build, not expected values for subsequent releases. The
+throughput normalization and battery profile changed after those captures;
+compare builds only after accounting for their metric definitions.
 
 The battery model's sleep term assumes a quiet bus. With the async sensor read
 the task is blocked while the IOM moves the FIFO, so that transfer time is

@@ -2,6 +2,9 @@
 
 Vital Sign Monitoring, a five-minute demonstration of on-device ECG models.
 
+Powered by [heartKIT](https://ambiqai.github.io/heartkit/), accelerated with
+[heliaAOT](https://ambiqai.github.io/helia-aot/).
+
 ## Before the demo
 
 - Use the matching v5.2.0 package: `v520/apollo510b/`, `v520/apollo510/`, or

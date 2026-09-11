@@ -1,28 +1,37 @@
-# HeartKit Vitals Demo
+# Vital Sign Monitoring
 
-Real-time ECG and PPG capture on an Ambiq Apollo5-family EVB, with on-device AI
-running the whole time and a live browser dashboard showing both the signals and
-what the silicon is doing to produce them.
+Powered by [heartKIT](https://ambiqai.github.io/heartkit/), accelerated with
+[heliaAOT](https://ambiqai.github.io/helia-aot/).
 
-HeartKit Vitals Demo is an NSX firmware application. It captures ECG and PPG
-from an AS7058 sensor, runs DSP and AOT ECG pipelines on-device, computes
-heart-rate, HRV, pulse-rate, and SpO2 metrics, and streams everything to the
-Tileio web dashboard over USB. Apollo510B also supports Tileio over BLE.
+Explore on-device AI for vital sign monitoring on Ambiq evaluation boards.
+This demo brings ECG and PPG signals, derived vitals, and AI performance metrics
+together in a live browser dashboard.
+
+Three ECG models developed with heartKIT perform denoising, waveform
+segmentation, and arrhythmia classification. heliaAOT compiles the models into
+C modules that run directly in the firmware without an on-device model
+interpreter. See the [heartKIT documentation](https://ambiqai.github.io/heartkit/)
+for model development and the [heliaAOT documentation](https://ambiqai.github.io/helia-aot/)
+for ahead-of-time compilation and deployment.
+
+Built with neuralSPOT-X (NSX), the firmware captures signals from an AS7058
+sensor, processes them on-device, and streams results to the TileIO dashboard
+over USB. Apollo510B also supports BLE. The demo is for evaluation, not medical
+diagnosis.
 
 ## What the demo shows
 
-- Live ECG and PPG waveforms captured from a real sensor, not a recording.
+- ECG and PPG waveforms from the sensor, with stored stimuli available for testing.
 - Three ECG models running on-device: denoise, segmentation (P-wave, QRS,
   T-wave), and arrhythmia classification. Segmentation bands are drawn on the
   live trace.
 - Derived vitals: heart rate, HRV, pulse rate, SpO2, and PPG quality.
-- Device telemetry alongside the clinical signals: CPU utilization, a modelled
+- Device telemetry alongside the sensor signals: CPU utilization, a modeled
   battery life, AI throughput, and AI efficiency.
-- A runtime speed toggle that moves the SoC between 96 MHz low-power and 250 MHz
-  high-performance operation while streaming continues.
+- Runtime controls for model modes and supported CPU operating modes.
 
-The point of the demo is the last two items. Plenty of things can draw an ECG.
-This one shows the inference cost and the power consequence next to the signal.
+View signal processing and inference cost side by side to explore the tradeoffs
+between model performance, memory use, and energy consumption.
 
 ## Hardware required
 
@@ -44,43 +53,23 @@ You also need:
   only. Not needed once the board is flashed.
 - Chrome or Edge. Safari does not support WebUSB.
 
-Two ways to get firmware onto the board. Build from source works today. The
-prebuilt package becomes available with the v5.0.0 release.
-
-## Quick start B: build from source
-
-```bash
-uv sync
-uv run nsx configure --app-dir . --board apollo510b_evb
-uv run nsx build --app-dir . --board apollo510b_evb
-uv run nsx flash --app-dir . --board apollo510b_evb
-```
-
-The built firmware is written to `build/<board>/heartkit-vitals-demo.bin`.
-
-`pyproject.toml` requires `neuralspotx>=0.7.17`; `uv sync` handles this. Full
-build, flash, validation, and cleanup steps are in `docs/developer.md`.
-
-Building from source requires access to the private `nsx-as7058` module pinned
-in `nsx.lock`; without it `nsx configure` cannot fetch the AS7058 driver. For
-everyone else the prebuilt package in Quick start A is the supported path.
+Start with the prebuilt release package below, or build from source if you have
+access to the required dependencies.
 
 ## Quick start A: flash the prebuilt release binary
 
 No toolchain required. You need the SEGGER J-Link software installed and the
 EVB connected on its programming/debug USB port, powered on.
 
-1. Download `heartkit-vitals-demo-v500-firmware.zip` from the
-   [v5.0.0 release](https://github.com/AmbiqAI/heartkit-vitals-demo/releases/tag/v5.0.0),
-   or from the team OneDrive under
-   `Demos/vital-sign-monitoring/firmware/v500/`.
+1. Download `heartkit-vitals-demo-v520-firmware.zip` from the
+   [v5.2.0 release](https://github.com/AmbiqAI/heartkit-vitals-demo/releases/tag/v5.2.0).
 2. Unzip it, pick your board folder from the table below, and open it:
 
    | Your EVB | Folder | Transports |
    | --- | --- | --- |
-   | Apollo510B EVB | `v500/apollo510b/` | USB and BLE |
-   | Apollo510 EVB | `v500/apollo510/` | USB only |
-   | Apollo330 Plus EVB | `v500/apollo330/` | USB only |
+   | Apollo510B EVB | `v520/apollo510b/` | USB and BLE |
+   | Apollo510 EVB | `v520/apollo510/` | USB only |
+   | Apollo330 Plus EVB | `v520/apollo330/` | USB only |
 
    The Apollo510 and Apollo330 packages are USB only; BLE is available on the
    Apollo510B alone. On the Apollo330, keep the speed toggle in low-power mode
@@ -104,12 +93,30 @@ The `apollo510b` and `apollo510` folders both use device `AP510NFA-CBR`; in the
 
 To confirm, check that the board enumerates as `heartkit-vitals-demo` on the
 WebUSB port. Full instructions, including the macOS Gatekeeper workaround, are
-in `v500/FLASH.md`.
+in `v520/FLASH.md`.
 
-## Connect with Tileio
+## Quick start B: build from source
+
+```bash
+uv sync
+uv run nsx configure --app-dir . --board apollo510b_evb
+uv run nsx build --app-dir . --board apollo510b_evb
+uv run nsx flash --app-dir . --board apollo510b_evb
+```
+
+The built firmware is written to `build/<board>/heartkit-vitals-demo.bin`.
+
+`pyproject.toml` requires `neuralspotx>=0.7.17`; `uv sync` handles this. Full
+build, flash, validation, and cleanup steps are in `docs/developer.md`.
+
+Building from source requires access to the private `nsx-as7058` module pinned
+in `nsx.lock`; without it `nsx configure` cannot fetch the AS7058 driver. For
+everyone else the prebuilt package in Quick start A is the supported path.
+
+## Connect with TileIO
 
 Open <https://ambiqai.github.io/tileio> in Chrome or Edge and select the
-built-in dashboard **HeartKit: Vital Sign Monitoring**.
+built-in dashboard **Vital Sign Monitoring**.
 
 Check **Settings** first: API Mode must be **LIVE**, not **Emulate**. Emulate
 shows synthetic data and is not a demo of this firmware. Reload after changing
@@ -170,109 +177,26 @@ sourcing on issues #25 and #18.
 
 ### Tiles glossary
 
-**CPU Usage.** Percent busy, computed as `100 - idle` over a 30-second rolling
-window (`kCpuStatsRollingSeconds` in `src/main.cc`). It includes everything the
-firmware does, which means the USB or BLE transport that exists only to feed
-this dashboard is counted in the number. A deployed product that streams nothing
-would read lower. BLE reads higher than USB for the same reason. The same number
-is the busy fraction the battery model bills, so the CPU tile and the battery
-tile derive from one measurement. A per-task breakdown and a deployment
-projection are emitted on the SWO `cpu` line as diagnostics; see
-`docs/developer.md`.
+| Tile | What it shows |
+| --- | --- |
+| CPU Usage | Processor activity, including signal processing and dashboard communication. |
+| MCU Battery Life | Projected MCU runtime for a two-coin-cell scenario with idle periods between work. It excludes sensor power and is not measured battery life for continuous streaming. |
+| AI Throughput | Average execution speed of active AI models, in inferences per second. It is not how often the models run. |
+| Denoise, Segment, and Arrhythmia Efficiency | Energy per inference in `µJ/inf`, based on execution timing and reference power values. Lower is better. |
+| Heart Rate, HRV, Pulse Rate, and SpO2 | Vitals derived from the selected input signals. |
+| Denoise Similarity, Segmentation, and Arrhythmia Label | Signal comparison, waveform classification, and model output. |
+| PPG Quality | Quality indicator for the PPG signal. |
 
-Historical results on `apollo510b_evb`, firmware 054c7ec (v5.1.0 pre-release), 180 s SWO
-captures with the dashboard connected, 2026-09-05 (issues #65, #70):
+Model efficiency tiles show `--` when the model is off, in DSP mode, or has not
+yet produced a valid result. AI Throughput shows `--` when no AI models have
+valid results. The speed control selects supported CPU operating modes; keep
+Apollo330 in LP mode.
 
-| Transport and mode | CPU | Battery est. | AI throughput |
-| --- | --- | --- | --- |
-| USB, 96 MHz low power | 16.1 percent | 36.3 days | about 55 to 70 IPS |
-| USB, 250 MHz high performance | 8.0 percent | 27.8 days | about 200 IPS |
-| BLE, 96 MHz low power | 23.5 percent | 31.4 days | about 55 to 70 IPS |
+For calculation details and measurement context, see the
+[developer guide](docs/developer.md#dashboard-metric-calculations) and
+[battery assumptions](docs/battery-projection.md).
 
-In low power, BLE costs about 7 points more CPU and about 5 fewer modelled
-battery days than USB. Throughput reads as a range because the settled mean over
-a capture and the tile at any one instant differ: the low-power means were 69
-inferences per second over USB and 57 over BLE, while the tile was read at 59
-and 61. All three captures ended with zero missed samples and zero bus errors,
-bus resets, sensor restarts and stalls.
-
-The v5.0.0 release measured 39.9 percent, 24.0 days and 58.5 inferences per
-second over USB in low power (issue #65), and a separate v5.0.0-era run put BLE
-at 37.7 percent against roughly 27 to 28 percent for USB (issue #19). Those
-figures are the record of those runs, not of this build.
-
-**MCU Battery Life.** A duty-cycled MCU runtime projection using two coin cells
-(2 x 225 mAh at 3 V, 1.35 Wh nominal) and a 20% energy allowance. In AP510B LP
-mode, measured workload fractions weight each model's active power, other
-compute and quiet sleep. Runtime is usable energy divided by average power.
-
-Model latency and memory benchmarks use heliaPROFILER (HPX). The battery
-profile uses separate GPIO-timed Joulescope JS110 captures on the MCU supply
-rail: repeated AOT inference including input-copy/loop overhead, a spin-loop
-proxy for other compute, and a quiet-sleep helper retaining sufficient memory
-capacity for the demo. See [measurement assumptions](docs/battery-projection.md).
-
-The projection assumes sleep between work periods, not continuous dashboard
-streaming. Sensor supply energy is excluded; the allowance does not replace
-sensor or battery characterization. HP and other-board power profiles retain
-their separate assumptions. Historical battery results above use an older profile.
-
-**AI Throughput.** Inferences per second expressed as
-`1e6 / duration_us` (`ips_from_delta_us` in `src/inference_timing.h`).
-Duration includes the timed pipeline stage's overhead.
-The dashboard averages only AI-enabled models with a successful inference.
-Off and DSP stages report unavailable AI metrics; if none are available,
-AI Throughput displays "--". Internal stage timing still contributes to battery duty.
-This is a **throughput figure, not a run rate**. It answers "how
-fast does this model execute when it executes", not "how often does it execute".
-The models actually run about once every 2 seconds. Do not read the tile as the
-model firing hundreds of times a second.
-
-**Denoise Efficiency**, **Segment Efficiency**, and **Arrhythmia Efficiency**.
-AI efficiency in inferences per watt, one tile per model. Each is throughput
-divided by the modelled inference power from bench runlogs dated 2026-02-26.
-These power assumptions are separate from the AP510B LP battery profile.
-The dashboard converts the transmitted efficiency to microjoules per inference
-(`1e6 / IPS/W`, shown as `µJ/inf`); lower values indicate less energy per inference.
-
-**Speed toggle.** Switches the SoC at runtime between 96 MHz low-power and
-250 MHz high-performance operation. **Both modes are supported.** The default is
-96 MHz low power.
-
-Measured on `apollo510b_evb`, firmware 054c7ec (v5.1.0 pre-release), 180 s
-capture over USB with the dashboard connected, 2026-09-05, in 250 MHz
-high-performance mode expect:
-
-- AI throughput **2 to 3x, varying by model and build**. This firmware measured
-  about 200 inferences per second against 55 to 70 in low power, roughly 2.9x.
-  On v5.0.0-era builds, measured 2026-09-01 and 2026-09-02 (issue #25), two
-  builds of the same code measured average throughput of 67.8 against 135.5
-  inferences per second, and 66.2 against 182.6. The models execute in place
-  from MRAM with their arenas in shared SRAM, so binary layout changes how the
-  largest model caches and moves the three-stage mean without moving inference
-  duty. The bench harness, with the models and arena held in TCM, measured
-  2.59x.
-- The three efficiency tiles **change by model in high performance: a tile may
-  read higher or lower**. The tiles are throughput divided by inference power, so
-  they carry the same binary layout effect as throughput and the three models do
-  not move together. Paired low-power and high-performance readings on the
-  released v5.0.0 build recorded mixed directions across the three tiles (issue
-  #25). The 2026-02-26 bench runlogs measured energy per inference rising about
-  17 percent for segmentation in the harness (issue #18); that is a harness
-  result, and the on-device tile did not reproduce it. Read the live tiles rather
-  than quoting a direction or a percentage in advance.
-- A lower battery figure: 27.8 days modelled at 250 MHz against a measured
-  8.0 percent busy fraction, compared with 36.3 days at 96 MHz on the same
-  firmware. The busy fraction falls because each inference finishes sooner,
-  while the model bills more power for the time the core is busy, so the
-  estimate still lands lower. On v5.0.0 the same comparison was 14.6 days
-  against a measured 22.3 percent busy fraction, compared with 27.7 days at
-  96 MHz (issue #25).
-
-If you are looking at an older build, note that a timebase defect made
-high-performance figures read wrong; it was fixed in v5.0.0 (issue #25).
-
-### Expected behaviour
+### Expected behavior
 
 These are correct and should not be reported as faults.
 
@@ -286,7 +210,7 @@ These are correct and should not be reported as faults.
   11 is a measurement artifact.
 - **Gaps are drawn only on real data loss.** The dashboard breaks the trace
   honestly rather than drawing a smooth line across missing data. A gap after a
-  genuine stall is correct behaviour. In hardware validation the demo recorded
+  genuine stall is correct behavior. In hardware validation the demo recorded
   zero visible ECG gaps over a 3-minute baseline and a 10-minute endurance run
   (2026-09-01).
 
@@ -294,7 +218,7 @@ These are correct and should not be reported as faults.
 
 | Symptom | Do this |
 | --- | --- |
-| Connect fails, device already listed, Scan is greyed out | **Forget Device**, then `usb` -> Scan -> select -> Connect. |
+| Connect fails, device already listed, Scan is grayed out | **Forget Device**, then `usb` -> Scan -> select -> Connect. |
 | No device in the chooser | Check the cable is on the **data** connector, not the debug connector, and that the board is powered. |
 | Tiles stay at `--` | Confirm Settings -> API Mode is **LIVE**, not Emulate, and reload. |
 | Dashboard shows Connected but nothing moves | Replug the data cable, then reconnect. |
@@ -344,7 +268,7 @@ derivation.
 - **TimedSignal v2 deferred to v5.1 (issue #5, open).** Owner decision,
   2026-09-01. The demo works correctly without it; the streaming fix landed
   separately and is verified on hardware.
-- **Battery and efficiency figures are modelled, not measured.** See the tiles
+- **Battery and efficiency figures are modeled, not measured.** See the tiles
   glossary.
 
 ## Documentation

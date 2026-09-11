@@ -8,8 +8,8 @@ the repository root.
 ## Models
 
 The three TensorFlow Lite models were trained by Ambiq using
-[HeartKit](https://github.com/AmbiqAI/heartkit) (BSD-3-Clause) with the
-training configurations kept alongside them in this folder. HeartKit itself is
+[heartKIT](https://github.com/AmbiqAI/heartkit) (BSD-3-Clause) with the
+training configurations kept alongside them in this folder. heartKIT itself is
 separately licensed BSD-3-Clause and is not vendored here.
 
 Production firmware executes generated heliaAOT modules in `modules/hkv_*_aot/`,
@@ -22,10 +22,10 @@ carry their own heliaAOT license, separate from the source models' BSD license.
 | Configuration | `den-tcn-sm.json` (task `hk-denoise`) | `seg-4-tcn-sm.json` (task `hk-segmentation-4`) | `arr-4-eff-sm.json` (task `hk-rhythm-4`, run name `arr-4-eff-sm-ei`) |
 | Architecture | TCN, four blocks, 8/16/24/32 filters, kernel 1x7, dilation 1/1/2/4; FP32 weights, float32 I/O | TCN, four blocks, 16/24/32/48 filters, kernel 1x7, dilation 1/2/4/8, dropout 0.1; INT8 post-training quantization, int8 I/O | EfficientNetV2, 16 input filters and five blocks, 24/32/48/64/80 filters, kernel 1x9, stride 1x2; FP32 weights, float32 I/O |
 | Input window and stride | 256 samples at 100 Hz (2.56 s), input and output `[1, 256, 1]` float32; the firmware advances 206 samples per inference (`ECG_DEN_VALID_LEN`) | 256 samples at 100 Hz (2.56 s), input `[1, 256, 1]` int8, output `[1, 256, 4]` int8 over classes NONE/P-WAVE/QRS/T-WAVE; the firmware advances 206 samples per inference (`ECG_SEG_VALID_LEN`) | 500 samples at 100 Hz (5 s), input `[1, 500, 1]` float32, output `[1, 4]` float32 over classes SR/SB/AFIB/GSVT; it runs on the first 500 samples of the 1000-sample metrics window, which advances 200 samples per cycle (`ECG_MET_VALID_LEN`) |
-| Training datasets named in the configuration | `ecg-synthetic` (HeartKit's generator) at weight 0.9 and `ptbxl` at weight 0.1 | `ludb` at weight 0.20 and `ecg-synthetic` (HeartKit's generator) at weight 0.80 | `lsad` only |
-| HeartKit version | HeartKit v1.0.0 (training runs were not version-tracked at the time; later models will record the exact tag or commit) | HeartKit v1.0.0 (training runs were not version-tracked at the time; later models will record the exact tag or commit) | HeartKit v1.0.0 (training runs were not version-tracked at the time; later models will record the exact tag or commit) |
+| Training datasets named in the configuration | `ecg-synthetic` (heartKIT's generator) at weight 0.9 and `ptbxl` at weight 0.1 | `ludb` at weight 0.20 and `ecg-synthetic` (heartKIT's generator) at weight 0.80 | `lsad` only |
+| heartKIT version | heartKIT v1.0.0 (training runs were not version-tracked at the time; later models will record the exact tag or commit) | heartKIT v1.0.0 (training runs were not version-tracked at the time; later models will record the exact tag or commit) | heartKIT v1.0.0 (training runs were not version-tracked at the time; later models will record the exact tag or commit) |
 | Training run | not archived | not archived | not archived |
-| Dataset redistribution terms | PTB-XL on PhysioNet, licence Creative Commons Attribution 4.0 International Public License, https://physionet.org/content/ptb-xl/, checked 2026-09-05. HeartKit synthetic ECG generator, BSD-3-Clause with HeartKit. | LUDB on PhysioNet, licence Open Data Commons Attribution License v1.0, https://physionet.org/content/ludb/, checked 2026-09-05. HeartKit synthetic ECG generator, BSD-3-Clause with HeartKit. | LSAD (Large Scale 12-lead ECG database, Chapman-Shaoxing/Ningbo) on PhysioNet, licence Creative Commons Attribution 4.0 International Public License, https://physionet.org/content/ecg-arrhythmia/, checked 2026-09-05. |
+| Dataset redistribution terms | PTB-XL on PhysioNet, license Creative Commons Attribution 4.0 International Public License, https://physionet.org/content/ptb-xl/, checked 2026-09-05. heartKIT synthetic ECG generator, BSD-3-Clause with heartKIT. | LUDB on PhysioNet, license Open Data Commons Attribution License v1.0, https://physionet.org/content/ludb/, checked 2026-09-05. heartKIT synthetic ECG generator, BSD-3-Clause with heartKIT. | LSAD (Large Scale 12-lead ECG database, Chapman-Shaoxing/Ningbo) on PhysioNet, license Creative Commons Attribution 4.0 International Public License, https://physionet.org/content/ecg-arrhythmia/, checked 2026-09-05. |
 | Model license | BSD 3-Clause with this repository (`LICENSE`, `NOTICE`) | BSD 3-Clause with this repository (`LICENSE`, `NOTICE`) | BSD 3-Clause with this repository (`LICENSE`, `NOTICE`) |
 
 The models are Ambiq-authored work product and are licensed with this
@@ -40,7 +40,7 @@ SHA-256 of the shipped files, for pinning an answer to a specific artifact:
 
 All three files and their configurations entered the repository in a single
 commit, `7e8c36d` of 2024-11-01, whose message is "feat: Latest version." The
-commit itself records no HeartKit version and no training run; the values in
+commit itself records no heartKIT version and no training run; the values in
 those two rows come from the model owner.
 
 ### Denoise frame size
