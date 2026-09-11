@@ -12,10 +12,10 @@ The three TensorFlow Lite models were trained by Ambiq using
 training configurations kept alongside them in this folder. HeartKit itself is
 separately licensed BSD-3-Clause and is not vendored here.
 
-Each model is embedded in the firmware as a C array. The arrays in
-`src/ecg_denoise_flatbuffer.h`, `src/ecg_segmentation_flatbuffer.h` and
-`src/ecg_arrhythmia_flatbuffer.h` decode byte for byte to the `.tflite` files
-in this folder, so the table below describes what ships.
+Production firmware executes generated heliaAOT modules in `modules/hkv_*_aot/`,
+not a TensorFlow Lite interpreter. The `.tflite` files below are the source
+model assets used for conversion and reference validation. Generated modules
+carry their own heliaAOT license, separate from the source models' BSD license.
 
 | Field | `denoise.tflite` | `segmentation.tflite` | `arrhythmia.tflite` |
 | --- | --- | --- | --- |

@@ -362,6 +362,10 @@ Ambiq-authored code in this repository is licensed under the BSD 3-Clause
 License; see `LICENSE`. The models in `assets/` are covered by the same license
 (provenance in `assets/README.md`).
 
+The generated `modules/hkv_*_aot/` sources use the heliaAOT license included
+in each module, which restricts use to Ambiq hardware. They are not covered
+by the root BSD license. This is a mixed-license repository.
+
 The firmware binaries also contain third-party components under their own
 terms. `THIRD-PARTY-NOTICES.md` reproduces those licenses and notices; it is
 generated from the modules pinned in `nsx.lock` by
@@ -378,5 +382,9 @@ with ams-OSRAM; its source is not in this repository. See `NOTICE`.
 - `assets/` contains model, dashboard, stimulus, and AS7058 profile inputs.
 - `nsx.yml` and `nsx.lock` define the reproducible NSX dependency closure.
 
-`modules/` and `cmake/nsx/` are generated from the lockfile. Do not commit or
-edit their generated contents.
+Downloaded dependencies in `modules/` and generated `cmake/nsx/` files are
+managed by the lockfile. The `modules/hkv_*_aot/` directories are committed
+model artifacts. Do not commit downloaded private dependency sources.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution and build-access
+requirements, and [SECURITY.md](SECURITY.md) for private security reporting.
