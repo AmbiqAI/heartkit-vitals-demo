@@ -1227,6 +1227,9 @@ send_ecg_signals(void)
     }
 }
 
+/* Display rates must not reuse bypass timings needed by battery duty accounting. */
+static volatile float g_aiIps[3] = {NAN, NAN, NAN};
+
 static void
 send_ecg_metrics(void)
 {
@@ -1235,13 +1238,14 @@ send_ecg_metrics(void)
     buffer[1] = ecgMetResults.hrv;
     buffer[2] = ecgMetResults.denoiseCossim;
     buffer[3] = ecgMetResults.arrhythmiaLabel;
-    buffer[4] = ecgMetResults.denoiseIps;
-    buffer[5] = ecgMetResults.segmentIps;
-    buffer[6] = ecgMetResults.arrhythmiaIps;
+    buffer[4] = ai_display_rate(g_aiIps[0], appState.denoiseMode == DenoiseModeAi);
+    buffer[5] = ai_display_rate(g_aiIps[1], appState.segMode == SegmentationModeAi);
+    buffer[6] = ai_display_rate(g_aiIps[2], appState.arrMode == ArrhythmiaModeAi);
     buffer[7] = ecgMetResults.qos;
-    buffer[8] = ecgMetResults.denoiseuIpspw;
-    buffer[9] = ecgMetResults.segmentuIpspw;
-    buffer[10] = ecgMetResults.arrhythmiaIpspw;
+    const float powerMw = inference_power_mw(appState.speedMode != 0);
+    buffer[8] = 1.0e3f * buffer[4] / powerMw;
+    buffer[9] = 1.0e3f * buffer[5] / powerMw;
+    buffer[10] = 1.0e3f * buffer[6] / powerMw;
     pack_and_enqueue_tio_packet(0, 1, buffer, 11 * sizeof(float32_t));
 }
 
@@ -1356,6 +1360,10 @@ send_cpu_signals(void)
 static void
 send_cpu_metrics(void)
 {
+    appMetResults.avgAiIps = ai_average_rate(
+        ai_display_rate(g_aiIps[0], appState.denoiseMode == DenoiseModeAi),
+        ai_display_rate(g_aiIps[1], appState.segMode == SegmentationModeAi),
+        ai_display_rate(g_aiIps[2], appState.arrMode == ArrhythmiaModeAi));
     float32_t buffer[3];
     buffer[0] = appMetResults.cpuPercUtil;
     buffer[1] = appMetResults.batteryDays;
@@ -1476,6 +1484,7 @@ EcgProcessTask(void *pvParameters)
             ringbuffer_seek(&rbEcgDen, ECG_DEN_VALID_LEN);
 
             ecgMetResults.denoiseIps = ips_from_delta_us(dwt_delta_us(tickStart));
+            g_aiIps[0] = ai_display_rate(ecgMetResults.denoiseIps, modelLatUs > 0 && err == 0);
             ecgMetResults.denoiseLatUs = modelLatUs;
             ecgMetResults.denoiseLatMaxUs = MAX(ecgMetResults.denoiseLatMaxUs, modelLatUs);
             /* Publish the run counter AFTER the duration it belongs to, never
@@ -1561,6 +1570,7 @@ EcgProcessTask(void *pvParameters)
             ringbuffer_seek(&rbEcgSeg, ECG_SEG_VALID_LEN);
 
             ecgMetResults.segmentIps = ips_from_delta_us(dwt_delta_us(tickStart));
+            g_aiIps[1] = ai_display_rate(ecgMetResults.segmentIps, modelLatUs > 0 && err == 0);
             ecgMetResults.segmentLatUs = modelLatUs;
             ecgMetResults.segmentLatMaxUs = MAX(ecgMetResults.segmentLatMaxUs, modelLatUs);
             /* Counter after duration, barrier required -- see the denoise
@@ -1605,6 +1615,7 @@ EcgProcessTask(void *pvParameters)
             ringbuffer_seek(&rbEcgMaskMet, ECG_MET_VALID_LEN);
 
             ecgMetResults.arrhythmiaIps = ips_from_delta_us(dwt_delta_us(tickStart));
+            g_aiIps[2] = ai_display_rate(ecgMetResults.arrhythmiaIps, modelLatUs > 0 && arrErr == 0);
             ecgMetResults.arrhythmiaLatUs = modelLatUs;
             ecgMetResults.arrhythmiaLatMaxUs = MAX(ecgMetResults.arrhythmiaLatMaxUs, modelLatUs);
             /* Counter after duration, barrier required -- see the denoise
@@ -1986,7 +1997,6 @@ CpuProcessTask(void *pvParameters)
 
             send_cpu_metrics();
         }
-        appMetResults.avgAiIps = (ecgMetResults.denoiseIps + ecgMetResults.segmentIps + ecgMetResults.arrhythmiaIps) / 3.0f;
 
         ringbuffer_push(&rbEcgCpuTx, &ecgTaskPerc, 1);
         ringbuffer_push(&rbPpgCpuTx, &ppgTaskPerc, 1);

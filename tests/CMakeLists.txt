@@ -27,6 +27,12 @@ set(HKV_TEST_FLAGS -Wall -Wextra -Werror -g ${HKV_SAN_FLAGS})
 
 enable_testing()
 
+add_executable(test_ai_rates_fast_math test_ai_rates.c)
+target_include_directories(test_ai_rates_fast_math PRIVATE ${HKV_SRC_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_options(test_ai_rates_fast_math PRIVATE ${HKV_TEST_FLAGS} -O3 -ffast-math)
+target_link_options(test_ai_rates_fast_math PRIVATE ${HKV_SAN_FLAGS})
+add_test(NAME test_ai_rates_fast_math COMMAND test_ai_rates_fast_math)
+
 foreach(part APOLLO510B APOLLO510 APOLLO330P)
     set(test_name test_battery_${part})
     add_executable(${test_name} test_battery_model.c)

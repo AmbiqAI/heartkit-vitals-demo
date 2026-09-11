@@ -6,6 +6,14 @@
 
 int main(void)
 {
+    CHECK(isnan(ai_display_rate(4200.0f, false)));
+    CHECK(isnan(ai_display_rate(NAN, true)));
+    CHECK(isnan(ai_display_rate(0.0f, true)));
+    CHECK_NEAR(ai_display_rate(50.0f, true), 50.0f, 0.001f);
+    CHECK(isnan(ai_average_rate(NAN, NAN, NAN)));
+    CHECK_NEAR(ai_average_rate(50.0f, NAN, NAN), 50.0f, 0.001f);
+    CHECK_NEAR(ai_average_rate(50.0f, NAN, 100.0f), 75.0f, 0.001f);
+    CHECK_NEAR(ai_average_rate(50.0f, 30.0f, 100.0f), 60.0f, 0.001f);
     CHECK_NEAR(ips_from_delta_us(10000u), 100.0f, 0.001f);
     CHECK_NEAR(ips_from_delta_us(20000u), 50.0f, 0.001f);
     CHECK_NEAR(ips_from_delta_us(0u), 1000000.0f, 0.001f);

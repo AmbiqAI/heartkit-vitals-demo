@@ -220,6 +220,9 @@ their separate assumptions. Historical battery results above use an older profil
 **AI Throughput.** Inferences per second expressed as
 `1e6 / duration_us` (`ips_from_delta_us` in `src/inference_timing.h`).
 Duration includes the timed pipeline stage's overhead.
+The dashboard averages only AI-enabled models with a successful inference.
+Off and DSP stages report unavailable AI metrics; if none are available,
+AI Throughput displays "--". Internal stage timing still contributes to battery duty.
 This is a **throughput figure, not a run rate**. It answers "how
 fast does this model execute when it executes", not "how often does it execute".
 The models actually run about once every 2 seconds. Do not read the tile as the
@@ -229,6 +232,8 @@ model firing hundreds of times a second.
 AI efficiency in inferences per watt, one tile per model. Each is throughput
 divided by the modelled inference power from bench runlogs dated 2026-02-26.
 These power assumptions are separate from the AP510B LP battery profile.
+The dashboard converts the transmitted efficiency to microjoules per inference
+(`1e6 / IPS/W`, shown as `µJ/inf`); lower values indicate less energy per inference.
 
 **Speed toggle.** Switches the SoC at runtime between 96 MHz low-power and
 250 MHz high-performance operation. **Both modes are supported.** The default is

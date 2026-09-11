@@ -4,7 +4,10 @@
 
 Complete the AOT migration and prepare local changes for review under issues
 #37 and #68. Owner approved branch push and draft PR update; those are published.
-No merge, release, packaging or scheduled work without approval.
+Owner requested the disabled-model telemetry fix and release after final smoke.
+Proposed version v5.2.0. Publication scope question is pending: AP510/AP330
+hardware coverage and the paired UI energy-reference timing caveat.
+No scheduled work is authorized.
 Work only in this worktree and the paired TileIO worktree.
 
 Branch: work/aot-021-denoise. Base: 04207dc. Migration commits: d0a4afc and
@@ -21,8 +24,19 @@ Local commits are approved; consult git log for their final IDs.
   by firmware and host regression tests. Scale-compatibility notes removed.
   Historical capture figures remain records of their original builds.
   All three board builds and eleven sanitizer tests pass after this correction.
-  Corrected binaries have not been flashed; older hardware evidence does not
-  validate this image. Dashboard needs no numeric conversion or range change.
+  Corrected AP510B binary flashed and verified on September 10. USB LP/all-AI
+  passed 90 seconds (2778 packets, CRC0); HP/all-Off passed 12 seconds (411,
+  CRC0); restored LP/all-AI passed 15 seconds (476, CRC0). Mode echoes matched.
+  Logs: /tmp/hkv-smoke-{flash,lp,off,restore}.log. No power measurements taken.
+  Off-mode bypass-rate finding is fixed locally: separate successful AI rates
+  from internal stage timing, unavailable values for Off/DSP, average only
+  available AI rates. Fast-math requires integer IEEE-754 validity checks.
+  First hardware iteration caught ordinary NaN checks failing in mixed mode.
+  Twelve host tests now pass, including an optimized fast-math regression.
+  Final corrected hardware matrix passed: 141 seconds, 4391 packets, CRC0.
+  All-AI, Off, DSP, mixed, restored AI verified on raw wire metrics.
+  See docs/release-v5.2.0-validation.md for counts, image hash and coverage.
+  All five hosted firmware PR checks passed on b2a6228.
 
 - Production denoise uses AOT 0.21.0; segmentation/arrhythmia retain accepted
   AOT 0.19.0 outputs. ns-cmsis-nn 7.32.0; production manifest/lock excludes
@@ -92,7 +106,8 @@ bank policy based only on static fit; dynamic peaks and wake behavior need tests
 AP510B probe1160002954; device AP510NFA-CBR. JS110004204 on positive MCU rail.
 GP0/J8-1 to JS110 IN0; J8-14 GND to JS110 GND. Logic reference 1.8 V, no JS110
 outputs/+5V connected. Sensor wiring and physical connections are owner-controlled.
-Fixture was disconnected at the last check; do not assume an installed image.
+AP510B is connected with corrected production image, restored LP/all-AI.
+Python released USB after testing. Joulescope is disconnected.
 
 Use NSX flash/reset/view or HPX wrappers. No raw J-Link fallback for empty SWO.
 Quiet capture uses HPX SWPOI reset; debug snapshots only after recording.
@@ -107,5 +122,5 @@ mechanical diff. Never stage modules/helia-rt, the optional external reference.
 
 Paired UI: tileio/.claude/worktrees/vitals-dashboard-labels,
 branch codex/vitals-dashboard-labels. Its root HANDOFF owns dashboard status.
-Next: inspect local commits, complete remaining hardware checks, obtain approval
-before merging or releasing either repo. Draft PR publication is complete.
+Next: push final fix and wait for hosted CI; prepare v5.2.0 release.
+Publication scope question remains pending. Draft PR publication is complete.
