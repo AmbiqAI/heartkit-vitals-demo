@@ -49,6 +49,34 @@ connection before retrying.
 
 ## Validation
 
+### Firmware diagnostics
+
+Open the board-specific SWO viewer:
+
+```bash
+uv run nsx view --app-dir . --board apollo510b_evb
+```
+
+The firmware emits machine-parseable lines in the format:
+
+```
+HKV|<uptime_ms>|<seq>|<subsystem>|<k=v>...
+```
+
+The sequence number lets you tell a dropped SWO line apart from a firmware
+stall. See `src/obs.c` and issue #11 for the observability rework.
+
+Two build flags control what is emitted (`src/constants.h`):
+
+- `EN_APP_REPORT`, default `1`. The periodic subsystem report. This is the
+  always-on telemetry and it is what you normally read.
+- `EN_APP_TRACE`, default `0`. Ad hoc per-event lines. Off by default and
+  compiled out entirely, including the arguments.
+
+Counters are always compiled in regardless of the flags.
+
+### Lockfile and USB smoke test
+
 Check that the lockfile still matches the manifest:
 
 ```bash
