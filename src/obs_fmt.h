@@ -1,23 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2026, Ambiq
-/**
- * @file obs_fmt.h
- * @brief Pure value arithmetic for the HKV diagnostic line format.
- *
- * Everything the line format computes that does NOT need FreeRTOS, nsx, or a
- * lock lives here rather than inside obs.c, for one reason: this header is
- * dependency-free (stdint only), so tests/test_obs_format.c can exercise it on
- * the host under ASan/UBSan. Anything left in obs.c is only reachable on
- * hardware, where a wrong answer shows up as a plausible number in a capture
- * rather than as a failing test.
- *
- * That is not a hypothetical distinction. All three functions below encode a
- * claim that the rest of the design leans on -- the sign of a negative metric,
- * the correctness of a delta across a counter wrap, and the difference between
- * "observed zero" and "observed nothing" -- and each one is a single line that
- * a refactor could plausibly "simplify" into being wrong.
- *
- * See obs.h for the line format and the counter/gauge model.
+/** @file obs_fmt.h
+ * @brief Dependency-free arithmetic for diagnostic serialization.
  */
 #ifndef __HKV_OBS_FMT_H
 #define __HKV_OBS_FMT_H
@@ -37,32 +21,9 @@ extern "C" {
 #define HKV_FX2_MAX_INPUT (21474836.0f)
 
 /**
- * @brief Scale a float to hundredths as a signed integer.
- *
- * REPLACES the idiom this file exists to kill:
- *
- *     printf("%d.%02d", (int)x, (int)(fabsf(x - (int)x) * 100))
- *
- * which is wrong twice. It LOSES THE SIGN for -1 < x < 0 (the integer part is
- * 0, prints as "0.50" for -0.5), and it pays for an fabsf, a subtraction and
- * two float->int conversions per field. This does one multiply, one add and
- * one conversion, and the sign is carried by the single integer it returns.
- *
- * The emitted key carries an `_x100` suffix so the scale is self-describing on
- * the wire and a consumer never has to guess (see hkv_log_fx2).
- *
- * Rounding is half-away-from-zero, so +0.005 -> 1 and -0.005 -> -1 and the
- * result is symmetric about zero. Truncation would bias every negative value
- * one count toward zero.
- *
- * Out-of-range and non-finite inputs are handled explicitly rather than left
- * to the C cast: converting a NaN or an out-of-range float to int32_t is
- * undefined behaviour, and these values genuinely occur -- ppgMetResults.spo2
- * is a ratio of two measured amplitudes and is NaN until the first valid PPG
- * window lands.
- *
- * @param v value to scale
- * @return v * 100 rounded, clamped to +/-INT32_MAX; HKV_FX2_INVALID for NaN
+ * @brief Scale a float to hundredths, rounding half away from zero.
+ * @param v Value to scale.
+ * @return Rounded value clamped to +/-INT32_MAX, or HKV_FX2_INVALID for NaN.
  */
 static inline int32_t
 hkv_fx2_from_float(float v)

@@ -1,18 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2026, Ambiq
-/**
- * @file store.h
- * @brief Central store for the NSX port (phase 6: full app orchestration).
- *
- * Extends the phase 3 DSP-only store with the pieces needed for full parity
- * with legacy heartkit-vitals-demo's main.cc: app_state_t runtime mode
- * switches (input source, denoise/segmentation/arrhythmia mode, noise
- * levels, CPU speed mode), the app-level CPU/battery metrics struct, the
- * raw+noisy ECG segmentation staging buffers, and the CPU-utilization
- * TileIO TX taps. AI-mode denoise/segmentation/arrhythmia model buffers
- * live in ecg_denoise.h/ecg_segmentation.h/ecg_arrhythmia.h (already
- * ported in phase 4) -- only the orchestration-level globals are added
- * here.
+/** @file store.h
+ * @brief Shared application state and signal buffers.
  */
 #ifndef __APP_STORE_H
 #define __APP_STORE_H
@@ -44,19 +33,11 @@ typedef struct {
     float32_t cpuPercUtil;
     float32_t batteryDays;
     float32_t avgAiIps;
-    /* Battery-model breakdown (issue #17). Diagnostics only -- these are
-     * emitted on the `cpu` HKV report line so the three-state split is
-     * observable on SWO, and are NOT part of the TileIO CPU metrics packet
-     * (send_cpu_metrics still sends exactly the first three fields). Only the
-     * two independent terms are kept: compute and idle are exact derivations
-     * of these and cpuPercUtil (see report_extra_cpu). battInferenceFrac is a
-     * 0..1 fraction of wall time. */
+    /* Diagnostic-only battery terms; excluded from TileIO metrics.
+     * battInferenceFrac is a wall-time fraction in [0,1]. */
     float32_t battInferenceFrac;
     float32_t battAvgPowerMw;
-    /* Deployment projection and its coarse breakdown (issues #8, #65).
-     * Percentages of wall time over the same 30 s window as cpuPercUtil, the
-     * measured figure they are stated against. Diagnostics only: emitted on the
-     * `cpu` HKV report line, not in the TileIO CPU metrics packet. */
+    /* Diagnostic percentages share the measured CPU reporting window. */
     float32_t cpuProjPerc;
     hkv_cpu_split_t cpuSplit;
 } metrics_app_results_t;
@@ -93,10 +74,7 @@ extern arm_biquad_casd_df1_inst_f32 ecgFilterCtx;
 
 extern float32_t ecgDenScratch[ECG_DEN_WINDOW_LEN];
 extern float32_t ecgDenInout[ECG_DEN_WINDOW_LEN];
-// Noise-free copy of the denoise input window, kept so EcgProcessTask can
-// compute a cosine-similarity "denoise quality" score against the noisy/
-// AI-denoised output when running in synthetic (non-live) input mode --
-// mirrors legacy's ecgDenNoise.
+// Retain the clean stimulus as the denoise-similarity reference.
 extern float32_t ecgDenNoise[ECG_DEN_WINDOW_LEN];
 extern rb_config_t rbEcgDen;
 // Parallel (non-filtered) raw+noise staging ringbuffer, teed alongside
@@ -135,19 +113,7 @@ extern hrv_td_metrics_t ecgHrvMetrics;
 
 extern metrics_ecg_results_t ecgMetResults;
 
-///////////////////////////////////////////////////////////////////////////////
-// PPG Metrics Configuration
-///////////////////////////////////////////////////////////////////////////////
-//
-// Phase 6 fix: sensor.c now applies the real dual-wavelength "click golden"
-// AS7058 profile (Red PPG1_SUB1 + IR PPG1_SUB2 + ECG) instead of the
-// earlier single-wavelength JSON bring-up profile (see sensor.c/
-// as7058_profiles.c) -- so metrics_capture_ppg() below now gets two real
-// channels and computes a genuine ratiometric SpO2 (via nsx-physiokit's own
-// pk_ppg math and the profile's a/b/c + dc_comp_red/ir calibration
-// coefficients, exposed via sensor_get_spo2_config() -- no AMS on-chip
-// bio_spo2_a0 algorithm needed; that stays a real Cortex-M packaging gap,
-// see sensor_get_spo2_config()'s doc comment in sensor.h).
+// PPG metrics buffers.
 
 extern rb_config_t rbPpg1Met; /* Red */
 extern rb_config_t rbPpg2Met; /* IR */
@@ -157,17 +123,7 @@ extern float32_t ppg2MetData[PPG_MET_WINDOW_LEN];
 
 extern metrics_ppg_results_t ppgMetResults;
 
-///////////////////////////////////////////////////////////////////////////////
-// TileIO Streaming Taps
-///////////////////////////////////////////////////////////////////////////////
-//
-// Separate from the metrics-stage ringbuffers above: these are lightweight
-// tap-offs of raw + denoised ECG + QRS mask (from EcgProcessTask's
-// preprocessing/segmentation stages) and downsampled dual-wavelength PPG
-// samples (from PpgProcessTask), drained by TioProcessTask in main.cc to
-// stream live signals to a Tileio host dashboard over nsx-tileio-usb. ECG
-// streams raw+denoised+mask (3ch), PPG streams Red+IR (2ch) -- both match
-// legacy.
+// Separate TX taps keep transport draining independent of metrics processing.
 
 extern rb_config_t rbEcgRawTx;
 extern rb_config_t rbEcgDenTx;

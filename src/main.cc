@@ -1,33 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2026, Ambiq
-/**
- * @file main.cc
- * @brief HeartKit vitals demo (NSX port, phase 6: full app orchestration).
- *
- * Full parity port of legacy heartkit-vitals-demo/src/main.cc onto the NSX
- * SDK: AS7058 PPG+ECG sensing (nsx-as7058), DSP (nsx-physiokit) and
- * AI/TFLM (nsx-helia-rt) ECG denoise/segmentation/arrhythmia pipelines
- * selectable at runtime via app_state_t mode switches (denoise/seg/
- * arrhythmia mode, input source, noise levels, CPU speed mode), a
- * FreeRTOS-runtime-stats-driven CPU utilization monitor, and TileIO USB
- * streaming (nsx-tileio-usb) with a full 3-channel ECG / metrics / CPU
- * packet layout matching legacy, plus host->device UIO mode control.
- *
- * Notes vs legacy (see plan.md phase 6 notes and sensor.h):
- *  - Canned-stimulus patient playback (load_patient_data, sensor.c) is now
- *    implemented: selecting a non-live input source via UIO substitutes the
- *    canned ecg/ppg1/ppg2 stimulus for live AS7058 FIFO data, enabling the
- *    noise-injection and denoise-quality cosine-similarity paths below.
- *  - True dual-wavelength PPG/SpO2: FIXED in this revision. sensor.c
- *    previously hardcoded the simplified single-wavelength JSON-generated
- *    "click_ppg_ecg" profile (one LED, wrong physical LED mapping baked
- *    into the raw JSON data); it now applies the real "click golden"
- *    profile via as7058_get_active_profile() (Red PPG1_SUB1 + IR PPG1_SUB2
- *    + ECG, matching legacy's default), with the LED sub1/sub2 physical
- *    mapping override legacy applies at runtime. PPG signal streaming is
- *    now 2ch and spo2 is a real ratiometric value (pk_ppg math + the
- *    profile's calibration coefficients -- no AMS on-chip bio_spo2_a0
- *    algorithm needed, see sensor.h).
+/** @file main.cc
+ * @brief Vital Sign Monitoring application orchestration.
  */
 #include <math.h>
 #include <stdint.h>
@@ -74,12 +48,7 @@
 
 #include "tio_usb.h"
 
-/* TileIO BLE is board-gated to apollo510b_evb (only board in this app's
- * family with the EM9305 BLE radio -- see nsx.yml's `boards:
- * [apollo510b_evb]` scoping of nsx-tileio-ble/nsx-ble/nsx-cordio and
- * CMakeLists.txt's matching `if(NSX_BOARD STREQUAL "apollo510b_evb")`
- * source/link gate). ble_bringup.h/.c are not even compiled in for the
- * other two boards. */
+/* Match the BLE source gate in the build configuration. */
 #if defined(AM_PART_APOLLO510B) && TIO_BLE_ENABLED
 #include "ble_bringup.h"
 #endif
@@ -91,21 +60,7 @@ static TaskHandle_t cpuProcessTaskHandle;
 static TaskHandle_t tioProcessTaskHandle;
 static TaskHandle_t reportTaskHandle;
 
-/* Capacity of the run-time-stats snapshot buffer, used in BOTH the array
- * declaration and the uxTaskGetSystemState() call -- a named constant rather
- * than two hard-coded 10s that can drift apart, which is how this got close to
- * failing in the first place.
- *
- * WHY THIS IS NOT A TUNING KNOB. uxTaskGetSystemState() returns 0 -- not a
- * truncated list -- when the array cannot hold every task. The previous value
- * was 10 against 9 live tasks on the BLE build (6 app + idle + timer + BLE
- * radio), so ONE additional task anywhere, including one created inside a
- * vendored module, would have silently zeroed every per-task percentage and
- * pinned the reported CPU utilisation at a constant value with no other
- * symptom. 16 restores real headroom, and CpuProcessTask now counts the
- * overflow (HKV_CNT_CPU_STAT_OVERFLOW) and skips the interval instead of
- * publishing a number computed from an empty list. The `tasks` field on the
- * `cpu` report line shows how much of this is actually in use. */
+/* uxTaskGetSystemState requires room for every task; an undersized snapshot fails. */
 #define HKV_TASK_STATUS_CAPACITY (16u)
 static TaskStatus_t xTaskDetails[HKV_TASK_STATUS_CAPACITY];
 /* Tasks seen by the last successful uxTaskGetSystemState(), reported so the
@@ -122,16 +77,7 @@ static const uint32_t kCpuStatsSamplePeriodMs = 100;
 static const uint32_t kCpuStatsPublishPeriodMs = 1000;
 static const uint32_t kCpuStatsRollingSeconds = 30;
 
-///////////////////////////////////////////////////////////////////////////////
-// DWT cycle counter (per-stage IPS timing)
-///////////////////////////////////////////////////////////////////////////////
-//
-// nsx-core does not (yet) expose a microsecond-ticker peripheral wrapper
-// equivalent to legacy's ns_timer_config_t/ns_us_ticker_read(), so per-stage
-// ECG/PPG denoise/segment/arrhythmia latency (IPS = inferences-per-second)
-// is measured directly via the Cortex-M DWT cycle counter, converted to
-// microseconds using SystemCoreClock -- the same technique already proven
-// in phase 4's AiModelDemoTask.
+// DWT cycle counter for stage timing.
 
 extern "C" uint32_t RTOS_AppConfigureTimerForRuntimeStats(void);
 extern "C" uint32_t RTOS_AppGetRuntimeCounterValueFromISR(void);
@@ -168,17 +114,7 @@ inference_power_mw(bool hpMode)
     return hpMode ? (float32_t)MCU_INFERENCE_POWER_MW_HP : (float32_t)MCU_INFERENCE_POWER_MW_LP;
 }
 
-///////////////////////////////////////////////////////////////////////////////
-// FreeRTOS runtime-stats timer (am_hal_timer, RTOS_TIMER channel)
-///////////////////////////////////////////////////////////////////////////////
-//
-// Drives configGENERATE_RUN_TIME_STATS (FreeRTOSConfig.h) so CpuProcessTask
-// can read per-task run-time counters via uxTaskGetSystemState(). Ported
-// near-verbatim from legacy main.cc's rtos_time_init/rtos_ticker_read/
-// rtos_timer_clear + RTOS_AppConfigureTimerForRuntimeStats/
-// RTOS_AppGetRuntimeCounterValueFromISR -- this uses the AmbiqSuite HAL
-// (am_hal_timer_*) directly, which is board/SoC-portable and not
-// NSX-specific, so it needs no additional wrapper.
+// FreeRTOS runtime-statistics timer.
 
 static volatile uint32_t g_rtos_stat_timer_cnt = 0;
 
@@ -190,7 +126,6 @@ rtos_time_init(void)
     g_rtos_stat_timer_cnt = 0;
     am_hal_timer_config_t rtosTimerConfig;
     am_hal_timer_default_config_set(&rtosTimerConfig);
-    // 4096/(96 megahertz)*6 = 256us precision
     rtosTimerConfig.eInputClock = AM_HAL_TIMER_CLOCK_HFRC_DIV4K;
     rtosTimerConfig.eTriggerSource = AM_HAL_TIMER_TRIGGER_TMR4_OUT1;
     status = am_hal_timer_config(timerNum, &rtosTimerConfig);
@@ -229,17 +164,7 @@ RTOS_AppGetRuntimeCounterValueFromISR(void)
     return g_rtos_stat_timer_cnt;
 }
 
-///////////////////////////////////////////////////////////////////////////////
-// TileIO USB streaming
-///////////////////////////////////////////////////////////////////////////////
-//
-// ECG (slot 0): type 0 = raw+denoised+mask (3ch, matches legacy), type 1 =
-// HR/HRV/denoise-cossim/arrhythmia/IPS/QoS metrics. PPG (slot 1): type 0 =
-// single-wavelength signal (see store.h for why only 1ch), type 1 = PR/
-// QoS metrics (spo2 always 0, n/a). CPU (slot 2): type 0 = per-task
-// utilization percentages, type 1 = overall CPU%/battery-days/avg AI IPS.
-// UIO carries the 8 app_state_t mode-select bytes (constants.h
-// TIO_UIO_*_IDX) in both directions.
+// TileIO streaming and host controls.
 
 static void received_slot_data(uint8_t slot, uint8_t slot_type, const uint8_t *data, uint32_t length);
 static void received_uio_state(const uint8_t *data, uint32_t length);
@@ -259,18 +184,7 @@ static tio_usb_context_t tioUsbCtx = {
     .pid = TIO_USB_PRODUCT_ID,
 };
 
-/*
- * Pipeline flush on host (re)connect, race-free version.
- *
- * ringbuffer.c is not thread-safe: each rb tolerates exactly one producer
- * (head writer) and one consumer (tail writer). ringbuffer_flush() writes
- * tail, so it may only be executed by each buffer's CONSUMER task -- a
- * cross-task flush racing a concurrent seek/pop can leave tail past head,
- * making ringbuffer_len() report a huge bogus length (this hazard existed
- * in legacy too). Instead of flushing directly, TioProcessTask raises
- * per-owner request flags and each owning task flushes its own buffers at
- * the top of its loop.
- */
+/* Only each ring's consumer may flush its tail; request flushes in the owning task. */
 static volatile uint8_t g_flush_req_ecg = 0;
 static volatile uint8_t g_flush_req_ppg = 0;
 static volatile uint8_t g_flush_req_cpu = 0;
@@ -463,10 +377,7 @@ check_tio_state(void)
             hkv_log_u32("host_connected", 1);
             hkv_log_end();
             request_pipeline_flush();
-            /* Tell the newly connected host our current mode state so its UI
-             * reflects reality without requiring it to write UIO first --
-             * matches legacy's check_webusb_state(). (Runs in TioProcessTask
-             * context; send_uio_state only enqueues.) */
+            /* Synchronize host controls without requiring an initial state write. */
             send_uio_state();
         }
     }
@@ -546,10 +457,7 @@ set_speed_mode(uint8_t mode)
     if (appState.speedMode != mode) {
         appState.speedMode = mode;
         nsx_power_set_performance_mode(appState.speedMode ? NSX_POWER_PERF_HIGH : NSX_POWER_PERF_LOW);
-        /* The core clock just changed under the software timebase. Without
-         * this the FreeRTOS tick keeps its old period in CPU cycles and runs
-         * fast (or slow) by the clock ratio, and every dwt_delta_us() is
-         * scaled by a stale SystemCoreClock. Issue #25. */
+        /* Resynchronize tick and duration scaling after a mode change; see AmbiqAI/heartkit-vitals-demo#25. */
         timebase_sync_to_core_clock();
         /* Samples taken at the previous operating point do not describe this
          * one, and the max would otherwise carry them for a whole interval. */
@@ -580,11 +488,7 @@ send_uio_state(void)
 {
     uint8_t uioBuffer[8];
     snapshot_uio_state(uioBuffer);
-    /* Enqueue (slot 0, type 2 = UIO) via the ISR-safe TX queue rather than
-     * calling tio_usb_send_uio_state() directly -- the direct call blocks in
-     * retry loops, which is unacceptable from any context TioProcessTask
-     * shares with time-critical work (and fatal from ISR context; see
-     * received_uio_state below). Matches legacy's send_uio_state(). */
+    /* Replies must enqueue without blocking the callback context. */
     pack_and_enqueue_tio_packet_priority(0, 2, uioBuffer, sizeof(uioBuffer));
 }
 
@@ -599,16 +503,7 @@ received_slot_data(uint8_t slot, uint8_t slot_type, const uint8_t *data, uint32_
 }
 
 #if defined(AM_PART_APOLLO510B) && TIO_BLE_ENABLED
-/*
- * ble_bringup.c (a plain C file) needs to hand these callbacks to
- * tio_ble_context_t as C function pointers, but received_slot_data/
- * received_uio_state above are C++-linkage `static` functions -- neither
- * `extern`-able by name (static) nor C-callable without extern "C" (name
- * mangling). Rather than changing their linkage/visibility (and risking the
- * hardware-validated USB callback wiring above), add two tiny extern "C"
- * forwarders with matching signatures that main() hands to ble_bringup_init()
- * indirectly via ble_bringup.c's tio_ble_context_t.
- */
+/* C-linkage adapters allow the BLE module to call the application callbacks. */
 extern "C" void
 ble_bringup_slot_update_cb(uint8_t slot, uint8_t slot_type, const uint8_t *data, uint32_t length)
 {
@@ -632,21 +527,7 @@ ble_bringup_uio_read_cb(uint8_t *data, uint32_t length)
 }
 #endif
 
-/*
- * ROOT-CAUSE NOTE (AS7058 ISR freeze on host connect): nsx-tileio-usb
- * dispatches this callback from the NSX_TIMER_USB timer *ISR* (its vendor
- * RX handler runs inside usb_timer_callback). An earlier revision applied
- * the UIO state and called send_uio_state() -> tio_usb_send_uio_state()
- * directly here -- a blocking send that can spin in am_util_delay_ms(1)
- * retry loops (plus perf-mode switching and printfs), all in ISR context.
- * That stalls same/lower-priority IRQs long enough to blow the AS7058's
- * bounded INT-service window; with its edge-triggered INT line stuck high
- * and never re-armed, the sensor stops interrupting permanently -- observed
- * as isr/push counters freezing at the exact "host connected" moment.
- *
- * Fix: do nothing here but latch a state update or state-request flag;
- * TioProcessTask applies settings and enqueues replies in task context.
- */
+/* USB callbacks run in interrupt context; defer settings and replies to TioProcessTask. */
 static volatile uint8_t g_uio_pending = 0;
 static volatile uint8_t g_uio_state_request_pending = 0;
 static uint8_t g_uio_rx_buf[8];
@@ -700,51 +581,8 @@ apply_pending_uio_state(void)
 // TIO packet senders
 ///////////////////////////////////////////////////////////////////////////////
 
-///////////////////////////////////////////////////////////////////////////////
-// Rate-matched signal emission
-///////////////////////////////////////////////////////////////////////////////
-//
-// See constants.h "TileIO latency budget" and issue #12.
-//
-// Every pump tick, per signal slot:
-//
-//   1. TRIM the slot's TX rings down to their high-water H, discarding the
-//      OLDEST samples and keeping the newest H. Anything above H is stale
-//      backlog we have already decided not to ship (no catch-up, ever). The
-//      discarded sample count is accumulated per slot so it can later be
-//      signalled to the host as a sequence discontinuity (TimedSignal v2
-//      carries a per-slot sample sequence; tracked separately). For now it is
-//      exposed as a counter -- see the trim acceptance rate in constants.h,
-//      which is a small drift allowance rather than a hard zero.
-//   2. Emit AT MOST ONE packet, of TIO_*_SAMPLES_PER_PKT samples, plus
-//      TIO_TX_DRIFT_CATCHUP_SAMPLES more while the trough servo still has
-//      budget for this window. If a full packet is not available, emit
-//      nothing this tick rather than a short packet.
-//
-//      The nominal count assumes the producer runs at exactly the pump's
-//      nominal rate; it does not. The two corrections -- skip a tick when
-//      short, pop one extra when long -- let the pump track the producer's
-//      real rate in both directions. Neither can push emission above 1x,
-//      because the pop comes out of a ring and can only return samples the
-//      producer already produced; that invariant is structural, not a
-//      property of the count. See constants.h.
-//
-// SAMPLE ALIGNMENT (the part that silently corrupts the waveform if it is
-// wrong): a slot's TX taps are several parallel rings holding the same sample
-// index in each position (ECG: raw/denoised/mask; PPG: red/IR). They only stay
-// aligned if every ring is advanced by the SAME number of samples on every
-// operation. That is enforced structurally here rather than by convention:
-//
-//   * The rings of a slot are held in one group, and all counts are derived
-//     from tio_tx_group_avail(), the MINIMUM length across the group.
-//   * The trim seeks every ring in the group by one single `drop` value
-//     computed once, in one loop.
-//   * The pop loop below is bounded by one single `numSamples` value returned
-//     by tio_tx_group_prepare(), and pops exactly one sample from each ring
-//     per iteration.
-//
-// There is deliberately no code path that advances one ring of a group without
-// advancing the others by the same amount.
+// Advance every ring in a signal group equally to preserve channel alignment.
+// See AmbiqAI/heartkit-vitals-demo#12.
 
 typedef struct {
     rb_config_t *rings[3];   /* parallel TX taps, must stay sample-aligned */
@@ -759,32 +597,8 @@ typedef struct {
     uint32_t servoTroughPrev;    /* previous window's trough, for the rate term */
     volatile uint16_t extraBudget;  /* servo output: extra samples per window */
     volatile uint32_t servoTrough;  /* last completed window's trough (log) */
-    /* Observability IDs, not storage. The values live in the obs.h counter and
-     * gauge tables so that every counter in the app is emitted by one
-     * table-driven reporter and adding one needs no reporter or parser change.
-     * The group only carries which row it owns.
-     *
-     * cntPumped counts ticks on which a full packet was assembled and handed
-     * to the transport; cntDelivered counts those the transport accepted. They
-     * are NOT the same number and the difference matters: samples are popped
-     * from the rings before the enqueue result is known, so during a host
-     * blackout the rings still drain and pump_ps keeps reading 10/s with
-     * trim_ps at 0 while nothing reaches the host. pump_ps == deliv_ps is the
-     * healthy case; a gap between them is real loss, corroborated by the
-     * `tio` and `tiousb` report lines.
-     *
-     * cntDrained counts ticks on which the servo spent an extra sample.
-     * Compare against extraBudget: if it tracks the budget the servo is in
-     * control, and if it falls short the spend guard is holding the pump off a
-     * near-empty ring. MIND THE UNITS -- drain_ps is per second while bgt is
-     * per servo window (64 ticks = 6.4 s).
-     *
-     * gaugeOcc is the occupancy watermark pair, sampled pre-trim and pre-pop
-     * so it is the true peak the producer created including whatever the trim
-     * is about to discard. Windowed, so the report shows a progression rather
-     * than a lifetime extreme. For a block-structured producer like ECG the
-     * low value IS the pre-block residual R: the sawtooth trough is the last
-     * pump tick before the next block lands. */
+    /* Pumped counts assembled packets; delivered counts accepted packets.
+     * Drained counts extra samples, while occupancy is sampled before trim/pop. */
     hkv_counter_id_t cntTrimmed;   /* samples discarded by trim-to-high-water */
     hkv_counter_id_t cntPumped;
     hkv_counter_id_t cntDelivered;
@@ -794,16 +608,7 @@ typedef struct {
 
 #define TIO_OCC_MIN_INIT (0xFFFFFFFFu)
 
-/* Designated initialisers deliberately, not positional. These are 16 fields of
- * which most are same-typed zeros, the build does not enable -Wextra, so
- * -Wmissing-field-initializers is off, and a reorder would not warn. The
- * specific hazard: if troughTarget silently took another field's zero, the
- * spend guard degrades to `avail > samplesPerPkt` and the servo takes an extra
- * sample on nearly every tick.
- *
- * The same argument now covers the counter/gauge ids: they are consecutive
- * enum values, so a positional mix-up would attribute PPG trim to the ECG
- * report line and nothing would warn. Naming each one is the check. */
+/* Named fields prevent silent swaps between same-typed thresholds and counter IDs. */
 static tio_tx_group_t g_ecgTxGroup = {
     .rings = {&rbEcgMaskTx, &rbEcgRawTx, &rbEcgDenTx},
     .numRings = 3,
@@ -839,43 +644,13 @@ static tio_tx_group_t g_ppgTxGroup = {
     .cntDrained = HKV_CNT_TXPPG_DRAIN,
     .gaugeOcc = HKV_GAUGE_TXPPG_OCC};
 
-/* Peak ring occupancy is not H: the trim runs BEFORE the pop, so the producer
- * can land a full structural block on top of (H - samplesPerPkt) samples that
- * survived the previous tick. Assert on that, not on H alone -- asserting
- * H < BUF_LEN would still pass if a window constant grew enough to overrun.
- *
- * The drift drain does not enter this bound: popping the extra sample only
- * ever leaves FEWER samples behind, so the worst case is still the tick that
- * pops the nominal count.
- *
- * ECG is the binding case, and its margin is a function of the PAD, not the
- * window: ECG_TX_BUF_LEN is 2 * ECG_SEG_WINDOW_LEN while the block is
- * ECG_SEG_WINDOW_LEN - 2 * ECG_SEG_PAD_LEN, so the window cancels out of
- * BUF_LEN - (H - pkt + block) and what remains is
- * 4 * ECG_SEG_PAD_LEN - TIO_TX_SLACK_SAMPLES - TIO_TX_SLIP_SAMPLES.
- * Widening the window is therefore free; SHRINKING ECG_SEG_PAD_LEN, or raising
- * either of the two allowances, eats the margin directly and can take it
- * negative. See #36. */
+/* Reserve room for a producer block arriving after a nominal pop; see AmbiqAI/heartkit-vitals-demo#36. */
 static_assert(TIO_ECG_TX_HIGH_WATER - TIO_ECG_SAMPLES_PER_PKT + TIO_ECG_TX_BLOCK_SAMPLES <= ECG_TX_BUF_LEN,
               "ECG TX peak occupancy (H - pkt + block) exceeds ring capacity");
 static_assert(TIO_PPG_TX_HIGH_WATER - TIO_PPG_SAMPLES_PER_PKT + TIO_PPG_TX_BLOCK_SAMPLES <= PPG_TX_BUF_LEN,
               "PPG TX peak occupancy (H - pkt + block) exceeds ring capacity");
 
-/* A full structural block landing on the trough must still fit under H, or the
- * trim fires on the very next tick and discards fresh signal.
- *
- * FIVE terms, because the trough is not the target and the block is not
- * punctual: the trough settles up to PULL_DIV above target (the position
- * term's deadband), alternates a further samplesPerPkt with the block-period
- * quantisation, and the block can arrive TIO_TX_SLIP_SAMPLES late because
- * EcgProcessTask runs one mutually-exclusive stage per iteration and a due
- * segmentation is deferrable.
- *
- * This bound has been wrong twice by omitting a term. The two-term form passed
- * at a target of 30 while the real peak sat at 248 of 250. The four-term form
- * ignored producer scheduling and claimed ~41 samples of margin where
- * simulation showed 3 -- one more iteration of slip and it trimmed. Add terms
- * here rather than simplifying; see TIO_TX_SLIP_SAMPLES for the measurements. */
+/* Include servo deadband, packet phase, and producer slip in the peak bound. */
 static_assert(TIO_ECG_TX_TROUGH_TARGET + TIO_TX_SERVO_PULL_DIV + TIO_ECG_SAMPLES_PER_PKT + TIO_TX_SLIP_SAMPLES +
                       TIO_ECG_TX_BLOCK_SAMPLES <=
                   TIO_ECG_TX_HIGH_WATER,
@@ -891,15 +666,7 @@ static_assert(TIO_PPG_TX_TROUGH_TARGET + TIO_TX_SERVO_PULL_DIV + TIO_PPG_SAMPLES
 static_assert(TIO_ECG_TX_TROUGH_TARGET > TIO_ECG_SAMPLES_PER_PKT, "ECG trough target must exceed one packet");
 static_assert(TIO_PPG_TX_TROUGH_TARGET > TIO_PPG_SAMPLES_PER_PKT, "PPG trough target must exceed one packet");
 
-/* The servo window must span at least THREE whole producer blocks.
- *
- * One block is not enough, which cost a bench iteration to learn. The block
- * period is a non-integer number of pump ticks, so the true trough alternates
- * by ~samplesPerPkt from block to block; a window spanning 1-2 blocks catches
- * that alternation in its minimum and the servo's rate term differentiates the
- * artifact rather than the drift. Three blocks guarantees the minimum is taken
- * over enough troughs to land consistently at the bottom of the alternation.
- * ECG is the binding case: block/samplesPerPkt ticks to drain one block. */
+/* Span multiple producer blocks so the trough estimate rejects block-phase aliasing. */
 static_assert(TIO_TX_SERVO_WINDOW_TICKS >= (3 * TIO_ECG_TX_BLOCK_SAMPLES / TIO_ECG_SAMPLES_PER_PKT),
               "servo window must span at least three ECG producer blocks");
 
@@ -920,147 +687,8 @@ tio_tx_group_avail(const tio_tx_group_t *group)
     return avail;
 }
 
-/* Trough servo. Runs once per servo window, not per tick.
- *
- * WHAT IT CORRECTS. The producer and the pump are on different clocks, so the
- * producer delivers 100 +/- a few tenths of a percent samples per second while
- * the pump nominally takes exactly 100. The residual is a standing RATE error
- * of a couple of samples per second, and correcting a rate error is the job
- * here -- not correcting instantaneous occupancy.
- *
- * WHY A THRESHOLD COULD NOT DO IT. The previous design popped an extra sample
- * on every tick whose occupancy exceeded a setpoint. That asks one number to
- * be two things at once: the target trough (which must satisfy
- * trough + block <= H, so <= 50) and the drain trigger (which for a block
- * producer must sit near the peak, ~200, so that only the few ticks per block
- * actually needed qualify). For ECG those are incompatible, and measurement
- * confirmed both failure modes -- setpoint 240 under-drained and trimmed
- * ~1.8 samples/s forever; setpoint 50 over-drained, emptied the ring and
- * produced whole seconds with no ECG packet at all.
- *
- * HOW THIS ONE WORKS. Each window, compare the measured trough against the
- * target and nudge a BUDGET of extra samples by one. The budget is the rate
- * correction; the trough is the error signal. The pump then spends at most
- * that many extra samples over the following window, at most one per tick, and
- * only while occupancy is comfortably above target. Corrections are therefore
- * bounded by construction and the trough is held near target instead of being
- * driven to either rail.
- *
- * CONTROL LAW, and why it is not simply "nudge the budget toward the target".
- * The plant is an integrator: the budget sets a RATE, and the trough is the
- * accumulated position. Driving an integrator with a position error alone
- * (budget += step when the trough is high) is a double integrator and it limit
- * cycles -- simulated against the measured drift it swings the trough 0 -> 64
- * -> 0 with an ~80 s period, which would trim at the peak and skip at the
- * floor. So the law has two terms:
- *
- *   budget += (trough - trough_prev)          rate term
- *           + (trough - target) / PULL_DIV    position term
- *
- * The rate term is the whole correction and it is dead-beat: the trough moved
- * by exactly the imbalance between production and consumption over the window,
- * so adding that difference to the budget cancels the drift in ONE window and
- * leaves the trough wherever it sits. The position term is what then walks the
- * trough back to target, gently, over a first-order tail of ~PULL_DIV windows.
- * Integer division gives it a natural deadband: inside +/-PULL_DIV samples of
- * target it contributes zero and the servo holds still.
- *
- * STABILITY, which matters more here than convergence speed:
- *  - The error signal is the per-window MINIMUM, and the window is asserted to
- *    span at least three producer blocks. So the servo sees the trough, not
- *    the 2 s sawtooth whose 200-sample swing would otherwise swamp the ~2/s
- *    drift it is trying to measure.
- *  - The budget is clamped to [0, TIO_TX_SERVO_MAX_BUDGET], so there is no
- *    windup: a producer that stops entirely parks the budget at 0 rather than
- *    accumulating a debt to spend later as a burst.
- *  - It responds from both directions. Producer fast: trough rises, budget
- *    rises, extra draining. Producer slow: trough falls, budget falls to 0 and
- *    the pump self-throttles by skipping, which is the correct response since
- *    samples cannot be manufactured.
- *
- * Those are the properties the law was designed for, and they hold. What does
- * NOT hold is convergence to a stable operating point -- an earlier version of
- * this comment claimed a monotone approach to target, and hardware disproved
- * it. See RESIDUAL BEHAVIOUR below before trusting any stability claim here.
- *
- * RESIDUAL BEHAVIOUR: THE SERVO DOES NOT CONVERGE. Read this before tuning it.
- *
- * It holds the stream inside its acceptance envelope, but it does not settle
- * on a stable budget. Measured on hardware 2026-09-01, ECG, over a 107 s
- * window taken from 60 s into the run -- comfortably past the ~12.7 s the
- * budget needs to become useful, and there is no later settling point to wait
- * for since the dither never stops:
- *
- *   bgt   0 x13, 7 x6, 9 x4, 10 x31, 13 x7, 19 x7, 20 x26, 31 x13
- *         -- a 0..31 spread clustering near multiples of samplesPerPkt,
- *            not the stable ~15 the design intends.
- *   trgh  3..34 spread, against a target of 20.
- *
- * WHY IT IS SHIPPED ANYWAY. Every quantity that matters is comfortably inside
- * bounds, and the dither is a fraction of a sample per second of rate error
- * that never accumulates:
- *
- *   trim  0/s on every line -- no sample is ever discarded.
- *   pkt   mean 9.96/s, no interval below 9 -- no emission gap.
- *   occ   observed peak ~209 against H = 250, ~41 samples of real margin
- *         (the four-term static_assert above bounds the theoretical worst
- *         case at 238, and the observed peak sits well under even that).
- *
- * The controlled variable misbehaving while every controlled OUTCOME is in
- * spec means the loop is sloppy, not unsafe. It was not worth further tuning
- * passes against a bench.
- *
- * WHAT DID NOT FIX IT, so nobody re-derives a false premise. The block-period
- * aliasing diagnosis at TIO_TX_SERVO_WINDOW_TICKS is real -- the block period
- * genuinely is a non-integer 19.53 pump ticks and the trough genuinely does
- * alternate by a packet -- but widening the window from 32 to 64 ticks did NOT
- * remove the dither. It WIDENED it: the earlier 32-tick window gave bgt 0<->10
- * and trgh 13<->23, tighter than the 0..31 and 3..34 above. So aliasing is at
- * most part of the cause. The likely reason widening failed is that 64 ticks
- * is 3.28 block periods -- still not an integer multiple, so the number of
- * troughs captured per window and their phases keep changing, and the
- * per-window minimum keeps stepping by packet-sized amounts. A fixed-length
- * window cannot be an integer multiple of a block period that is set by an
- * independent, drifting producer clock.
- *
- * A SECOND MECHANISM, found by simulation and not by the window analysis. The
- * rate term cannot distinguish producer SCHEDULING SLIP from clock drift: a
- * block deferred by an iteration looks exactly like a producer that briefly
- * sped up, so the servo corrects for a rate change that never happened. The
- * asymmetry is what makes it stick -- when the block arrives late the trough
- * dips and the correction goes negative, but the 0-clamp rectifies it, so the
- * budget is not given back on the rebound. Simulated with perfectly periodic
- * blocks the dither is only bgt 7..20 / trgh 11..24; adding one iteration of
- * slip reproduces the measured 0..31 / 3..34 almost exactly. There is also a
- * boot transient: the first window measures a trough of 0 while the ring is
- * still filling, that value becomes servoTroughPrev, and the next window's
- * rate term is the entire fill transient.
- *
- * So the dither has two causes, not one, and neither is a gain problem --
- * which is why no amount of gain tuning fixed it.
- *
- * WHAT TO INVESTIGATE NEXT, if a future maintainer wants real convergence: do
- * not tune the gains -- make the MEASUREMENT synchronous with the producer.
- * Detect the block push (an occupancy jump of ~block samples) and latch the
- * trough once per block rather than once per fixed window. That removes the
- * phase beat at its source rather than averaging over it, it makes the rate
- * term a true per-block imbalance, and it addresses the slip mechanism too --
- * a block measured per block is not "late" relative to its own arrival, so
- * scheduling deferral stops masquerading as drift. One change, both causes.
- * It is a structural change to the error signal, which is why it was out of
- * scope here.
- *
- * ALSO RECORDED: bgt was observed at 31 against TIO_TX_SERVO_MAX_BUDGET of 32
- * on 13 of those lines. It is not pinned, but it is close, so if someone later
- * finds it sitting at the cap they should know it was already reaching 31
- * intermittently at ~2.4% producer drift -- and that the cap is what stops the
- * budget becoming a burst, so raising it is not automatically the right move.
- *
- * Two smaller, understood contributors to the offset, both benign: the trough
- * settles ABOVE target by up to PULL_DIV because the position term's integer
- * division has no restoring force inside its deadband, and the underlying
- * occupancy alternates by ~samplesPerPkt from the block quantisation. Both are
- * carried in the peak static_assert above. */
+/* Correct clock drift using trough change and position error, with a bounded
+ * extra-sample budget; see AmbiqAI/heartkit-vitals-demo#12. */
 static void
 tio_tx_group_servo(tio_tx_group_t *group)
 {
@@ -1117,18 +745,7 @@ tio_tx_group_prepare(tio_tx_group_t *group)
          * the tick rather than emit a short packet. */
         return 0;
     }
-    /* Spend the servo's budget: at most one extra sample per tick, at most
-     * extraBudget per window, and only while occupancy stays a full packet
-     * clear of the target trough.
-     *
-     * That guard is what stops the over-draining that emptied the ring under
-     * the old threshold design: however large the budget, the pump stops
-     * taking extra as soon as occupancy approaches target, so the correction
-     * can never pull the trough down to where the next tick has to skip.
-     *
-     * The 1x invariant remains structural rather than tuned: the pop comes out
-     * of a ring, so it can only ever return samples the producer has already
-     * produced. */
+    /* Keep a full-packet reserve above the trough before spending extra-sample budget. */
     size_t numSamples = group->samplesPerPkt;
     if (group->extraSpent < group->extraBudget &&
         avail > (size_t)(group->troughTarget + group->samplesPerPkt)) {
@@ -1142,50 +759,13 @@ tio_tx_group_prepare(tio_tx_group_t *group)
     return numSamples;
 }
 
-/* Pace a signal pump task at exactly TIO_PUMP_INTERVAL_MS.
- *
- * vTaskDelayUntil() (not vTaskDelay) so the period is measured from the
- * previous wake time and scheduling latency does not accumulate into drift --
- * the old "measure the loop with DWT, then vTaskDelay the remainder" form lost
- * the measurement/delay gap on every single iteration. At
- * configTICK_RATE_HZ = 1000, pdMS_TO_TICKS(100) is exactly 100 ticks.
- *
- * Overrun handling is the subtle part, and it has to hit `max(work, period)`
- * exactly -- both neighbouring behaviours are bugs:
- *
- *   * Letting vTaskDelayUntil() fire back-to-back to catch up emits packets
- *     closer together than the period, i.e. ABOVE 1.00x realtime, which the
- *     latency budget forbids.
- *   * Re-anchoring to `now` and then delaying is worse in the other
- *     direction: the deadline `now + period` is still in the future, so the
- *     task blocks a further full period and the iteration costs `work +
- *     period`. That runs the pump BELOW 1x, and because the producer is
- *     clocked independently the resulting sample deficit accumulates until
- *     the trim starts discarding it -- a recurring splice, exactly the
- *     artifact this file exists to remove. Overrun is a real condition here
- *     (one long inference per cycle is enough), not a hypothetical.
- *
- * So on overrun, re-anchor to `now - period`: vTaskDelayUntil() then sees a
- * deadline of `now`, returns immediately without blocking, and leaves
- * *pLastWake == now for the next cycle. The period is dropped, never
- * compressed and never doubled.
- *
- * Note for bench runs: enabling the debug log flags puts blocking SWO writes
- * into these equal-priority tasks and makes overrun materially more likely --
- * the instrumented build is the one most likely to exercise this path. */
+/* Drop missed periods instead of emitting catch-up bursts; see AmbiqAI/heartkit-vitals-demo#12. */
 static void
 tio_pump_wait(TickType_t *pLastWake)
 {
     const TickType_t period = pdMS_TO_TICKS(TIO_PUMP_INTERVAL_MS);
     TickType_t now = xTaskGetTickCount();
-    /* SIGNED delta. An unsigned compare treats a deliberately future-dated
-     * anchor as a huge positive elapsed time and fires the overrun branch,
-     * which silently discarded the PPG phase stagger: PpgProcessTask anchors
-     * at T+33, the first iteration reaches here at ~T+20, and the unsigned
-     * (now - *pLastWake) underflows to a value comfortably >= period. Signed
-     * arithmetic reads that as -13 ticks (not yet due) and leaves the anchor
-     * alone, while remaining wrap-safe for the same reason the unsigned form
-     * was: the difference is what wraps, not the operands. */
+    /* A phase-offset anchor can be in the future; signed subtraction preserves that case. */
     if ((int32_t)(now - *pLastWake) >= (int32_t)period) {
         *pLastWake = now - period;
     }
@@ -1389,24 +969,9 @@ SensorIrqTask(void *pvParameters)
     }
 }
 
-///////////////////////////////////////////////////////////////////////////////
-// ECG process task
-///////////////////////////////////////////////////////////////////////////////
-//
-// Full pipeline: downsample -> (synthetic-mode-only) noise injection ->
-// DSP/AI denoise (mode-gated) -> DSP/AI segmentation (mode-gated) ->
-// DSP/AI arrhythmia (mode-gated) -> metrics (HR/HRV) -> TileIO TX. Mirrors
-// legacy's EcgProcessTask 1:1 modulo the sensor.c stimulus-substitution gap
-// documented at the top of this file.
+// ECG processing.
 
-/* Per-stage non-zero-return counts live in the obs.h counter table
- * (HKV_CNT_PIPE_ERR_*), so they are ALWAYS compiled in, unlike the
- * EN_APP_TRACE lines they sit beside. With tracing off -- the default -- the
- * inference return codes are otherwise discarded at the `(void)err`, and a
- * persistently failing denoise or segmentation stage would produce a
- * plausible-looking flat trace with no indication anywhere that the model
- * never ran. Two increments per 2 s: the counters are not what costs, the
- * printing is. */
+/* Count stage failures independently of optional diagnostic output. */
 
 void
 EcgProcessTask(void *pvParameters)
@@ -1487,45 +1052,11 @@ EcgProcessTask(void *pvParameters)
             g_aiIps[0] = ai_display_rate(ecgMetResults.denoiseIps, modelLatUs > 0 && err == 0);
             ecgMetResults.denoiseLatUs = modelLatUs;
             ecgMetResults.denoiseLatMaxUs = MAX(ecgMetResults.denoiseLatMaxUs, modelLatUs);
-            /* Publish the run counter AFTER the duration it belongs to, never
-             * before. CpuProcessTask runs in a different task and pairs this
-             * stage's runsDelta with its *Ips to derive inference duty; with
-             * the count first, a window sampled mid-execution sees a run whose
-             * duration has not been written yet and bills it at the previous
-             * value. On the first-ever run that value is the store.c seed
-             * (1.0), which is a legitimate ips (a 2 s stage) and so cannot be
-             * screened out downstream as a sentinel.
-             *
-             * SOURCE ADJACENCY IS NOT ENOUGH, hence the barrier. `*Ips` is an
-             * ordinary non-volatile store and the counter increment inside
-             * hkv_count() is volatile; C does not order non-volatile accesses
-             * against volatile ones, so the compiler is free to sink the store
-             * past the increment. GCC 15.2 was measured doing exactly that at
-             * the metrics site: recompiling this file with the three barriers
-             * removed puts MET_RUNS (g_hkv_counters+140) at EcgProcessTask
-             * +0x528 and the arrhythmiaIps store (ecgMetResults+24) at +0x532,
-             * i.e. counter first. With the barriers the same store lands at
-             * +0x4f4, ahead of the counter at +0x52e. The empty asm with a
-             * "memory" clobber is what forces that. Same pattern in the
-             * segmentation and metrics branches; do not remove it to "tidy up".
-             *
-             * READING THE DISASSEMBLY -- CHECK THE FIELD OFFSET. Only the
-             * *Ips store (+16 den, +20 seg, +24 arr) is ordering-critical.
-             * The *uIpspw store (+32, +36, +40) and the *LatUs / *LatMaxUs
-             * stores are read by the reporter, not by the duty derivation,
-             * so their position relative to the counter means nothing.
-             * Comparing the counter against the +40 store instead of the +24
-             * store makes a correct metrics site look inverted. */
+            /* Publish duration before the run counter so duty sampling cannot pair a new
+             * run with an old duration. The compiler barrier enforces store ordering. */
             __asm volatile("" ::: "memory");
             hkv_count(HKV_CNT_PIPE_DEN_RUNS);
-            /* DASHBOARD CHANGE: the uIps/W divisor is now the sourced
-             * inference power for the CURRENT operating point (5.5 mW LP,
-             * 16.7 mW HP) where it used to be AVG_INFERENCE_POWER (7.87 mW,
-             * unsourced), so in LP all three *uIpspw values read ~43% higher
-             * than on any earlier build. Efficiency did not change; the power
-             * figure divided into it did. These now follow appState.speedMode
-             * the same way the battery model below does -- see
-             * inference_power_mw() and issue #25 AC5. */
+
             ecgMetResults.denoiseuIpspw =
                 1.0e3f * ecgMetResults.denoiseIps / inference_power_mw(appState.speedMode != 0);
             if (err != 0) {
@@ -1543,11 +1074,7 @@ EcgProcessTask(void *pvParameters)
 
             modelLatUs = 0;
             if (appState.segMode == SegmentationModeDsp) {
-                /* Use the shared physiokit DSP segmentation (same as legacy)
-                 * rather than an inline reimplementation: it also stamps the
-                 * QoS bits into the mask and reports a qos value, which the
-                 * inline version was silently dropping (stale qos in DSP
-                 * mode). */
+                /* Preserve quality annotations from the shared DSP segmentation path. */
                 err = ecg_physiokit_segmentation_inference(ecgSegInout, ecgSegMask, 0, &ecgMetResults.qos);
             } else if (appState.segMode == SegmentationModeAi) {
                 modelStart = dwt_cycles();
@@ -1642,44 +1169,15 @@ EcgProcessTask(void *pvParameters)
 
         (void)err;
 
-        /* Wait BEFORE sending, not after. With the send ahead of the wait, a
-         * long iteration (a 250 ms segmentation tick, say) emits at T+250, the
-         * wait correctly returns immediately, and the next near-idle iteration
-         * emits again ~2 ms later -- two packets 2 ms apart, a one-packet
-         * catch-up the design says never happens. Sending immediately after
-         * the wake instead makes inter-packet spacing equal the wake-to-wake
-         * interval, max(work, period), by construction. */
+        /* Delay before enqueueing to avoid back-to-back packets after an overrun. */
         tio_pump_wait(&pumpLastWake);
         send_ecg_signals();
     }
 }
 
-///////////////////////////////////////////////////////////////////////////////
-// PPG process task
-///////////////////////////////////////////////////////////////////////////////
-//
-// Dual-wavelength pipeline: downsample Red (PPG1_SUB1) + IR (PPG1_SUB2) ->
-// metrics (PR/QoS/real ratiometric SpO2 via pk_ppg + sensor_get_spo2_config()
-// calibration coefficients) -> TileIO TX (2ch). No denoise/segmentation
-// stage, matching legacy's pass-through behavior absent an AI model for PPG.
-// (Phase 6 fix: previously ran single-wavelength only because sensor.c
-// applied the wrong AS7058 profile -- see sensor.c/store.h.)
+// PPG processing.
 
-/* Loop iterations and teed samples are counted in the obs.h table
- * (HKV_CNT_PIPE_PPG_ITERS / HKV_CNT_PIPE_PPG_PUSHED), and the size of a single
- * tee pass -- the OBSERVED structural block -- is the HKV_GAUGE_PPG_TEE gauge.
- *
- * TIO_PPG_TX_BLOCK_SAMPLES (13) is an empirical figure taken from the AS7058
- * watermark interval, not a compile-time bound: with PPG_DS_RATE == 1 the loop
- * is bounded only by MIN(len(rbPpg1Sensor), len(rbPpg2Sensor)), so a delayed
- * task could in principle tee up to SENSOR_BUF_LEN-1 samples in one pass and
- * exceed H. Unlike ECG, whose block is ECG_SEG_VALID_LEN and therefore
- * statically checkable, this one has to be watched at runtime. That is why the
- * gauge is declared LIFETIME rather than windowed: a single excursion
- * invalidates the derivation of H, and a per-second maximum would scroll it
- * out of the capture. If `tee_hi` on the `pipe` report line exceeds
- * TIO_PPG_TX_BLOCK_SAMPLES, that constant is wrong and H must be re-derived
- * from the real bound. */
+/* Track producer activity separately from samples accepted by the TX taps. */
 
 void
 PpgProcessTask(void *pvParameters)
@@ -1741,14 +1239,7 @@ PpgProcessTask(void *pvParameters)
     }
 }
 
-///////////////////////////////////////////////////////////////////////////////
-// CPU utilization task
-///////////////////////////////////////////////////////////////////////////////
-//
-// Reads FreeRTOS per-task run-time counters (configGENERATE_RUN_TIME_STATS,
-// FreeRTOSConfig.h) to compute ECG/PPG task CPU utilization, a 30s rolling
-// overall utilization average, and a battery-life estimate -- ported from
-// legacy's CpuProcessTask.
+// CPU utilization.
 
 ///////////////////////////////////////////////////////////////////////////////
 // Battery projection
@@ -1783,14 +1274,7 @@ CpuProcessTask(void *pvParameters)
 {
     (void)pvParameters;
     const uint32_t samplesPerPublish = kCpuStatsPublishPeriodMs / kCpuStatsSamplePeriodMs;
-    /* Elapsed, not nominal. The sample loop is paced by a RELATIVE vTaskDelay,
-     * so each iteration takes the delay plus its own work and the real window
-     * is always longer than samplesPerPublish x kCpuStatsSamplePeriodMs. Using
-     * the nominal value as the duty denominator would understate the window and
-     * therefore OVERSTATE inference duty. Tick deltas remove the argument: the
-     * denominator is the window that actually elapsed. Re-baselined together
-     * with the run counters on every discarded interval below, so the window
-     * and the counter deltas always describe the same span. */
+    /* Include loop work in elapsed time so duration-based duty is not overestimated. */
     TickType_t publishWindowStart = xTaskGetTickCount();
     float32_t cpuUtilSecondAccum = 0.0f;
     uint32_t cpuUtilSecondCount = 0;
@@ -1827,14 +1311,7 @@ CpuProcessTask(void *pvParameters)
         service_cpu_flush_request();
         numTasks = uxTaskGetSystemState(xTaskDetails, HKV_TASK_STATUS_CAPACITY, &runTimeTicks);
         if (numTasks == 0) {
-            /* Not "no tasks" -- uxTaskGetSystemState() returns 0, rather than
-             * a truncated list, when the array is too small for the live task
-             * count. Falling through would compute every percentage from an
-             * empty list: idleDelta underflows, cpuIdlePerc clamps, and the
-             * published utilisation becomes a plausible constant that nothing
-             * else contradicts. Count it, skip the interval, and leave the
-             * previous published value alone. If stat_overflow is climbing on
-             * the `cpu` report line, raise HKV_TASK_STATUS_CAPACITY. */
+            /* An undersized snapshot must not publish an empty task list as CPU utilization. */
             hkv_count(HKV_CNT_CPU_STAT_OVERFLOW);
             /* Discarding the interval means discarding the stage runs inside
              * it too, exactly as the prevRun re-baseline below does. Without
@@ -2012,31 +1489,7 @@ CpuProcessTask(void *pvParameters)
 // TileIO TX queue drain task
 ///////////////////////////////////////////////////////////////////////////////
 
-/* USB delivery, owned by TioProcessTask. The decision logic (hold, retry,
- * stall, and whether to take another packet off the queue) lives in
- * src/tio_tx_sm.h so it can be driven by tests/test_tio_tx_sm.c on the host;
- * everything below is the wiring to FreeRTOS, nsx and the counter table.
- *
- * USB BUSY invariant: tio_usb_send_slot_packet() refuses a frame the TinyUSB
- * FIFO cannot take whole (NSX_USB_STATUS_BUSY) and reports a short write as
- * NSX_USB_STATUS_PARTIAL. Neither counts as delivered, and both clear on
- * their own once the host reads. Every other status is terminal for that
- * packet -- TIMEOUT above all, since nsx_usb_vendor_send() can spin in it for
- * seconds and must never be re-entered on a retry.
- *
- * A packet leaves g_tioTxQueue for USB only when USB can be offered it now, so
- * a slow host backs the queue up instead of costing packets; the queue, not a
- * one-packet holding slot, is what absorbs host jitter. Once the backlog
- * reaches TIO_TX_USB_HOLD_WATERMARK the head is drained anyway so BLE keeps
- * receiving, and counted as a USB drop. Retrying the held
- * packet is only cheap because tio_usb_send_slot_packet() checks
- * nsx_usb_vendor_write_available() before entering nsx_usb_vendor_send()
- * (tio_usb.c). If that guard is ever relaxed -- including by the transport
- * extraction in issue #5 -- a retry can block this task in the multi-second
- * USB timeout path and the pacing here has to be rethought. See #56.
- *
- * A retried PARTIAL re-sends the whole 256 B frame; the host resyncs by
- * scanning for the start/stop bytes. */
+/* Preserve a pending packet across retries; see AmbiqAI/heartkit-vitals-demo#56. */
 static_assert(TIO_TX_SM_PACKET_LEN == TIO_USB_PACKET_LEN, "tio_tx_sm.h packet size must match the TileIO frame");
 
 /* BLE fan-out state, refreshed per iteration and read by the dequeue hook. */
@@ -2189,28 +1642,7 @@ TioProcessTask(void *pvParameters)
     }
 }
 
-///////////////////////////////////////////////////////////////////////////////
-// Report task (periodic subsystem report, EN_APP_REPORT)
-///////////////////////////////////////////////////////////////////////////////
-//
-// See src/obs.h for the line format, the counter/gauge model, and the locking
-// argument. This file supplies only the rotation list and the per-subsystem
-// `extra` callbacks that append values which do not live in the counter/gauge
-// tables (instantaneous ring lengths, servo state, metric results).
-//
-// WHY A ROTATION AND NOT ONE BURST. Emitting every subsystem back-to-back once
-// a second puts the whole per-second SWO cost -- on the order of 20 ms across
-// ten lines -- into a single burst inside ReportTask, which runs at the SAME
-// priority as the ECG and PPG pump tasks. A 20 ms burst fits inside the 250 ms
-// jitter budget, so it would not break anything, but it perturbs exactly the
-// cadence the report exists to measure. Emitting ONE subsystem per slot
-// spreads the same total over the second and keeps each individual stall to a
-// couple of milliseconds.
-//
-// Each subsystem is still visited exactly once per rotation and the rotation
-// is one second, so every `_ps` delta is a genuine per-second rate. The slot
-// period is derived from the list length, so adding a subsystem keeps the
-// rotation at one second rather than silently stretching the delta window.
+// Rotate diagnostic output to avoid blocking the signal pumps in a single burst.
 
 /* Every hkv_log_* call in these callbacks runs with the log lock already held
  * (hkv_report_subsystem took it). They must not call hkv_log_begin or
@@ -2219,19 +1651,7 @@ TioProcessTask(void *pvParameters)
 static void
 report_extra_sensor(void)
 {
-    /* sensor.c owns these counters: they are updated from the AS7058 INT ISR
-     * and the interval pair carries a ticks->ms conversion, so they stay
-     * behind sensor.h's accessors rather than moving into the obs table. The
-     * wire format is `k=v` either way, so nothing downstream can tell.
-     *
-     * Confirms the INT ISR is firing and that both PPG channels and ECG are
-     * actually reaching their ringbuffers. A stable isr_min/isr_max pair close
-     * to the FIFO watermark's expected interval (~125-130 ms on hardware for
-     * this profile) confirms a normal cadence -- the bursty look of
-     * watermark-batched delivery is not itself a bug. A max that is a large
-     * multiple of the min is real IRQ starvation, and is the first thing to
-     * check after any change touching interrupt priorities, the USB/BLE ISR
-     * paths, or critical sections. */
+    /* Sensor accessors preserve ISR-owned interval accounting. */
     hkv_log_u32("isr", sensor_get_as7058_int_isr_count());
     hkv_log_u32("missed", sensor_get_irq_notify_missed_count());
     hkv_log_u32("ppg_push", sensor_get_ppg_push_count());
@@ -2264,22 +1684,8 @@ report_extra_tio(void)
     hkv_log_u32("qdepth", (uint32_t)uxQueueMessagesWaiting(g_tioTxQueue));
 }
 
-/* Servo state that is control output rather than an observability counter, so
- * it is read straight from the group instead of being mirrored into a table.
- *
- *   bgt  -- servo budget, extra samples per SERVO WINDOW (64 ticks = 6.4 s),
- *           NOT per second. The rate it encodes is bgt / (window x pump
- *           interval), which should equal the producer's drift. Do NOT expect
- *           a settled value: measured spread is 0..31 clustering near
- *           multiples of samplesPerPkt. See tio_tx_group_servo().
- *   trgh -- the trough the servo last measured, against a target of
- *           TIO_*_TX_TROUGH_TARGET. The shipped servo does not converge;
- *           measured spread is 3..34 against a target of 20. Judge trim_ps and
- *           pump_ps, not this.
- *           CAUTION: trgh 0 with bgt 0 is ambiguous. It is the normal reading
- *           for a producer slower than the pump (self-throttling, not a fault)
- *           AND the reading for a producer that has stopped entirely.
- *           Distinguish them with pump_ps and the `sensor` line, not here. */
+/* Budget is extra samples per servo window, not per second. A zero trough
+ * does not distinguish slow production from a stopped producer. */
 static void
 report_extra_tx_group(const tio_tx_group_t *group)
 {
@@ -2348,10 +1754,7 @@ report_extra_ppgmet(void)
 }
 
 #if defined(AM_PART_APOLLO510B) && TIO_BLE_ENABLED
-/* Written by ReportTask immediately before it emits the `cpu` line, read by
- * report_extra_cpu() while the log mutex is held. Single writer, single
- * reader, same task -- the split exists purely to keep the ~1 ms stack walk
- * outside the mutex, not for cross-task safety. */
+/* Cache the stack scan outside the log mutex; only ReportTask accesses this value. */
 static uint32_t g_cpu_ble_hwm = 0;
 #endif
 
@@ -2406,29 +1809,7 @@ report_extra_cpu(void)
     hkv_log_fx2("cpu_cap", appMetResults.cpuSplit.capture);
     hkv_log_fx2("cpu_inf", appMetResults.cpuSplit.inference);
     hkv_log_fx2("cpu_tx", appMetResults.cpuSplit.transport);
-    /* Free stack words on the BLE radio dispatcher task, and the tio_ble_init()
-     * status that explains a zero. Both are CACHED VALUES -- the ~1 ms stack
-     * walk happens in ReportTask before hkv_report_subsystem() takes the log
-     * mutex (see g_cpu_ble_hwm), never from inside this callback. Emitting the
-     * scan from here would extend the global log-mutex hold by ~1 ms on top of
-     * the ~2 ms of ITM this line already costs, and with EN_APP_TRACE on that
-     * blocks every equal-priority pump task's trace call for the duration --
-     * measuring the pipeline would perturb it, which is the thing obs.h exists
-     * to avoid. See ble_bringup_radio_stack_free_words() for what the scan
-     * costs and why it is once per second.
-     *
-     * Read ble_hwm against BLE_BRINGUP_RADIO_STACK_WORDS (4096); the measured
-     * steady-state figure is ~3714, i.e. the stack is ~9% used. `ble_wake_ps`
-     * on this same line is the other half of the BLE CPU picture.
-     *
-     * ble_hwm=0 now means "the radio task is gone" -- BleRadioTask clears its
-     * own handle before self-deleting on a tio_ble_init() failure -- and
-     * ble_init carries the status code that says why. ble_init=0 with a
-     * plausible ble_hwm is the healthy case.
-     *
-     * OMITTED, not zero-filled, on the two boards with no radio -- same gate
-     * as the ble_bringup.h include above. A `ble_hwm=0` would read as a stack
-     * about to overflow, which is the opposite of "there is no BLE task". */
+    /* Read the cached BLE diagnostics; avoid stack scanning in the streaming path. */
 #if defined(AM_PART_APOLLO510B) && TIO_BLE_ENABLED
     hkv_log_u32("ble_hwm", g_cpu_ble_hwm);
     hkv_log_u32("ble_init", (uint32_t)ble_bringup_init_status());
@@ -2463,11 +1844,7 @@ static const hkv_report_line_t kReportLines[] = {
 #define HKV_REPORT_SLOT_MS (1000u / HKV_REPORT_LINE_COUNT)
 
 static_assert(HKV_REPORT_SLOT_MS > 0, "report rotation cannot exceed one subsystem per millisecond");
-/* Integer division, so a line count that does not divide 1000 silently yields
- * a rotation SHORTER than a second -- 11 subsystems gives 90 ms slots and a
- * 990 ms rotation -- while every `_ps` field stays labelled per-second and
- * reads ~1% high. Fail the build instead: either pick a divisor of 1000 or
- * change the slot derivation and the `_ps` suffix together. */
+/* Exact division keeps the report rotation aligned with per-second counter units. */
 static_assert(1000u % HKV_REPORT_LINE_COUNT == 0,
               "report line count must divide 1000 ms exactly, or _ps is not a per-second rate");
 
@@ -2484,11 +1861,7 @@ ReportTask(void *pvParameters)
          * turn the `_ps` deltas into something other than per-second. */
         vTaskDelayUntil(&lastWake, pdMS_TO_TICKS(HKV_REPORT_SLOT_MS));
 #if defined(AM_PART_APOLLO510B) && TIO_BLE_ENABLED
-        /* Sample the ~1 ms BLE stack walk here, OUTSIDE hkv_report_subsystem()
-         * and therefore outside the global log mutex it holds for the whole
-         * line including extra(). Once per rotation (the cpu slot only), so
-         * the cost is unchanged -- what changes is that no other task's trace
-         * call waits on it. */
+        /* Scan the stack outside the logging mutex to avoid blocking other reporters. */
         if (kReportLines[idx].extra == report_extra_cpu) {
             g_cpu_ble_hwm = ble_bringup_radio_stack_free_words();
         }
@@ -2573,15 +1946,7 @@ main(void)
     NSX_TRY(tio_usb_init(&tioUsbCtx) != NSX_STATUS_SUCCESS, "TileIO USB Init failed.\n");
 #endif
 
-    /* BLE bring-up: app-owned EM9305 radio/WSF-pool/dispatcher-task setup
-     * (see ble_bringup.c). Board power-up is already covered by
-     * nsx_power_configure() above -- this only layers the BLE-specific
-     * ns_ble_pre_init() + radio task creation on top, unlike ble_webble's
-     * standalone example (which calls am_bsp_low_power_init() itself,
-     * since it has no other board bring-up to reuse). Placed after core
-     * inits/queue creation, alongside where tio_usb_init() runs, so both
-     * transports come up together before the sensor/processing tasks start
-     * producing TileIO packets. */
+    /* Initialize radio resources after board power configuration. */
 #if defined(AM_PART_APOLLO510B) && TIO_BLE_ENABLED
     NSX_TRY(ble_bringup_init() != NSX_STATUS_SUCCESS, "TileIO BLE bring-up failed.\n");
 #endif
@@ -2605,10 +1970,7 @@ main(void)
     NSX_TRY((xTaskCreate(ReportTask, "ReportTask", 1024, 0, 1, &reportTaskHandle) != pdPASS),
             "ReportTask create failed.\n");
 
-    /* Emitted from main(), before the scheduler starts, so it is the FIRST
-     * line of any capture and cannot interleave with a report line. A capture
-     * that does not begin with this is a capture whose build is unknown, and
-     * every conclusion drawn from it is provisional. */
+    /* Emit build identity before task output can interleave with it. */
     hkv_log_boot();
 
     /* Constant after model initialization, so once is enough; emitted after the

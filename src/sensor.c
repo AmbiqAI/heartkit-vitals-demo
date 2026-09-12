@@ -1,23 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2026, Ambiq
-/**
- * @file sensor.c
- * @brief AS7058 PPG+ECG sensor bring-up (NSX port).
- *
- * Adapted from legacy heartkit-vitals-demo src/sensor.c and from the
- * ppg-codec-demo NSX reference port. GPIO/IRQ wiring and transport setup
- * follow the nsx-gpio / nsx-as7058_{i2c,spi} pattern established in
- * ppg-codec-demo. Phase 6 fix: sensor_configure() previously hardcoded the
- * simplified single-wavelength JSON-generated "click_ppg_ecg" profile
- * (ppg1_sub_en=1, one LED only) instead of selecting the real dual-
- * wavelength (Red PPG1_SUB1 + IR PPG1_SUB2) + ECG "click golden" profile
- * via as7058_get_active_profile() (as legacy does) -- this silently drove
- * the wrong/no visible LED and discarded the second wavelength entirely.
- * Fixed here: profile now comes from as7058_get_active_profile()
- * (AS7058_APP_PROFILE, constants.h -- defaults to CLICK_GOLDEN), with the
- * same runtime LED sub1/sub2 override legacy applies, and the callback now
- * extracts both PPG1_SUB1 (Red) and PPG1_SUB2 (IR) into separate
- * ringbuffers plus ECG.
+/** @file sensor.c
+ * @brief AS7058 sensor configuration and capture.
  */
 #include <stdbool.h>
 #include <string.h>
@@ -61,8 +45,7 @@ rb_config_t rbEcgSensor = {
     .buffer = s_ecg_rb_buf, .dlen = sizeof(float32_t), .size = SENSOR_RB_LEN, .head = 0, .tail = 0,
 };
 
-/* Extern I2C/SPI configs are provided by the app (board bring-up owns bus
- * ownership); declared here to keep sensor.c self-contained during phase 2. */
+/* Defined by the application store. */
 extern nsx_i2c_config_t nsxI2cCfg;
 extern nsx_spi_config_t nsxSpiCfg;
 
@@ -85,14 +68,7 @@ static volatile TickType_t g_restart_due_tick = 0;
 /* Last bus rebuild observed by the recovery service. Sensor task only. */
 static uint32_t g_bus_rebuilds_seen = 0;
 
-/* AS7058 INT GPIO ISR-to-ISR interval tracking, exposed via ReportTask's
- * once/sec breadcrumb: confirms whether the sensor's INT line is firing at
- * a uniform, expected cadence (normal FIFO-watermark batching -- e.g. one
- * INT per ~26 ECG samples at 200 Hz is exactly the configured watermark,
- * not a bug) versus genuinely irregular/starved (would show large
- * max-interval outliers relative to the min). Useful ongoing health check
- * after any change touching interrupt priorities, USB/BLE ISR paths, or
- * critical sections that could starve the sensor's edge-triggered INT. */
+/* Measure interrupt spacing independently of FIFO service time. */
 static volatile uint32_t g_as7058_isr_last_tick = 0;
 static volatile uint32_t g_as7058_isr_min_interval_ticks = 0xFFFFFFFFu;
 static volatile uint32_t g_as7058_isr_max_interval_ticks = 0;
@@ -105,9 +81,7 @@ static volatile uint32_t g_as7058_isr_max_interval_ticks = 0;
 static bio_spo2_a0_configuration_t g_spo2_config;
 static bool g_spo2_config_valid = false;
 
-/* Small LCG PRNG + gaussian approximation for adding synthetic noise to the
- * canned PPG stimulus (ported verbatim from legacy sensor.c) -- keeps the
- * playback waveform from being unnaturally clean. */
+/* Add synthetic noise to stored PPG stimuli. */
 static uint32_t g_ppg_stim_prng_state = 0x13579BDFu;
 
 static inline float32_t
@@ -128,17 +102,7 @@ ppg_stim_gaussian_noise(float32_t stddev)
     return z * stddev;
 }
 
-/*
- * Canned patient-data playback (ported from legacy sensor.c
- * load_patient_data). When appState/sensorCtx.inputSource selects a
- * pre-recorded patient (< NUM_INPUT_PTS), the live AS7058 FIFO samples are
- * discarded and the same NUMBER of samples is substituted from the canned
- * stimulus arrays (stimulus.c) -- so playback is paced by the real sensor's
- * sample clock and flows through the identical downstream pipeline.
- * inputSource 0 cycles through all patients back-to-back; 1..NUM_INPUT_PTS-1
- * select a single patient's segment (looped). Stimulus values are already
- * pipeline-scale: they bypass the live-path AGC clip/rescale.
- */
+/* Stored stimulus playback retains the sensor's sample pacing. */
 static uint32_t
 load_patient_data(uint32_t reqSamples, uint32_t slot)
 {
@@ -193,11 +157,7 @@ sensor_live_mode(void)
     return (g_sensorCtx == NULL) || (g_sensorCtx->inputSource == LIVE_INPUT_MODE);
 }
 
-/*
- * GPIO/IRQ wiring for the AS7058 INT pin. nsx-gpio owns pin config, IRQ
- * bank registration/dispatch, and interrupt clearing (see nsx_gpio_init()),
- * replacing the legacy hand-rolled AmbiqSuite HAL GPIO + NVIC + ISR plumbing.
- */
+/* NSX GPIO owns interrupt registration and clearing. */
 static err_code_t
 as7058_osal_int_pin_read(void *p_ctx, uint8_t *p_state)
 {
@@ -335,13 +295,7 @@ sensor_as7058_callback(err_code_t error,
             load_patient_data(sample_cnt, AS7058_SUB_SAMPLE_ID_PPG1_SUB1);
         } else {
             for (uint16_t i = 0; i < sample_cnt; i++) {
-                /* Raw AS7058 PPG counts run ~10^5-10^6 (PPG_AGC_MIN..PPG_AGC_MAX,
-                 * constants.h). Clip to the AGC operating range and rescale down
-                 * to a small int16-friendly span -- matches legacy sensor.c's
-                 * per-sample CLIP/-=/ /=16 exactly. Without this, raw counts
-                 * blow past int16 range downstream (TX packing, DSP windows),
-                 * which is what made the live PPG waveform look flat/dead
-                 * except for large step artifacts on full cover/uncover. */
+                /* Rescale the AGC range to fit downstream signed sample storage. */
                 float32_t val = (float32_t)samples[i];
                 val = CLIP(val, PPG_AGC_MIN, PPG_AGC_MAX);
                 val -= PPG_AGC_MIN;
@@ -478,19 +432,7 @@ sensor_configure(void)
 
     profile.control.reg_vals.i2c_mode = AS7058_USE_I2C ? 1 : 0;
 
-    /* Match legacy sensor_configure(): force the LED-to-physical-position
-     * mapping (led_sub1/led_sub2) to the board-profile macros (constants.h
-     * AS7058_LED_SUB1_CFG/AS7058_LED_SUB2_CFG -- LED2/Red and LED3/IR on
-     * the click board) whenever not using a dedicated SpO2 profile. This
-     * is the fix for the "click_ppg_ecg" bring-up profile bug: that
-     * profile's raw JSON data hardcoded led_sub1=1 (a stale/incorrect
-     * physical LED index, not the click board's real Red LED position),
-     * so only one (possibly wrong or unlit) LED ever fired. The active
-     * profile is now as7058_get_active_profile() (AS7058_APP_PROFILE,
-     * default CLICK_GOLDEN -- dual-wavelength Red+IR PPG + ECG, see
-     * as7058_profiles.c) which already bakes in the correct mapping, but
-     * this override is applied unconditionally (as legacy does) so it
-     * stays correct regardless of which profile ends up selected. */
+    /* Apply board-specific LED positions rather than assuming profile wiring. */
     if (!spo2_profile_enabled) {
         profile.led.reg_vals.led_sub1 = AS7058_LED_SUB1_CFG;
         profile.led.reg_vals.led_sub2 = AS7058_LED_SUB2_CFG;

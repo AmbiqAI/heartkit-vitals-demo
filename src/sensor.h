@@ -1,15 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2026, Ambiq
-/**
- * @file sensor.h
- * @brief AS7058 PPG+ECG sensor bring-up (NSX port).
- *
- * Ported from legacy heartkit-vitals-demo src/sensor.c. Phase 6 update:
- * sensor_configure() now applies the real dual-wavelength (Red PPG1_SUB1 +
- * IR PPG1_SUB2) + ECG "click golden" profile via as7058_get_active_profile()
- * (respecting AS7058_APP_PROFILE, constants.h), instead of the earlier
- * single-wavelength JSON bring-up profile -- see as7058_profiles.c. The
- * callback extracts both PPG wavelengths plus ECG.
+/** @file sensor.h
+ * @brief AS7058 sensor configuration and capture API.
  */
 #ifndef __APP_SENSOR_H
 #define __APP_SENSOR_H
@@ -30,11 +22,7 @@ extern "C" {
 
 typedef struct {
     uint8_t initialized;
-    /* Mirrors legacy app_state_t.inputSource (constants.h: NUM_INPUT_PTS
-     * canned stimulus slots, LIVE_INPUT_MODE = live AS7058 sensor).
-     * Non-live values substitute canned patient stimulus playback for the
-     * live AS7058 FIFO data in the sensor callback (load_patient_data,
-     * sensor.c) -- paced by the real sensor sample clock, matching legacy. */
+    /* Stored stimuli replace live samples while retaining sensor-clock pacing. */
     uint8_t inputSource;
 } sensor_context_t;
 

@@ -1,13 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2026, Ambiq
-/**
- * @file ble_bringup.c
- * @brief App-owned TileIO BLE bring-up (apollo510b_evb only).
- *
- * See ble_bringup.h for the full contract/rationale. This whole file is a
- * no-op outside AM_PART_APOLLO510B so an accidental non-gated build (e.g. a
- * CMakeLists.txt mistake) degrades gracefully instead of hard-failing on
- * boards with no BLE hardware.
+/** @file ble_bringup.c
+ * @brief Application-owned TileIO BLE initialization.
  */
 #include "ble_bringup.h"
 
@@ -30,17 +24,7 @@
 #include "tio_ble.h"
 #include "tio_usb.h" /* TIO_USB_PACKET_LEN + frame layout constants (cited below) */
 
-/* ---- WSF buffer pool (app-owned policy) -------------------------------
- * Pattern copied from neuralspotx/examples/ble_webble/src/main.c
- * (WEBBLE_WSF_BUFFER_POOLS/WEBBLE_WSF_BUFFER_SIZE/webbleWsfBuffers), scaled
- * up: TileIO's slot signal/metric characteristics are up to
- * TIO_BLE_SLOT_SIG_BUF_LEN/TIO_BLE_SLOT_MET_BUF_LEN (242) bytes, vs.
- * ble_webble's 1-3 byte characteristics, and there are TIO_BLE_SLOT_COUNT*2+1
- * (9) characteristics that may all have pending ATT buffers concurrently.
- * The largest tier is sized to comfortably hold a 242-byte notification (plus
- * ATT/L2CAP header overhead) with headroom for the 247-byte negotiated MTU,
- * with enough buffer count for all 9 characteristics to be in flight.
- */
+/* WSF pools must accommodate concurrent TileIO payloads and protocol overhead. */
 #define BLE_BRINGUP_WSF_BUFFER_POOLS 4
 #define BLE_BRINGUP_WSF_BUFFER_SIZE                                            \
     (BLE_BRINGUP_WSF_BUFFER_POOLS * 16 + 16 * 8 + 32 * 8 + 64 * 8 + 280 * 20) / \
@@ -56,15 +40,7 @@ static ns_ble_pool_config_t g_bleBringupWsfBuffers = {
     .descNum = BLE_BRINGUP_WSF_BUFFER_POOLS,
 };
 
-/* ---- App->BLE callback forwarding --------------------------------------
- * received_slot_data()/received_uio_state() in main.cc already implement the
- * ISR-safety fix for host UIO writes (latch-and-defer via g_uio_pending,
- * applied in TioProcessTask context -- see apply_pending_uio_state()). BLE
- * write callbacks run from the WSF/Cordio ATTS server context (RadioTask,
- * not an ISR, but still not a context that should block or touch
- * non-thread-safe ringbuffers directly), so reuse the exact same latch-and-
- * defer pattern rather than duplicating it: these two wrappers just forward
- * into main.cc's existing (extern "C", non-static) callbacks. */
+/* Defer BLE writes through the same task-context path as USB controls. */
 extern void ble_bringup_slot_update_cb(
     uint8_t slot, uint8_t slot_type, const uint8_t *data, uint32_t length);
 extern void ble_bringup_uio_update_cb(const uint8_t *data, uint32_t length);
@@ -121,71 +97,8 @@ ble_bringup_event_handler(const ns_ble_event_t *event, void *context)
     }
 }
 
-/* ---- The TileIO notify timer is a dead poll; park it (issue #19) --------
- *
- * READ THIS BEFORE "FIXING" THE NUMBER BELOW BACK TO 200.
- *
- * `tio_ble_context_t::notify_period_ms` is NOT this app's telemetry rate. It
- * is plumbed straight through tio_ble_notify_period_ms() into the `periodMs`
- * argument of ns_ble_create_characteristic() for all TIO_BLE_SLOT_COUNT*2+1
- * (9) characteristics, and every one of those calls also passes `async` =
- * true (tio_ble.c:131, :193, :204). In ns_ble.c's timer handler:
- *
- *     if (c->notifyHandlerCb != NULL) { status = c->notifyHandlerCb(...); }
- *     if (status == NS_STATUS_SUCCESS && c->indicationIsAsynchronous == false)
- *         ns_ble_send_value(c, (attEvt_t *)pMsg);
- *     WsfTimerStartMs(&c->indicationTimer, c->indicationPeriod);
- *                                              -- ns_ble.c:1054-1064
- *
- * With async == true the send is skipped unconditionally, and TileIO's
- * notify handler (tio_ble.c:76) is `return NS_STATUS_SUCCESS;` with an empty
- * body. So a timer expiry calls a no-op, sends nothing, and rearms. It is a
- * poll that can never produce a packet.
- *
- * The actual telemetry path is already data-driven and does not involve this
- * timer at all: TioProcessTask -> ble_bringup_send_slot_packet() ->
- * tio_ble_send_slot_data()/tio_ble_send_uio_state() -> ns_ble_send_value(),
- * which pushes a notification the moment a packet exists. Raising the period
- * therefore does NOT slow telemetry, drop a notification, or change the
- * dashboard's update rate -- there is no telemetry on this path to slow. It
- * removes 9 characteristics x 5 expiries/s = ~45 dispatcher wakes/s that
- * carried no data.
- *
- * Neither does it touch the control path. CCCD subscribe/unsubscribe still
- * starts and stops the timer (ns_ble.c:1088/:1092), UIO reads still go
- * through tio_ble_read_handler() -> uio_read_cb (so a freshly connected host
- * still gets its UIO state on read), UIO writes still go through
- * tio_ble_uio_write_handler() -> uio_update_cb, and UIO state pushes still go
- * through tio_ble_send_uio_state(). None of those four read indicationPeriod.
- *
- * WHY 65535 AND NOT 0. ns_ble_create_characteristic()'s `periodMs` is a
- * uint16_t, so 65535 ms is the maximum expressible period: ~0.14 expiries/s
- * across all 9 characteristics, i.e. the poll is gone rather than merely
- * slower. It is also safe -- WsfTimerStartMs takes a uint32_t and divides by
- * WSF_MS_PER_TICK (10), giving 6553 ticks with nothing near an overflow
- * (wsf_timer.h:37/45, wsf_timer.c:39).
- *
- * 0 is NOT the disable value and must not be used here, but the trap is
- * quieter than it looks. tio_ble_notify_period_ms() (nsx-tileio-ble
- * src/tio_ble.c:100-104) maps a 0 in this context field to
- * TIO_BLE_DEFAULT_NOTIFY_PERIOD_MS before it ever reaches ns_ble, so writing
- * 0 here does not reach WSF as 0 ticks -- it silently restores TileIO's
- * default poll period and puts the ~45 dead wakes/s back, with nothing in
- * this file changing to show it. A zero that reads as "off" and behaves as
- * "default" is the failure mode to watch for here.
- *
- * (The 0-tick behaviour one layer down -- WSF_TIMER_MS_TO_TICKS yielding 0
- * and WsfTimerUpdate() expiring a 0-tick timer on the very next tick,
- * wsf_timer.c:254-264 -- is real, but it is the module-level rationale for
- * why tio_ble.c does that clamping at all, not something reachable from this
- * file. See AmbiqAI/nsx-ambiq-sdk#71.)
- *
- * THIS IS A WORKAROUND, NOT THE FIX. The fix is for ns_ble.c to not arm the
- * timer at all when async == true (a characteristic that has declared its
- * sends asynchronous has said the timer has no job), or failing that for
- * nsx-tileio to stop passing a poll period it structurally cannot use. Both
- * live outside this repo: ns_ble.c is vendored, and modules/nsx-tileio is
- * generated from nsx.lock and gitignored here. See the issue #19 report. */
+/* Async notifications are data-driven. Zero selects the default polling period,
+ * not disable; use the maximum period. See AmbiqAI/heartkit-vitals-demo#19. */
 #define BLE_BRINGUP_DEAD_POLL_PERIOD_MS 65535u
 
 static tio_ble_context_t g_bleBringupCtx = {
@@ -209,17 +122,7 @@ static tio_ble_context_t g_bleBringupCtx = {
 static TaskHandle_t g_bleBringupRadioTaskHandle;
 static volatile int32_t g_bleBringupInitStatus = NS_STATUS_SUCCESS;
 
-/* Apollo510B EM9305 GPIO IRQ fanout. ble_webble's reference implementation
- * defines the raw `AM_BSP_EM9305_RADIO_INT_ISR` vector directly, but that
- * only works there because it doesn't also link nsx-gpio: this app already
- * does (for the AS7058 sensor IRQ), and nsx-gpio pulls in nsx-interrupt,
- * whose Apollo5-family glue (nsx_interrupt_vectors.c) provides a STRONG,
- * non-weak definition of every `am_gpio*_isr` vector (including this radio
- * IRQ's `am_gpio0_607f_isr`) that dispatches to nsx_irq_register()'d
- * handlers. Defining the raw ISR ourselves collides with that (link error:
- * multiple definition of `am_gpio0_607f_isr`) -- register through
- * nsx_irq_register() instead, which also covers the NVIC priority setup
- * that ble_webble does separately via NVIC_SetPriority(). */
+/* Register through NSX IRQ dispatch to avoid defining a duplicate GPIO vector. */
 static void
 ble_bringup_radio_irq_handler(void *ctx)
 {
@@ -235,42 +138,15 @@ BleRadioTask(void *pvParameters)
     if (status != NS_STATUS_SUCCESS) {
         nsx_printf("[ble] tio_ble_init failed (status=%ld)\n", (long)status);
         g_bleBringupInitStatus = (int32_t)status;
-        /* Clear the handle BEFORE self-deleting, or the NULL guard in
-         * ble_bringup_radio_stack_free_words() is decorative and that
-         * accessor dereferences a dangling TaskHandle_t once per second
-         * forever from ReportTask. This path is reachable on real hardware
-         * (EM9305 unpopulated, SPI fault, radio FW not loaded):
-         * ble_bringup_init() only creates the task, so it returns success and
-         * the scheduler starts regardless. Once the idle task's prvDeleteTCB
-         * runs, the TCB and the 16 KB stack are freed;
-         * uxTaskGetStackHighWaterMark() does no validation, so it would read
-         * pxStack out of freed heap and byte-walk from whatever address that
-         * block later holds. With the handle cleared, `ble_hwm=0` means "the
-         * radio task is gone" and `ble_init` on the same report line says
-         * why.
-         *
-         * RESIDUAL RACE (accepted, sub-tick): ReportTask (prio 1) can load a
-         * non-NULL handle and be preempted here by BleRadioTask (prio 3)
-         * before it dereferences it. The airtight alternative is
-         * vTaskSuspend(NULL) instead of vTaskDelete(NULL) -- the TCB stays
-         * valid, the watermark stays meaningful, and no dangling handle can
-         * exist -- at the cost of never reclaiming this task's 16 KB stack.
-         * Not taken unilaterally: 16 KB is worth more on this part than
-         * closing a one-shot window during a failed bring-up. Owner's call if
-         * that trade changes. */
+        /* Clear the shared handle before freeing the task. A concurrent reader can
+         * still race deletion; see AmbiqAI/heartkit-vitals-demo#19. */
         g_bleBringupRadioTaskHandle = NULL;
         vTaskDelete(NULL);
         return;
     }
     nsx_printf("[ble] TileIO BLE service started, advertising as '%s'\n", BLE_BRINGUP_ADV_NAME);
     while (1) {
-        /* The ONLY thing allowed in this loop besides the dispatcher call.
-         * hkv_count() is a load/add/store on a volatile uint32_t -- single
-         * digit cycles -- and it is what makes the wake rate observable
-         * (`ble_wake_ps` on the cpu report line). The stack high-water probe
-         * that used to sit here is gone; see
-         * ble_bringup_radio_stack_free_words() for what it cost and where it
-         * moved to. */
+        /* Keep dispatcher instrumentation constant-time; see AmbiqAI/heartkit-vitals-demo#19. */
         hkv_count(HKV_CNT_BLE_WAKE);
         wsfOsDispatcher();
     }
@@ -306,18 +182,13 @@ ble_bringup_init(void)
     g_bleBringupCtx.pool_config = &g_bleBringupWsfBuffers;
     (void)g_bleBringupPoolConfig;
 
-    /* Registers the EM9305 GPIO IRQ handler and sets its NVIC priority in
-     * one call -- see ble_bringup_radio_irq_handler()'s comment for why this
-     * app must go through nsx_irq_register() rather than ble_webble's direct
-     * NVIC_SetPriority()+raw-vector-definition approach. */
+
     if (nsx_irq_register(&irqCfg) != NSX_STATUS_SUCCESS) {
         nsx_printf("[ble] EM9305 IRQ register failed\n");
         return NSX_STATUS_FAILURE;
     }
 
-    /* Legacy compatibility hook; nsx-ble intentionally leaves interrupt
-     * vector ownership to the app (see ns_ble_pre_init()'s doc comment in
-     * ns_ble.h). */
+    /* NSX owns the interrupt vector; this hook intentionally performs no registration. */
     ns_ble_pre_init();
 
     if (xTaskCreate(BleRadioTask, "BleRadioTask", BLE_BRINGUP_RADIO_STACK_WORDS, NULL,
@@ -363,12 +234,7 @@ ble_bringup_send_slot_packet(const uint8_t *packet, uint32_t length)
     if (packet == NULL || length != TIO_USB_PACKET_LEN) {
         return NSX_STATUS_FAILURE;
     }
-    /* Cheap connected check first: ns_ble_send_value() (inside
-     * tio_ble_send_slot_data()/tio_ble_send_uio_state()) already returns
-     * immediately on no connection, but skipping the unpack entirely when
-     * nobody is listening keeps this call as light as possible from the
-     * shared TioProcessTask hot path -- never a source of USB-path
-     * slowdown. */
+    /* Avoid unpacking packets when no BLE subscriber can receive them. */
     if (!ble_bringup_connected()) {
         return NSX_STATUS_FAILURE;
     }
@@ -383,11 +249,7 @@ ble_bringup_send_slot_packet(const uint8_t *packet, uint32_t length)
         return tio_ble_send_uio_state(data, dlen);
     }
     if (dlen > TIO_BLE_SLOT_DATA_MAX_LEN) {
-        /* BLE's per-characteristic payload cap (240) is smaller than USB's
-         * 248-byte frame data field; nothing in this app's current slot
-         * payloads (ECG/PPG/CPU signals+metrics) approaches either limit,
-         * but guard defensively rather than overflow tio_ble's fixed
-         * buffers. */
+        /* Reject payloads that exceed the BLE characteristic capacity. */
         return NSX_STATUS_FAILURE;
     }
     return tio_ble_send_slot_data(slot, slot_type, data, dlen);

@@ -4,8 +4,6 @@
  * @file ecg_segmentation.cc
  * @author Adam Page (adam.page@ambiq.com)
  * @brief ECG segmentation
- * @version 1.0
- * @date 2023-12-13
  *
  * @copyright Copyright (c) 2024
  *
@@ -29,10 +27,7 @@
 #include "ecg_segmentation.h"
 #include "ecg_tensor_copy.h"
 
-/* A model narrower than the host window cannot fill it. The generated I/O
- * extents are compile-time constants, so what #36 caught at boot is now a
- * build error. The output is flat [TIME * CLASSES], not TFLM's [1, TIME,
- * CLASSES]. */
+/* Model extents must cover the host window; see AmbiqAI/heartkit-vitals-demo#36. */
 static_assert(hkv_segmentation_input_0_size >= ECG_SEG_WINDOW_LEN, "AOT seg input narrower than the host window");
 static_assert(hkv_segmentation_output_0_size >= ECG_SEG_WINDOW_LEN * ECG_SEG_NUM_CLASS,
               "AOT seg output narrower than the host window");
@@ -92,19 +87,7 @@ ecg_physiokit_segmentation_inference(float32_t *data, uint16_t *segMask, uint32_
         segMask[i] = segMask[i] > 0 ? ECG_SEG_QRS : ECG_SEG_NONE;
         segMask[i] |= ((qosMask & SIG_MASK_QOS_MASK) << SIG_MASK_QOS_OFFSET);
     }
-    /* Gated to match ecg_arrhythmia.cc, and not merely for volume.
-     *
-     * This is the DSP segmentation path (SegmentationModeDsp, selectable over
-     * UIO at runtime), and it runs once per ~2 s window on EcgProcessTask. It
-     * was emitting 1 + numPeaks raw nsx_printf lines per window in steady
-     * state -- not a bring-up or error path. Those calls share am_util_stdio's
-     * single file-static g_prfbuf with the serialized HKV report lines (see
-     * src/obs.h) and are NOT covered by its lock, so in DSP mode they
-     * reproduce exactly the interleaved-buffer corruption that issue #11
-     * exists to remove.
-     *
-     * The mask write below is real work and stays unconditional; only the
-     * prints are gated. */
+    /* Raw model prints bypass serialized logging; see AmbiqAI/heartkit-vitals-demo#11. */
 #if EN_MODEL_VERBOSE_LOGS
     nsx_printf("ECG SEG PK numPeaks: %d\n", numPeaks);
 #endif
