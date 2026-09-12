@@ -1,18 +1,8 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2026, Ambiq
-/**
- * @file ecg_tensor_copy.h
- * @brief Host window <-> model tensor copies for the ECG models.
- *
- * These loops live in a header whose only includes are stdint, stddef and
- * constants.h, so tests/test_ecg_tensor_copy.c can drive them on the host
- * under ASan/UBSan. On device the bounds come from generated compile-time
- * extents, where a bound taken from the tensor instead of the host
- * array is a silent out-of-bounds write rather than a failing test.
- *
- * The deployed models are wider than the host windows, so every bound here is
- * the overlap of the two and every tensor element past the host window is
- * defined by edge replication. See #36.
+/** @file ecg_tensor_copy.h
+ * @brief Copy between host windows and model tensors using overlap bounds.
+ * Tensor padding uses edge replication; see AmbiqAI/heartkit-vitals-demo#36.
  */
 #ifndef __HKV_ECG_TENSOR_COPY_H
 #define __HKV_ECG_TENSOR_COPY_H
@@ -40,11 +30,8 @@ typedef struct {
     int n;
 } hkv_tensor_len_t;
 
-/* LIMIT OF THE GUARD. Both constructors take a bare int, so these tags catch a
- * TRANSPOSED pair (host length passed where a tensor length is wanted) but not
- * a MISLABELLED one (the wrong constant handed to the right constructor). All
- * seven production call sites are correct today; a heavier scheme was judged not
- * worth the complexity. See #36. */
+/* Length tags prevent swapped arguments, not incorrectly constructed values;
+ * see AmbiqAI/heartkit-vitals-demo#36. */
 static inline hkv_host_len_t
 hkv_host_len(int n) {
     hkv_host_len_t v;

@@ -2,144 +2,10 @@
 // Copyright (c) 2026, Ambiq
 /**
  * @file obs.h
- * @brief Application observability: always-on counters, windowed gauges, and
- *        serialized machine-parseable diagnostic output.
- *
- * See issue #11 and docs/design/streaming-pipeline.md section 4.
- *
- * ===========================================================================
- * TWO MECHANISMS, NOT ONE
- * ===========================================================================
- *
- * The flags this replaces had it backwards: the CHEAP once-per-second counters
- * were behind EN_APP_DEBUG_LOGS (default 0, off) while the EXPENSIVE
- * per-pipeline-branch prints were behind EN_APP_TIMING_LOGS (default 1, on).
- * The shipped build paid for the costly one and omitted the useful one, and
- * hardware validation needed a hand-edited flag before it could see anything.
- *
- * So there are now two separate things with two different costs:
- *
- *   COUNTERS AND GAUGES -- always compiled, never behind a flag. Recording one
- *     is a relaxed read-modify-write on a volatile uint32_t: load, add, store,
- *     no lock, no barrier, safe from an ISR. At the app's increment rate
- *     (a few hundred per second, dominated by one per PPG sample at 100 Hz)
- *     the total cost is on the order of a thousand cycles per second. There is
- *     no build in which turning these off is worth the loss of evidence.
- *
- *   OUTPUT -- two channels, both flag-gated, because printing is what actually
- *     costs. Every emitted line is ITM/SWO traffic that BLOCKS the calling
- *     task for the duration.
- *       EN_APP_REPORT (constants.h, default 1) -- the periodic subsystem
- *         report driven by ReportTask. One subsystem per rotation slot so the
- *         per-second cost is spread rather than bursted.
- *       EN_APP_TRACE (constants.h, default 0) -- ad hoc per-event lines. Off
- *         by default: these sit inside pipeline branches on the equal-priority
- *         pump tasks whose cadence the whole latency budget depends on.
- *
- * Nothing is lost by leaving EN_APP_TRACE off, which is the point: every value
- * a trace line used to carry is also counted, so a persistently failing stage
- * cannot hide behind a plausible-looking silence.
- *
- * ===========================================================================
- * COUNTERS VS GAUGES (they are not the same and must not be conflated)
- * ===========================================================================
- *
- * A COUNTER is free-running and wrapping. It is NEVER reset -- not by the
- * reporter, not by a host, not on reconnect. uint32_t at the app's rates wraps
- * in decades, and even if it wrapped hourly the unsigned subtraction the
- * reporter uses is still correct across the wrap. The reporter keeps its OWN
- * previous snapshot and emits the delta, so two independent consumers can
- * never steal each other's interval. That property is the whole reason
- * counters are not resettable.
- *
- * A GAUGE is a windowed min/max of an instantaneous quantity (ring occupancy,
- * burst size). A window is meaningless without a reset, so gauges have one --
- * explicitly, and declared per gauge in the table:
- *   HKV_GAUGE_WINDOWED -- reset by the reporter after each emit, so the log
- *     shows a progression rather than a lifetime extreme.
- *   HKV_GAUGE_LIFETIME -- never reset. For a high-water mark whose value is a
- *     claim about a derived constant (see HKV_GAUGE_PPG_TEE), where "the worst
- *     ever seen" is the number that matters and a per-second maximum is not.
- *
- * ===========================================================================
- * LINE FORMAT
- * ===========================================================================
- *
- *     HKV|<uptime_ms>|<seq>|<subsystem>|<k=v> <k=v> ...\n
- *
- * uptime_ms is xTaskGetTickCount(); configTICK_RATE_HZ is 1000 so ticks ARE
- * milliseconds (static_assert in obs.c).
- *
- * seq is a GLOBAL report sequence number incremented under the log lock. It is
- * the load-bearing field. Without it a line that never arrived (SWO overflow,
- * a capture tool dropping bytes) is indistinguishable from firmware that
- * stopped emitting, and telling those two apart by eye has cost real debugging
- * time on this project. With it: contiguous seq and a stalled uptime_ms means
- * the firmware stalled; a gap in seq means the transport dropped a line.
- *
- * Values are INTEGERS ONLY. Real quantities are emitted as fixed point with
- * the scale in the key (`hr_x100=7250`), never as a float and never via the
- * `%d.%02d` split, which is expensive and loses the sign (see obs_fmt.h).
- *
- * Keys are self-describing, so a consumer never needs a schema update when a
- * counter is added:
- *   `<key>`     -- a free-running total
- *   `<key>_ps`  -- a per-report-interval delta, i.e. a rate per second
- *   `<key>_lo`  -- gauge minimum over the window
- *   `<key>_hi`  -- gauge maximum over the window
- *   `<key>_n`   -- observations behind that window; `_n=0` means the `_lo` and
- *                  `_hi` beside it are placeholders, NOT measurements
- *   `<key>_x100`-- signed integer hundredths
- *
- * One subsystem per line, each comfortably under 1024 bytes.
- *
- * ===========================================================================
- * WHY A MUTEX AND NOT A BUFFER, AND NOT A CRITICAL SECTION
- * ===========================================================================
- *
- * The observed SWO corruption (`ppg(r[ecg] denoise err=0`) is a DATA RACE, not
- * interleaved-but-intact lines. nsx_printf -> am_util_stdio_vprintf formats
- * into a single file-static g_prfbuf, and am_util_stdio_vsnprintf routes
- * through the SAME buffer. The usual fix -- format into a private buffer, then
- * emit the result atomically -- therefore DOES NOT WORK on this SDK: the
- * "private" formatting step is itself the shared resource. Format and emit
- * must both happen inside one lock.
- *
- * The lock is a FreeRTOS mutex, NOT taskENTER_CRITICAL. A ~200-character line
- * is roughly 2 ms of ITM writes; masking interrupts for that long would blow
- * the AS7058 bounded-INT window (sensor.c), a hazard already root-caused twice
- * in this codebase. A mutex lets the sensor ISR run while a log line drains.
- *
- * CONSEQUENCES, both of which are enforced rather than documented-and-hoped:
- *   - NEVER LOG FROM AN ISR. Taking a mutex in an ISR is invalid. hkv_log
- *     asserts !xPortIsInsideInterrupt(). Counters remain ISR-safe; output does
- *     not.
- *   - PRE-SCHEDULER IS HANDLED. main()'s bring-up prints run before
- *     vTaskStartScheduler, where taking a mutex is invalid. The lock is
- *     skipped in that state and the line is emitted unlocked, which is safe
- *     precisely because nothing else is running yet.
- *
- * RESIDUAL, stated plainly: this lock only covers callers that go through
- * hkv_log_*. Direct nsx_printf calls elsewhere in the app (sensor.c,
- * ble_bringup.c, as7058_profiles.c, the model TUs) and inside vendored modules
- * are NOT serialized against it and CAN still corrupt a line if they land
- * concurrently. This change does not eliminate the class; it removes the
- * app-level steady-state sources and leaves the rest visible.
- *
- * Two categories, and the distinction is the useful part:
- *   - Bring-up and error paths (most of the above). They fire once at startup
- *     or when something has already gone wrong, so a corrupted line in a
- *     steady-state capture is unlikely and, on an error path, is not the
- *     problem you are debugging anyway.
- *   - STEADY-STATE emitters, which are the ones that actually reproduce the
- *     defect. One was found in review and fixed rather than documented:
- *     ecg_physiokit_segmentation_inference() (ecg_segmentation.cc) emitted
- *     1 + numPeaks raw lines from EcgProcessTask once per ~2 s window whenever
- *     segmentation is in DSP mode -- runtime-selectable over UIO, so reachable
- *     by any user without a rebuild. It is now behind EN_MODEL_VERBOSE_LOGS,
- *     matching ecg_arrhythmia.cc. If you add a print on a periodic path,
- *     either route it through hkv_log_* or gate it; a raw nsx_printf on a
- *     2 s cadence is enough to corrupt a capture.
+ * @brief Counters, windowed gauges, and serialized diagnostic output.
+ * Counter updates are ISR-safe; logging is task-only. Each counter requires a
+ * single writer. Direct printf calls do not participate in the logging lock.
+ * See AmbiqAI/heartkit-vitals-demo#11.
  */
 #ifndef __HKV_OBS_H
 #define __HKV_OBS_H
@@ -416,12 +282,7 @@ void hkv_log_fx2(const char *key, float value);
 /** @brief Terminate the line and release the log lock. */
 void hkv_log_end(void);
 
-/**
- * @brief Emit the self-describing boot line.
- *
- * A capture that does not start with this line is a capture whose build is
- * unknown, and every conclusion drawn from it is provisional.
- */
+/** @brief Emit build identity before periodic diagnostic output. */
 void hkv_log_boot(void);
 
 /**
