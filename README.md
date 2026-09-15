@@ -31,9 +31,9 @@ The firmware processes signals on the board and sends results to
 
 | Evaluation board | Connection | Release package folder |
 | --- | --- | --- |
-| Apollo510B EVB | USB or BLE | `v521/apollo510b/` |
-| Apollo510 EVB | USB | `v521/apollo510/` |
-| Apollo330 Plus EVB | USB | `v521/apollo330/` |
+| Apollo510B EVB | USB or BLE | `v522/apollo510b/` |
+| Apollo510 EVB | USB | `v522/apollo510/` |
+| Apollo330 Plus EVB | USB | `v522/apollo330/` |
 
 Choose Apollo510B if you want to explore both USB and BLE. On Apollo330, use LP
 mode; its battery projection is not validated.
@@ -51,8 +51,8 @@ You also need:
 
 No firmware toolchain is required.
 
-1. Download `heartkit-vitals-demo-v521-firmware.zip` from the
-   [v5.2.1 release](https://github.com/AmbiqAI/heartkit-vitals-demo/releases/tag/v5.2.1).
+1. Download `heartkit-vitals-demo-v522-firmware.zip` from the
+   [v5.2.2 release](https://github.com/AmbiqAI/heartkit-vitals-demo/releases/tag/v5.2.2).
 2. Unzip the package and open the folder for your board from the table above.
 3. Power the board and connect its programming/debug USB port.
 4. Run the helper for your computer:
@@ -65,7 +65,7 @@ No firmware toolchain is required.
    USB port to your computer.
 
 For flashing troubleshooting, including macOS permissions and manual J-Link
-commands, see `v521/FLASH.md` in the package.
+commands, see `v522/FLASH.md` in the package.
 
 ## Connect with TileIO
 
@@ -138,7 +138,7 @@ binary is written to `build/<board>/heartkit-vitals-demo.bin`.
   work. It excludes sensor power and is not measured runtime of the continuously
   streaming demo. See the [calculation and measurement assumptions](docs/battery-projection.md).
 - This is an evaluation demo, not a medical diagnostic device. Hardware coverage
-  varies by board and interface; see the [release validation record](docs/release-v5.2.1-validation.md).
+  varies by board and interface; see the [release validation record](docs/release-v5.2.2-validation.md).
 
 ## Documentation
 

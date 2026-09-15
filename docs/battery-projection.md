@@ -69,7 +69,7 @@ the battery projection.
 - tests/test_battery_model.c covers profile selection for all three boards,
   capacity, idle/compute cases, unequal stage weights, proportional clamping,
   negative/oversized fractions and unchanged HP assumptions.
-- All eleven host tests pass with address/undefined-behavior sanitizers.
+- The host tests pass with address/undefined-behavior sanitizers.
 - AP510B, AP510 and AP330 firmware builds pass through the board-aware NSX
   build path. Direct reuse of a CMake directory after changing boards can
   encounter the other board's generated module list; regenerate through NSX.

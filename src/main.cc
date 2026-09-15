@@ -53,6 +53,7 @@
 
 #include "constants.h"
 #include "battery_model.h"
+#include "performance_mode.h"
 #include "inference_timing.h"
 #if defined(AM_PART_APOLLO330P)
 #include "am_bsp.h"
@@ -542,7 +543,7 @@ set_arrhythmia_mode(uint8_t mode)
 static void
 set_speed_mode(uint8_t mode)
 {
-    mode = MIN(mode, 1);
+    mode = hkv_supported_speed_mode(mode);
     if (appState.speedMode != mode) {
         appState.speedMode = mode;
         nsx_power_set_performance_mode(appState.speedMode ? NSX_POWER_PERF_HIGH : NSX_POWER_PERF_LOW);
@@ -2524,6 +2525,7 @@ main(void)
     hkv_log_init();
 
     sensorCtx.inputSource = appState.inputSource;
+    appState.speedMode = hkv_supported_speed_mode(appState.speedMode);
     nsxPwrCfg.perf_mode = appState.speedMode ? NSX_POWER_PERF_HIGH : NSX_POWER_PERF_LOW;
 
     /* Enable ITM/SWO BEFORE nsx_power_configure()/perf-mode switch -- see
