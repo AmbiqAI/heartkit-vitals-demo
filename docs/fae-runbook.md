@@ -7,18 +7,18 @@ Powered by [heartKIT](https://ambiqai.github.io/heartkit/), accelerated with
 
 ## Before the demo
 
-- Use the matching v5.2.0 package: `v520/apollo510b/`, `v520/apollo510/`, or
-  `v520/apollo330/`. Follow the package flashing instructions.
-- Validate the actual board and sensor before presenting. AP510B has release
-  smoke-test coverage; AP510 and AP330 were built but not hardware validated
-  for this release. See [release validation](release-v5.2.0-validation.md).
+- Download the firmware release linked in the [setup guide](../README.md).
+  Use its `apollo510b/`, `apollo510/`, or `apollo330/` folder for your board
+  and follow the package flashing instructions.
+- Validate the actual board and sensor before presenting. See the package
+  release notes for hardware coverage and validation details.
 - Connect the data USB cable. Open [TileIO](https://ambiqai.github.io/tileio/)
   in Chrome or Edge and choose **Vital Sign Monitoring** in **LIVE** API mode.
   Emulate mode is synthetic data, not firmware measurements.
 - Select Device, choose USB, scan, select the board, and connect.
   BLE is available on AP510B; AP510 and AP330 use USB.
-- Start in LP mode. On AP330, keep LP mode and do not quote the battery tile.
-  See the board limitations in the [setup guide](../README.md).
+- Start in LP mode. AP330 firmware enforces LP mode. The battery tile uses
+  shared budgeting assumptions, as described in the [setup guide](../README.md).
 - Confirm input selection, model modes, and changing waveforms. Off or DSP
   models intentionally show `--` for AI energy. AI Throughput shows `--`
   when no valid AI model results are available.

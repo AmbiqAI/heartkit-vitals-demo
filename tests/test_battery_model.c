@@ -1,11 +1,22 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2026, Ambiq
 #include "battery_model.h"
+#include "performance_mode.h"
 #include "inference_timing.h"
 #include "test_assert.h"
 
 int main(void)
 {
+    for (unsigned int requested = 0; requested <= UINT8_MAX; ++requested) {
+        const uint8_t mode = hkv_supported_speed_mode((uint8_t)requested);
+#if defined(AM_PART_APOLLO330P)
+        CHECK(mode == 0);
+#else
+        CHECK(mode == (requested != 0));
+#endif
+        CHECK_NEAR(hkv_battery_profile(mode != 0).sleep_mw,
+                   mode ? 0.75f : 1.268f, 0.0001f);
+    }
     CHECK(isnan(ai_display_rate(4200.0f, false)));
     CHECK(isnan(ai_display_rate(NAN, true)));
     CHECK(isnan(ai_display_rate(0.0f, true)));
