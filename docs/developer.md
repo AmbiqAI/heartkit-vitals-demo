@@ -137,7 +137,7 @@ performance specifications.
 - **Model energy:** firmware transmits IPS/W using inference-power references
   from the bench runlogs dated 2026-02-26. The dashboard converts this to
   `µJ/inf = 1e6 / (IPS/W)`. These power references are separate from the
-  AP510B LP battery profile. This is not a live power-meter measurement.
+  shared LP battery profile. This is not a live power-meter measurement.
 - **Battery projection:** workload fractions weight the model stages, other
   compute, and quiet sleep. See [battery assumptions](battery-projection.md)
   for capacity, allowance, power inputs, measurement methods, and scope.
