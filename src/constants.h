@@ -40,53 +40,16 @@ extern "C" {
 ///////////////////////////////////////////////////////////////////////////////
 // Power assumptions for efficiency metrics and battery-profile fallbacks.
 ///////////////////////////////////////////////////////////////////////////////
-// The shared LP battery profile is separate from the inference-energy assumptions below.
-// Its quiet-idle projection excludes sensor supply power; see
-// battery_model.h and AmbiqAI/heartkit-vitals-demo#68.
-
-/* Shared budgeting assumptions, not per-board power measurements; see #68. */
-
-/* Idle/sleep power. Shared by both speed modes -- Sleep 1 gates the core
- * clocks, so the figure does not depend on the run clock.
- * Source: Apollo510B SoC Datasheet DS-A510B-1p1p0, Table 39 "Current
- *         Consumption in Active Mode and Sleep Modes", symbol ISS1
- *         (System Sleep 1, 160 kB TCM retained), p.216, 2026.
- * Conditions: WFI SLEEP=1, clocks gated, HFRC on, XTAL off, buck enabled,
- *         NVM standby, cache retained, VDD 1.8 V. Typical, 750 uW. */
-#define MCU_SLEEP_POWER_MW (0.75)
-
-/* General compute (non-inference busy time: DSP, transport, ring copies).
- * Kept as the per-MHz figure and the clock so the derivation stays visible
- * instead of collapsing to a magic number.
- * Source: Apollo510B SoC Datasheet DS-A510B-1p1p0, Table 39, symbols IRUNLPFB
- *         and IRUNHPFB (CoreMark run power, low-power / high-performance
- *         mode), p.216, 2026.
- * Conditions: MRAM, cache enabled, buck enabled, VDD 1.8 V. Typical.
- * Clocks: 96 MHz for NSX_POWER_PERF_LOW, 250 MHz for NSX_POWER_PERF_HIGH --
- *         the two operating points appState.speedMode selects between. */
-#define MCU_COMPUTE_UW_PER_MHZ_LP (35.3)
-#define MCU_COMPUTE_CLOCK_MHZ_LP  (96.0)
-#define MCU_COMPUTE_POWER_MW_LP   (MCU_COMPUTE_UW_PER_MHZ_LP * MCU_COMPUTE_CLOCK_MHZ_LP / 1000.0) // 3.389 mW
-
-#define MCU_COMPUTE_UW_PER_MHZ_HP (46.8)
-#define MCU_COMPUTE_CLOCK_MHZ_HP  (250.0)
-#define MCU_COMPUTE_POWER_MW_HP   (MCU_COMPUTE_UW_PER_MHZ_HP * MCU_COMPUTE_CLOCK_MHZ_HP / 1000.0) // 11.700 mW
-
-/* Inference power for this demo's model set, one figure per operating point.
- * Source: OneDrive .../benchmarks/apollo510_evb/{ecg_segmentation,
- *         ecg_arrhythmia}/runlog.csv, LP(mW) and HP(mW) columns, row 2, dated
- *         2026-02-26.
- * Measured LP: 5.496 mW (ecg_segmentation), 5.743 mW (ecg_arrhythmia).
- * Measured HP: 16.697 mW (ecg_segmentation), 17.698 mW (ecg_arrhythmia).
- * Selection rule, identical in both sets: take the segmentation value rounded,
- *         i.e. the LOWER of the two, because segmentation is the stage that
- *         runs most often. ecg_denoise power was not captured in that run
- *         (all-zero row) in either column, so denoise -- the most frequently
- *         executed stage -- is billed at the segmentation figure in these
- *         fallback profiles. See AmbiqAI/heartkit-vitals-demo#18.
- * Conditions: apollo510_evb, TFLM, AS R5.3.0, gcc 14.3, EVB BOARD-LEVEL. */
-#define MCU_INFERENCE_POWER_MW_LP (5.5)
-#define MCU_INFERENCE_POWER_MW_HP (16.7)
+/* Shared capture-derived references and budgeting policy; see #68. */
+#define MCU_SLEEP_POWER_MW (1.268f)
+#define MCU_COMPUTE_POWER_MW_LP (4.623f)
+#define MCU_COMPUTE_POWER_MW_HP (14.622f)
+#define MCU_DENOISE_POWER_MW_LP (6.577f)
+#define MCU_DENOISE_POWER_MW_HP (22.099f)
+#define MCU_SEGMENT_POWER_MW_LP (5.393f)
+#define MCU_SEGMENT_POWER_MW_HP (17.614f)
+#define MCU_ARRHYTHMIA_POWER_MW_LP (6.265f)
+#define MCU_ARRHYTHMIA_POWER_MW_HP (21.112f)
 
 /* Budgeting allowance, not measured regulator efficiency; see #68. */
 #define SYSTEM_POWER_MARGIN (0.80)

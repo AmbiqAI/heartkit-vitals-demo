@@ -27,19 +27,14 @@ typedef struct {
 static inline hkv_battery_profile_t
 hkv_battery_profile(bool hp)
 {
-    const float inference = hp ? MCU_INFERENCE_POWER_MW_HP : MCU_INFERENCE_POWER_MW_LP;
-    hkv_battery_profile_t p = {
+    const hkv_battery_profile_t p = {
         MCU_SLEEP_POWER_MW,
-        (float)(hp ? MCU_COMPUTE_POWER_MW_HP : MCU_COMPUTE_POWER_MW_LP),
-        inference, inference, inference, SYSTEM_POWER_MARGIN, BATT_POWER_CAP
+        hp ? MCU_COMPUTE_POWER_MW_HP : MCU_COMPUTE_POWER_MW_LP,
+        hp ? MCU_DENOISE_POWER_MW_HP : MCU_DENOISE_POWER_MW_LP,
+        hp ? MCU_SEGMENT_POWER_MW_HP : MCU_SEGMENT_POWER_MW_LP,
+        hp ? MCU_ARRHYTHMIA_POWER_MW_HP : MCU_ARRHYTHMIA_POWER_MW_LP,
+        SYSTEM_POWER_MARGIN, BATT_POWER_CAP
     };
-    if (!hp) {
-        p.sleep_mw = 1.268f;
-        p.compute_mw = 6.0f;
-        p.denoise_mw = 8.968f;
-        p.segment_mw = 7.443f;
-        p.arrhythmia_mw = 8.638f;
-    }
     return p;
 }
 
