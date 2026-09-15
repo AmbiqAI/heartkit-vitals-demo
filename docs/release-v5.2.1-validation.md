@@ -3,7 +3,9 @@
 This patch shares the AP510B reference power assumptions across AP510, AP510B,
 and AP330. The calculation is tested independently for each board definition.
 It does not change sensor pin assignments, clock configuration, transport
-support, model execution, or AP330's LP-only restriction.
+support or model execution. This version remained a draft after review found
+that AP330's documented LP-only restriction was not enforced. The correction
+is recorded in [PR #95](https://github.com/AmbiqAI/heartkit-vitals-demo/pull/95).
 
 ## Calculation checks
 
