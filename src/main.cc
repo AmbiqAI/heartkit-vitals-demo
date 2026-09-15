@@ -162,12 +162,6 @@ dwt_delta_us(uint32_t startCycles)
     return deltaCycles / (SystemCoreClock / 1000000);
 }
 
-/* Read the operating point once so a mode change cannot mix profile values. */
-static inline float32_t
-inference_power_mw(bool hpMode)
-{
-    return hpMode ? (float32_t)MCU_INFERENCE_POWER_MW_HP : (float32_t)MCU_INFERENCE_POWER_MW_LP;
-}
 
 ///////////////////////////////////////////////////////////////////////////////
 // FreeRTOS runtime-stats timer (am_hal_timer, RTOS_TIMER channel)
@@ -1243,10 +1237,10 @@ send_ecg_metrics(void)
     buffer[5] = ai_display_rate(g_aiIps[1], appState.segMode == SegmentationModeAi);
     buffer[6] = ai_display_rate(g_aiIps[2], appState.arrMode == ArrhythmiaModeAi);
     buffer[7] = ecgMetResults.qos;
-    const float powerMw = inference_power_mw(appState.speedMode != 0);
-    buffer[8] = 1.0e3f * buffer[4] / powerMw;
-    buffer[9] = 1.0e3f * buffer[5] / powerMw;
-    buffer[10] = 1.0e3f * buffer[6] / powerMw;
+    const hkv_battery_profile_t power = hkv_battery_profile(appState.speedMode != 0);
+    buffer[8] = 1.0e3f * buffer[4] / power.denoise_mw;
+    buffer[9] = 1.0e3f * buffer[5] / power.segment_mw;
+    buffer[10] = 1.0e3f * buffer[6] / power.arrhythmia_mw;
     pack_and_enqueue_tio_packet(0, 1, buffer, 11 * sizeof(float32_t));
 }
 
@@ -1519,16 +1513,8 @@ EcgProcessTask(void *pvParameters)
              * store makes a correct metrics site look inverted. */
             __asm volatile("" ::: "memory");
             hkv_count(HKV_CNT_PIPE_DEN_RUNS);
-            /* DASHBOARD CHANGE: the uIps/W divisor is now the sourced
-             * inference power for the CURRENT operating point (5.5 mW LP,
-             * 16.7 mW HP) where it used to be AVG_INFERENCE_POWER (7.87 mW,
-             * unsourced), so in LP all three *uIpspw values read ~43% higher
-             * than on any earlier build. Efficiency did not change; the power
-             * figure divided into it did. These now follow appState.speedMode
-             * the same way the battery model below does -- see
-             * inference_power_mw() and issue #25 AC5. */
             ecgMetResults.denoiseuIpspw =
-                1.0e3f * ecgMetResults.denoiseIps / inference_power_mw(appState.speedMode != 0);
+                1.0e3f * ecgMetResults.denoiseIps / hkv_battery_profile(appState.speedMode != 0).denoise_mw;
             if (err != 0) {
                 hkv_count(HKV_CNT_PIPE_ERR_ECG_DEN);
             }
@@ -1578,9 +1564,8 @@ EcgProcessTask(void *pvParameters)
              * branch for why source order alone does not bind the compiler. */
             __asm volatile("" ::: "memory");
             hkv_count(HKV_CNT_PIPE_SEG_RUNS);
-            /* Follows the operating point -- see the denoise branch. */
             ecgMetResults.segmentuIpspw =
-                1.0e3f * ecgMetResults.segmentIps / inference_power_mw(appState.speedMode != 0);
+                1.0e3f * ecgMetResults.segmentIps / hkv_battery_profile(appState.speedMode != 0).segment_mw;
             if (err != 0) {
                 hkv_count(HKV_CNT_PIPE_ERR_ECG_SEG);
             }
@@ -1624,9 +1609,8 @@ EcgProcessTask(void *pvParameters)
              * store past the volatile increment. */
             __asm volatile("" ::: "memory");
             hkv_count(HKV_CNT_PIPE_MET_RUNS);
-            /* Follows the operating point -- see the denoise branch. */
             ecgMetResults.arrhythmiaIpspw =
-                1.0e3f * ecgMetResults.arrhythmiaIps / inference_power_mw(appState.speedMode != 0);
+                1.0e3f * ecgMetResults.arrhythmiaIps / hkv_battery_profile(appState.speedMode != 0).arrhythmia_mw;
 
             send_ecg_metrics();
             if (err != 0) {

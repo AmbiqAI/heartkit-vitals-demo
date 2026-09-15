@@ -1,90 +1,60 @@
 # MCU battery projection
 
 Tracking: [issue #68](https://github.com/AmbiqAI/heartkit-vitals-demo/issues/68).
-The owner selected a two-coin-cell ECG wearable scenario. This is a projected
-MCU runtime, not the continuously streaming demo's measured battery life.
 
-## Shared LP assumptions
+AP510, AP510B, and AP330 share the reference powers below. AP330 enforces LP
+operation. Battery life is a projected MCU runtime with quiet idle periods,
+not measured runtime of the continuously streaming demonstration.
 
-AP510B, AP510, and AP330 use the same LP battery projection profile below,
-including the 0.80 allowance. Measurements were captured on AP510B; using the
-profile on AP510 and AP330 is a shared budgeting assumption, not a measurement
-of either board. Actual runtime depends on the board and application workload.
+| Term | LP (mW) | HP (mW) |
+| --- | ---: | ---: |
+| Quiet sleep | 1.268 | 1.268 |
+| Other active work | 4.623 | 14.622 |
+| Denoise | 6.577 | 22.099 |
+| Segmentation | 5.393 | 17.614 |
+| Arrhythmia | 6.265 | 21.112 |
 
-| Term | Value | Basis |
-| --- | ---: | --- |
-| Quiet sleep | 1.268 mW | Measured helper with sufficient memory capacity for the demo |
-| Other active work | 6.000 mW | Budgeting proxy, rounded from the 5.977 mW spin measurement |
-| Denoise stage | 8.968 mW | Measured AOT helper |
-| Segmentation stage | 7.443 mW | Measured AOT helper |
-| Arrhythmia stage | 8.638 mW | Measured AOT helper |
-| Nominal battery energy | 1,350 mWh | Two cells, each assumed 225 mAh at 3 V |
-| Allowance | 20% | Existing owner-selected factor of 0.80 |
+Model references come from the AP510 HPX SRAM/MRAM capture campaign:
+scratch in shared SRAM, constants read directly from MRAM, original model
+precision. Other active work uses the campaign's spin-loop readings as a
+budgeting proxy. The spin probe keeps the debug domain powered; it is not an
+application DSP measurement or a baseline subtracted from model power.
+Sleep uses the AP510B [memory-bank sweep](../tools/bench/results/lp-power-20260909/sleep-bank-sweep/README.md).
 
-Sources: [active helper](../tools/bench/results/lp-power-20260909/RESULTS.md),
-[sleep bank sweep](../tools/bench/results/lp-power-20260909/sleep-bank-sweep/README.md),
-and [streaming demo comparison](../tools/bench/results/active-recheck-20260909/README.md).
-The spin value is not a measured mean of application DSP. The allowance is not
-a measured regulator efficiency or a substitute for sensor characterization.
+These owner-selected references apply to all three targets, not separate
+measurements of each SoC. See [capture provenance](power-reference-captures.md)
+for benchmark revisions and measurement scope.
 
-## Calculation and scope
+## Calculation
 
-The existing stage run counters and last measured stage durations estimate
-each stage's wall-time fraction. Denoise, segmentation and arrhythmia fractions
-are averaged over the same rolling window as measured CPU busy time. Their
-power contributions are summed individually, not equally averaged.
-
-If their sum exceeds busy time, scale all three fractions proportionally to
-fit. Other compute gets the remaining busy time; sleep gets one minus busy.
+Nominal battery energy is 1,350 mWh: two cells, each assumed 225 mAh at 3 V.
+A factor of 0.80 provides the budgeting allowance; it is not measured
+regulator efficiency.
 
 `average_mW = (sum(stage_fraction * stage_mW) + other_fraction * compute_mW + idle_fraction * sleep_mW) / 0.80`
 
 `days = 1350 / average_mW / 24`
 
-The stage duration includes pipeline overhead, not exclusively model invoke.
-DSP/off paths still contribute their shorter measured stage times, preserving
-the existing duty semantics. The fractions use each stage's latest duration
-times the number of runs, not an integrated per-invocation energy counter.
-No sleep baseline is added on top of active power, and no blanket spin-minus-
-sleep penalty is added. The allowance is applied once.
+Stage fractions use completed run counts and the latest measured stage duration
+over the CPU utilization window. If their sum exceeds total busy time, they
+are scaled proportionally to fit. Other work gets remaining busy time; quiet
+sleep gets the idle fraction. The allowance is applied once.
 
-Model active captures and quiet sleep used different configurations. The
-projection assumes production-style idle management; no actual sleep entry,
-memory-bank policy, sensor timing or streaming behavior is changed. Sensor
-supply energy and usable coin-cell capacity remain outside this validation.
-Deep sleep is not assumed.
+Reference model powers are measured during repeated inference. The demo
+applies them to pipeline-stage durations, which also include stage overhead.
+Off/DSP processing still contributes to the duty calculation. Sensor supply,
+battery usable-capacity characterization, and production sleep transitions are
+outside this projection.
 
-All three targets also share the AP510B HP reference profile and model-energy
-reference powers. AP330 remains LP-only; sharing calculation constants does not
-enable an unsupported operating mode. The energy tiles use the same reference
-power for equal inference durations across boards, separately from the LP battery
-stage powers above. Stage duty is
-`runs / (IPS * window_seconds)`, so normalizing throughput does not change
-the battery projection.
+## Model-energy tiles
 
-## Implementation and validation
+Each model uses its own LP/HP reference power and measured duration. The wire
+format stays IPS/W; TileIO converts it to `µJ/inf = 1e6 / (IPS/W)`. Off or
+unavailable AI results remain unavailable. The same model references feed
+both energy reporting and the battery calculation.
 
-- src/battery_model.h contains the profile selection and weighted calculation.
-- src/main.cc keeps per-stage duty histories synchronized with CPU utilization.
-- tests/test_battery_model.c covers profile selection for all three boards,
-  capacity, idle/compute cases, unequal stage weights, proportional clamping,
-  negative/oversized fractions and unchanged HP assumptions.
-- The host tests pass with address/undefined-behavior sanitizers.
-- AP510B, AP510 and AP330 firmware builds pass through the board-aware NSX
-  build path. Direct reuse of a CMake directory after changing boards can
-  encounter the other board's generated module list; regenerate through NSX.
-- AP510B was programmed and verified. During a 16.7-second USB run, it reported
-  approximately 23.6–24 days at roughly 11–12% busy, with 464 packets and no CRC
-  errors. Sensor/model counters showed no errors before the fixture disappeared.
-- The intended 65-second USB test did not finish: the target, probe and JS110
-  all disappeared from USB. Full rolling-window and mode-toggle hardware
-  validation remain pending reconnection. Logs are in
-  tools/bench/results/battery-projection-20260909.
+## Validation
 
-Final AP510B build SHA256:
-`edccb254be16fe22b1a294d85fa27078c854664f64289a1c131b64fe8604ced1`.
-Source-comment cleanup was rebuilt after the fixture disconnected; that final
-artifact was not reflashed. No functional code changed after the hardware run.
-
-The approximately 22-day planning example assumed higher busy time. The
-dashboard value is calculated from measured workload, not fixed to that example.
+Per-board host tests check reference selection, the AP330 LP guard, fixed
+workloads, clamping, and invalid AI metrics. Firmware and hardware release
+coverage is recorded separately in the release validation record.

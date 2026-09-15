@@ -56,11 +56,8 @@
  *         quoted at (see constants.h) and the pair verified on issue #18's
  *         bench runlogs.
  *
- * This guard must stay AT LEAST as wide as the set of boards where anything
- * else follows appState.speedMode. inference_power_mw() in main.cc divides by
- * the HP power figure in HP mode on every board; if the timebase were not
- * fixed here too, that board would divide an under-reported IPS by the HP
- * power and read worse than before the fix. */
+ * The mode table must cover every target that accepts HP requests so timing
+ * and power-profile selection describe the same operating point. */
 #define TIMEBASE_CORE_CLOCK_LP_HZ ((uint32_t)AM_HAL_CLKGEN_FREQ_MAX_HZ)
 #define TIMEBASE_CORE_CLOCK_HP_HZ ((uint32_t)AM_HAL_CLKGEN_FREQ_HP250_HZ)
 #define TIMEBASE_HAVE_MODE_TABLE  (1)
