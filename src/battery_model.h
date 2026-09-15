@@ -33,7 +33,6 @@ hkv_battery_profile(bool hp)
         (float)(hp ? MCU_COMPUTE_POWER_MW_HP : MCU_COMPUTE_POWER_MW_LP),
         inference, inference, inference, SYSTEM_POWER_MARGIN, BATT_POWER_CAP
     };
-#if defined(AM_PART_APOLLO510B)
     if (!hp) {
         p.sleep_mw = 1.268f;
         p.compute_mw = 6.0f;
@@ -41,7 +40,6 @@ hkv_battery_profile(bool hp)
         p.segment_mw = 7.443f;
         p.arrhythmia_mw = 8.638f;
     }
-#endif
     return p;
 }
 

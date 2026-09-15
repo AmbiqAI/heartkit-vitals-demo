@@ -40,34 +40,11 @@ extern "C" {
 ///////////////////////////////////////////////////////////////////////////////
 // Power assumptions for efficiency metrics and battery-profile fallbacks.
 ///////////////////////////////////////////////////////////////////////////////
-// The AP510B LP battery profile is separate from the IPS/W assumptions below.
+// The shared LP battery profile is separate from the inference-energy assumptions below.
 // Its quiet-idle projection excludes sensor supply power; see
 // battery_model.h and AmbiqAI/heartkit-vitals-demo#68.
 
-#if defined(AM_PART_APOLLO510B)
-
-/* apollo510b_evb. Datasheet figures below are native to this part; the bench
- * figures were taken on apollo510_evb (see the runlog citation), which is the
- * cross-part borrow in this direction and is the smaller of the two risks. */
-#define MCU_POWER_APOLLO5_FIGURES (1)
-
-#elif defined(AM_PART_APOLLO510)
-
-/* apollo510_evb (Apollo510 non-B). This part defines AM_PART_APOLLO5B and
- * AM_PART_APOLLO510 but NOT AM_PART_APOLLO510B, so the old `#ifdef
- * AM_PART_APOLLO5B` silently gave it Apollo510B provenance. It now has its own
- * branch and uses the same numbers with an explicit caveat:
- *   - The two INFERENCE figures are NATIVE to this board: the runlog cited
- *     below is apollo510_evb.
- *   - The SLEEP and COMPUTE-per-MHz figures are APOLLO510B DATASHEET VALUES
- *     used here as a cross-part placeholder. They are not verified for the
- *     non-B part.
- * TODO(#71): verify the borrowed Apollo510B sleep and compute-per-MHz figures against the Apollo510 (non-B) SoC Datasheet, Table 39, symbols ISS1, IRUNLPFB, IRUNHPFB. */
-#define MCU_POWER_APOLLO5_FIGURES (1)
-
-#endif
-
-#ifdef MCU_POWER_APOLLO5_FIGURES
+/* Shared budgeting assumptions, not per-board power measurements; see #68. */
 
 /* Idle/sleep power. Shared by both speed modes -- Sleep 1 gates the core
  * clocks, so the figure does not depend on the run clock.
@@ -111,36 +88,8 @@ extern "C" {
 #define MCU_INFERENCE_POWER_MW_LP (5.5)
 #define MCU_INFERENCE_POWER_MW_HP (16.7)
 
-/* 20% system margin (divide by 0.80). STATED, NOT DERIVED. It covers what the
- * core figures above do not include: IOM / timer / GPIO activity driving the
- * sensor, and the 3.3 V to 1.8 V regulator loss (the datasheet figures are
- * quoted at VDD 1.8 V). It is an engineering allowance chosen by the owner, not
- * a measurement. It is scoped to THIS branch on purpose: it stands in for the
- * previous unexplained 0.77 factor, which only ever applied to the Apollo5
- * constants (issue #18). Applying it to the unsourced fallback branch below
- * would be inflating numbers that never carried it. */
+/* Budgeting allowance, not measured regulator efficiency; see #68. */
 #define SYSTEM_POWER_MARGIN (0.80)
-
-#else
-
-/* TODO(#71): 2.12 mW sleep power for apollo330mP_evb has no source of record; verify against the Apollo330P SoC datasheet System Sleep 1 symbol. */
-#define MCU_SLEEP_POWER_MW (2.12)
-
-/* TODO(#71): 13.65 mW inference power for apollo330mP_evb has no source of record; verify against the Apollo330P SoC datasheet run-power symbol and a bench run. */
-#define MCU_INFERENCE_POWER_MW_LP (13.65)
-#define MCU_INFERENCE_POWER_MW_HP (13.65)
-
-/* TODO(#71): no general-compute figure exists for this part, so non-inference busy time is billed at the inference rate above; replace with the Apollo330P run-power symbol x the operating clock once verified. */
-#define MCU_COMPUTE_POWER_MW_LP (MCU_INFERENCE_POWER_MW_LP)
-#define MCU_COMPUTE_POWER_MW_HP (MCU_INFERENCE_POWER_MW_HP)
-
-/* No margin on this branch. These values are unsourced and never carried the
- * previous 0.77 factor; applying the 20% system margin here would silently cut
- * the reported battery life on a board whose model has not otherwise changed.
- * When the figures above get a source, decide the margin with them. */
-#define SYSTEM_POWER_MARGIN (1.0)
-
-#endif
 
 /* Nominal pack energy in mWh, not measured usable energy; see #68.
  * CR2032 nominal voltage: https://data.energizer.com/pdfs/cr2032.pdf */

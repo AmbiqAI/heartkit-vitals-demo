@@ -4,7 +4,12 @@ Tracking: [issue #68](https://github.com/AmbiqAI/heartkit-vitals-demo/issues/68)
 The owner selected a two-coin-cell ECG wearable scenario. This is a projected
 MCU runtime, not the continuously streaming demo's measured battery life.
 
-## AP510B LP assumptions
+## Shared LP assumptions
+
+AP510B, AP510, and AP330 use the same LP battery projection profile below,
+including the 0.80 allowance. Measurements were captured on AP510B; using the
+profile on AP510 and AP330 is a shared budgeting assumption, not a measurement
+of either board. Actual runtime depends on the board and application workload.
 
 | Term | Value | Basis |
 | --- | ---: | --- |
@@ -49,9 +54,11 @@ memory-bank policy, sensor timing or streaming behavior is changed. Sensor
 supply energy and usable coin-cell capacity remain outside this validation.
 Deep sleep is not assumed.
 
-Only the AP510B LP battery profile changes. HP and the AP510/AP330 profiles use
-their existing constants. The three IPS/W metrics use conventional inferences
-per second and retain their separate power assumptions. Stage duty is
+All three targets also share the AP510B HP reference profile and model-energy
+reference powers. AP330 remains LP-only; sharing calculation constants does not
+enable an unsupported operating mode. The energy tiles use the same reference
+power for equal inference durations across boards, separately from the LP battery
+stage powers above. Stage duty is
 `runs / (IPS * window_seconds)`, so normalizing throughput does not change
 the battery projection.
 
