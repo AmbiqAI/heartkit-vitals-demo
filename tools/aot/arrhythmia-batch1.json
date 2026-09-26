@@ -1,0 +1,670 @@
+{
+  "source_sha256": "a1855af0e0b2a346d773e0d36ff8c8b986c51db4aed99a6066c9da9f23f12eab",
+  "batch_one_sha256": "8b91d202ac5b94201277daf1ad3dc8b381bdceb99a1ca7261f8eaafb0f7cc7a0",
+  "changes": [
+    {
+      "tensor": 0,
+      "field": "shape_signature[0]",
+      "offset": 56908,
+      "before": -1,
+      "after": 1,
+      "shape": [
+        1,
+        500,
+        1
+      ]
+    },
+    {
+      "tensor": 51,
+      "field": "shape_signature[0]",
+      "offset": 36068,
+      "before": -1,
+      "after": 1,
+      "shape": [
+        1,
+        500,
+        1
+      ]
+    },
+    {
+      "tensor": 55,
+      "field": "shape_signature[0]",
+      "offset": 35664,
+      "before": -1,
+      "after": 1,
+      "shape": [
+        1,
+        1,
+        500,
+        1
+      ]
+    },
+    {
+      "tensor": 56,
+      "field": "shape_signature[0]",
+      "offset": 35408,
+      "before": -1,
+      "after": 1,
+      "shape": [
+        1,
+        1,
+        250,
+        16
+      ]
+    },
+    {
+      "tensor": 57,
+      "field": "shape_signature[0]",
+      "offset": 34992,
+      "before": -1,
+      "after": 1,
+      "shape": [
+        1,
+        1,
+        250,
+        16
+      ]
+    },
+    {
+      "tensor": 58,
+      "field": "shape_signature[0]",
+      "offset": 34840,
+      "before": -1,
+      "after": 1,
+      "shape": [
+        1,
+        1,
+        125,
+        16
+      ]
+    },
+    {
+      "tensor": 59,
+      "field": "shape_signature[0]",
+      "offset": 34688,
+      "before": -1,
+      "after": 1,
+      "shape": [
+        1,
+        1,
+        1,
+        16
+      ]
+    },
+    {
+      "tensor": 60,
+      "field": "shape_signature[0]",
+      "offset": 34400,
+      "before": -1,
+      "after": 1,
+      "shape": [
+        1,
+        1,
+        1,
+        4
+      ]
+    },
+    {
+      "tensor": 61,
+      "field": "shape_signature[0]",
+      "offset": 34064,
+      "before": -1,
+      "after": 1,
+      "shape": [
+        1,
+        1,
+        1,
+        16
+      ]
+    },
+    {
+      "tensor": 62,
+      "field": "shape_signature[0]",
+      "offset": 33904,
+      "before": -1,
+      "after": 1,
+      "shape": [
+        1,
+        1,
+        1,
+        16
+      ]
+    },
+    {
+      "tensor": 63,
+      "field": "shape_signature[0]",
+      "offset": 33752,
+      "before": -1,
+      "after": 1,
+      "shape": [
+        1,
+        1,
+        125,
+        16
+      ]
+    },
+    {
+      "tensor": 64,
+      "field": "shape_signature[0]",
+      "offset": 33480,
+      "before": -1,
+      "after": 1,
+      "shape": [
+        1,
+        1,
+        125,
+        24
+      ]
+    },
+    {
+      "tensor": 65,
+      "field": "shape_signature[0]",
+      "offset": 33064,
+      "before": -1,
+      "after": 1,
+      "shape": [
+        1,
+        1,
+        125,
+        24
+      ]
+    },
+    {
+      "tensor": 66,
+      "field": "shape_signature[0]",
+      "offset": 32912,
+      "before": -1,
+      "after": 1,
+      "shape": [
+        1,
+        1,
+        63,
+        24
+      ]
+    },
+    {
+      "tensor": 67,
+      "field": "shape_signature[0]",
+      "offset": 32760,
+      "before": -1,
+      "after": 1,
+      "shape": [
+        1,
+        1,
+        1,
+        24
+      ]
+    },
+    {
+      "tensor": 68,
+      "field": "shape_signature[0]",
+      "offset": 32472,
+      "before": -1,
+      "after": 1,
+      "shape": [
+        1,
+        1,
+        1,
+        6
+      ]
+    },
+    {
+      "tensor": 69,
+      "field": "shape_signature[0]",
+      "offset": 32136,
+      "before": -1,
+      "after": 1,
+      "shape": [
+        1,
+        1,
+        1,
+        24
+      ]
+    },
+    {
+      "tensor": 70,
+      "field": "shape_signature[0]",
+      "offset": 31976,
+      "before": -1,
+      "after": 1,
+      "shape": [
+        1,
+        1,
+        1,
+        24
+      ]
+    },
+    {
+      "tensor": 71,
+      "field": "shape_signature[0]",
+      "offset": 31824,
+      "before": -1,
+      "after": 1,
+      "shape": [
+        1,
+        1,
+        63,
+        24
+      ]
+    },
+    {
+      "tensor": 72,
+      "field": "shape_signature[0]",
+      "offset": 31552,
+      "before": -1,
+      "after": 1,
+      "shape": [
+        1,
+        1,
+        63,
+        32
+      ]
+    },
+    {
+      "tensor": 73,
+      "field": "shape_signature[0]",
+      "offset": 31136,
+      "before": -1,
+      "after": 1,
+      "shape": [
+        1,
+        1,
+        63,
+        32
+      ]
+    },
+    {
+      "tensor": 74,
+      "field": "shape_signature[0]",
+      "offset": 30984,
+      "before": -1,
+      "after": 1,
+      "shape": [
+        1,
+        1,
+        32,
+        32
+      ]
+    },
+    {
+      "tensor": 75,
+      "field": "shape_signature[0]",
+      "offset": 30832,
+      "before": -1,
+      "after": 1,
+      "shape": [
+        1,
+        1,
+        1,
+        32
+      ]
+    },
+    {
+      "tensor": 76,
+      "field": "shape_signature[0]",
+      "offset": 30544,
+      "before": -1,
+      "after": 1,
+      "shape": [
+        1,
+        1,
+        1,
+        8
+      ]
+    },
+    {
+      "tensor": 77,
+      "field": "shape_signature[0]",
+      "offset": 30208,
+      "before": -1,
+      "after": 1,
+      "shape": [
+        1,
+        1,
+        1,
+        32
+      ]
+    },
+    {
+      "tensor": 78,
+      "field": "shape_signature[0]",
+      "offset": 30048,
+      "before": -1,
+      "after": 1,
+      "shape": [
+        1,
+        1,
+        1,
+        32
+      ]
+    },
+    {
+      "tensor": 79,
+      "field": "shape_signature[0]",
+      "offset": 29896,
+      "before": -1,
+      "after": 1,
+      "shape": [
+        1,
+        1,
+        32,
+        32
+      ]
+    },
+    {
+      "tensor": 80,
+      "field": "shape_signature[0]",
+      "offset": 29624,
+      "before": -1,
+      "after": 1,
+      "shape": [
+        1,
+        1,
+        32,
+        48
+      ]
+    },
+    {
+      "tensor": 81,
+      "field": "shape_signature[0]",
+      "offset": 29208,
+      "before": -1,
+      "after": 1,
+      "shape": [
+        1,
+        1,
+        32,
+        48
+      ]
+    },
+    {
+      "tensor": 82,
+      "field": "shape_signature[0]",
+      "offset": 29056,
+      "before": -1,
+      "after": 1,
+      "shape": [
+        1,
+        1,
+        16,
+        48
+      ]
+    },
+    {
+      "tensor": 83,
+      "field": "shape_signature[0]",
+      "offset": 28904,
+      "before": -1,
+      "after": 1,
+      "shape": [
+        1,
+        1,
+        1,
+        48
+      ]
+    },
+    {
+      "tensor": 84,
+      "field": "shape_signature[0]",
+      "offset": 28616,
+      "before": -1,
+      "after": 1,
+      "shape": [
+        1,
+        1,
+        1,
+        12
+      ]
+    },
+    {
+      "tensor": 85,
+      "field": "shape_signature[0]",
+      "offset": 28280,
+      "before": -1,
+      "after": 1,
+      "shape": [
+        1,
+        1,
+        1,
+        48
+      ]
+    },
+    {
+      "tensor": 86,
+      "field": "shape_signature[0]",
+      "offset": 28120,
+      "before": -1,
+      "after": 1,
+      "shape": [
+        1,
+        1,
+        1,
+        48
+      ]
+    },
+    {
+      "tensor": 87,
+      "field": "shape_signature[0]",
+      "offset": 27968,
+      "before": -1,
+      "after": 1,
+      "shape": [
+        1,
+        1,
+        16,
+        48
+      ]
+    },
+    {
+      "tensor": 88,
+      "field": "shape_signature[0]",
+      "offset": 27696,
+      "before": -1,
+      "after": 1,
+      "shape": [
+        1,
+        1,
+        16,
+        64
+      ]
+    },
+    {
+      "tensor": 89,
+      "field": "shape_signature[0]",
+      "offset": 27280,
+      "before": -1,
+      "after": 1,
+      "shape": [
+        1,
+        1,
+        16,
+        64
+      ]
+    },
+    {
+      "tensor": 90,
+      "field": "shape_signature[0]",
+      "offset": 27128,
+      "before": -1,
+      "after": 1,
+      "shape": [
+        1,
+        1,
+        8,
+        64
+      ]
+    },
+    {
+      "tensor": 91,
+      "field": "shape_signature[0]",
+      "offset": 26976,
+      "before": -1,
+      "after": 1,
+      "shape": [
+        1,
+        1,
+        1,
+        64
+      ]
+    },
+    {
+      "tensor": 92,
+      "field": "shape_signature[0]",
+      "offset": 26688,
+      "before": -1,
+      "after": 1,
+      "shape": [
+        1,
+        1,
+        1,
+        16
+      ]
+    },
+    {
+      "tensor": 93,
+      "field": "shape_signature[0]",
+      "offset": 26352,
+      "before": -1,
+      "after": 1,
+      "shape": [
+        1,
+        1,
+        1,
+        64
+      ]
+    },
+    {
+      "tensor": 94,
+      "field": "shape_signature[0]",
+      "offset": 26192,
+      "before": -1,
+      "after": 1,
+      "shape": [
+        1,
+        1,
+        1,
+        64
+      ]
+    },
+    {
+      "tensor": 95,
+      "field": "shape_signature[0]",
+      "offset": 26040,
+      "before": -1,
+      "after": 1,
+      "shape": [
+        1,
+        1,
+        8,
+        64
+      ]
+    },
+    {
+      "tensor": 96,
+      "field": "shape_signature[0]",
+      "offset": 25768,
+      "before": -1,
+      "after": 1,
+      "shape": [
+        1,
+        1,
+        8,
+        80
+      ]
+    },
+    {
+      "tensor": 97,
+      "field": "shape_signature[0]",
+      "offset": 25640,
+      "before": -1,
+      "after": 1,
+      "shape": [
+        1,
+        80
+      ]
+    },
+    {
+      "tensor": 98,
+      "field": "shape_signature[0]",
+      "offset": 25496,
+      "before": -1,
+      "after": 1,
+      "shape": [
+        1,
+        4
+      ]
+    },
+    {
+      "tensor": 99,
+      "field": "shape_signature[0]",
+      "offset": 25368,
+      "before": -1,
+      "after": 1,
+      "shape": [
+        1,
+        4
+      ]
+    },
+    {
+      "tensor": 100,
+      "field": "shape_signature[0]",
+      "offset": 25276,
+      "before": -1,
+      "after": 1,
+      "shape": [
+        1,
+        4
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "case": 0,
+      "input_sha256": "3e4a61c2e0416b5307cd5743ff110d116a8bc5278a24243036be387a85aaf5d4",
+      "output_sha256": "7486e19a4c60f4e553f7430453617cc44e77496e41f8703c2c88db2c1c1a8708",
+      "bit_exact": true
+    },
+    {
+      "case": 1,
+      "input_sha256": "de0f78116ec52bda2d3b1cfe80c0efdf2d203582b7594c4a511b514edd40135a",
+      "output_sha256": "d4b15c61552588cb99051125c713a777bc06f6baa0a3f0645e4a388442cf7a77",
+      "bit_exact": true
+    },
+    {
+      "case": 2,
+      "input_sha256": "526e6b2bb21816eb4bfeafcc2498bc11b4fb673a05747fff5ad1e51cc0475804",
+      "output_sha256": "5a4c873fd018a3e8d671577b5f1584a57d8c708a87e287c9edb7490379b6e27a",
+      "bit_exact": true
+    },
+    {
+      "case": 3,
+      "input_sha256": "205c0e0081559cf3ec0b47830774624838ace890d4fe14f11836729811c4d367",
+      "output_sha256": "d986a322567c37cfd9f17f1d7dcf46893a873a620a42c7e2cd8833006d54e0f5",
+      "bit_exact": true
+    },
+    {
+      "case": 4,
+      "input_sha256": "38fc331e88adcfee2226244680aed5efd011840a5751e2eae23f19788dcf17da",
+      "output_sha256": "092825cde41c31d343beb5e8831f4c77a9a71f66db1641e908fb5f51aea9c688",
+      "bit_exact": true
+    },
+    {
+      "case": 5,
+      "input_sha256": "3c2ebfdddd713a6cb46ee09b3605d53c853bbafaa1be08218cd59b9e75fdb87a",
+      "output_sha256": "a647ee9168fb8e7d721de3a61ba594b93fcd8625b9caf8feb1a9a7c72c6c77ef",
+      "bit_exact": true
+    },
+    {
+      "case": 6,
+      "input_sha256": "d37bb93b7b638f4167473e9004dd6c969d757f78e66e1acbf45bd3e2b78a6a2a",
+      "output_sha256": "fdc3c30f1e53a024bb7da65a9af51332d7771341d602538694cd48df491096b7",
+      "bit_exact": true
+    },
+    {
+      "case": 7,
+      "input_sha256": "104abae42a4a71b4c143c6d6643e984527a7caf1468c772b62f0c623ec89a5e5",
+      "output_sha256": "018b1c9998fb23018ded3b2328abee50d56a61d9c96428f108fe0181263419d1",
+      "bit_exact": true
+    }
+  ]
+}

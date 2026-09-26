@@ -7,16 +7,18 @@
         "memory": "mram",
         "region_id": 1,
         "source_memory": "mram",
-        "tensor_count": 33,
-        "total_size": 11892,
-        "used": 11892
+        "tensor_count": 35,
+        "total_size": 11932,
+        "used": 11932
       }
     ],
     "persistent": [],
     "scratch": [
       {
         "alignment": 16,
+        "fragmentation": 8256,
         "memory": "sram",
+        "peak_live": 57344,
         "region_id": 0,
         "total_size": 3145728,
         "used": 65600
@@ -24,9 +26,9 @@
     ]
   },
   "module_prefix": "hkv_denoise",
-  "plan_hash": "02d29fc56add9d56",
-  "schema_version": 3,
-  "tensor_layout_hash": "ecb7a65e9372c59a",
+  "plan_hash": "8460845a5457903c",
+  "schema_version": 4,
+  "tensor_layout_hash": "2ea3a802d17120a1",
   "tensors": [
     {
       "id": "0",
@@ -39,7 +41,7 @@
     {
       "id": "1",
       "memory": "mram",
-      "offset": 32,
+      "offset": 48,
       "role": "constant",
       "size": 4,
       "source_memory": "mram"
@@ -47,7 +49,7 @@
     {
       "id": "2",
       "memory": "mram",
-      "offset": 80,
+      "offset": 96,
       "role": "constant",
       "size": 4,
       "source_memory": "mram"
@@ -55,7 +57,7 @@
     {
       "id": "3",
       "memory": "mram",
-      "offset": 128,
+      "offset": 144,
       "role": "constant",
       "size": 32,
       "source_memory": "mram"
@@ -63,7 +65,7 @@
     {
       "id": "4",
       "memory": "mram",
-      "offset": 384,
+      "offset": 400,
       "role": "constant",
       "size": 32,
       "source_memory": "mram"
@@ -71,7 +73,7 @@
     {
       "id": "5",
       "memory": "mram",
-      "offset": 544,
+      "offset": 560,
       "role": "constant",
       "size": 16,
       "source_memory": "mram"
@@ -79,7 +81,7 @@
     {
       "id": "6",
       "memory": "mram",
-      "offset": 688,
+      "offset": 704,
       "role": "constant",
       "size": 32,
       "source_memory": "mram"
@@ -87,7 +89,7 @@
     {
       "id": "7",
       "memory": "mram",
-      "offset": 1248,
+      "offset": 1264,
       "role": "constant",
       "size": 64,
       "source_memory": "mram"
@@ -95,7 +97,7 @@
     {
       "id": "8",
       "memory": "mram",
-      "offset": 1760,
+      "offset": 1776,
       "role": "constant",
       "size": 64,
       "source_memory": "mram"
@@ -103,7 +105,7 @@
     {
       "id": "9",
       "memory": "mram",
-      "offset": 2336,
+      "offset": 2352,
       "role": "constant",
       "size": 32,
       "source_memory": "mram"
@@ -111,7 +113,7 @@
     {
       "id": "10",
       "memory": "mram",
-      "offset": 2880,
+      "offset": 2896,
       "role": "constant",
       "size": 64,
       "source_memory": "mram"
@@ -119,7 +121,7 @@
     {
       "id": "11",
       "memory": "mram",
-      "offset": 4480,
+      "offset": 4496,
       "role": "constant",
       "size": 96,
       "source_memory": "mram"
@@ -127,7 +129,7 @@
     {
       "id": "12",
       "memory": "mram",
-      "offset": 5248,
+      "offset": 5264,
       "role": "constant",
       "size": 96,
       "source_memory": "mram"
@@ -135,7 +137,7 @@
     {
       "id": "13",
       "memory": "mram",
-      "offset": 6496,
+      "offset": 6512,
       "role": "constant",
       "size": 48,
       "source_memory": "mram"
@@ -143,7 +145,7 @@
     {
       "id": "14",
       "memory": "mram",
-      "offset": 7696,
+      "offset": 7712,
       "role": "constant",
       "size": 96,
       "source_memory": "mram"
@@ -151,7 +153,7 @@
     {
       "id": "15",
       "memory": "mram",
-      "offset": 10864,
+      "offset": 10880,
       "role": "constant",
       "size": 128,
       "source_memory": "mram"
@@ -159,7 +161,7 @@
     {
       "id": "16",
       "memory": "mram",
-      "offset": 0,
+      "offset": 16,
       "role": "constant",
       "size": 28,
       "source_memory": "mram"
@@ -167,7 +169,7 @@
     {
       "id": "17",
       "memory": "mram",
-      "offset": 48,
+      "offset": 64,
       "role": "constant",
       "size": 28,
       "source_memory": "mram"
@@ -175,7 +177,7 @@
     {
       "id": "18",
       "memory": "mram",
-      "offset": 160,
+      "offset": 176,
       "role": "constant",
       "size": 224,
       "source_memory": "mram"
@@ -183,7 +185,7 @@
     {
       "id": "19",
       "memory": "mram",
-      "offset": 1312,
+      "offset": 1328,
       "role": "constant",
       "size": 448,
       "source_memory": "mram"
@@ -191,7 +193,7 @@
     {
       "id": "20",
       "memory": "mram",
-      "offset": 4576,
+      "offset": 4592,
       "role": "constant",
       "size": 672,
       "source_memory": "mram"
@@ -199,7 +201,7 @@
     {
       "id": "21",
       "memory": "mram",
-      "offset": 11888,
+      "offset": 11904,
       "role": "constant",
       "size": 4,
       "source_memory": "mram"
@@ -207,7 +209,7 @@
     {
       "id": "22",
       "memory": "mram",
-      "offset": 96,
+      "offset": 112,
       "role": "constant",
       "size": 32,
       "source_memory": "mram"
@@ -215,7 +217,7 @@
     {
       "id": "23",
       "memory": "mram",
-      "offset": 416,
+      "offset": 432,
       "role": "constant",
       "size": 128,
       "source_memory": "mram"
@@ -223,7 +225,7 @@
     {
       "id": "24",
       "memory": "mram",
-      "offset": 560,
+      "offset": 576,
       "role": "constant",
       "size": 128,
       "source_memory": "mram"
@@ -231,7 +233,7 @@
     {
       "id": "25",
       "memory": "mram",
-      "offset": 736,
+      "offset": 752,
       "role": "constant",
       "size": 512,
       "source_memory": "mram"
@@ -239,7 +241,7 @@
     {
       "id": "26",
       "memory": "mram",
-      "offset": 1824,
+      "offset": 1840,
       "role": "constant",
       "size": 512,
       "source_memory": "mram"
@@ -247,7 +249,7 @@
     {
       "id": "27",
       "memory": "mram",
-      "offset": 2368,
+      "offset": 2384,
       "role": "constant",
       "size": 512,
       "source_memory": "mram"
@@ -255,7 +257,7 @@
     {
       "id": "28",
       "memory": "mram",
-      "offset": 2944,
+      "offset": 2960,
       "role": "constant",
       "size": 1536,
       "source_memory": "mram"
@@ -263,7 +265,7 @@
     {
       "id": "29",
       "memory": "mram",
-      "offset": 5344,
+      "offset": 5360,
       "role": "constant",
       "size": 1152,
       "source_memory": "mram"
@@ -271,7 +273,7 @@
     {
       "id": "30",
       "memory": "mram",
-      "offset": 6544,
+      "offset": 6560,
       "role": "constant",
       "size": 1152,
       "source_memory": "mram"
@@ -279,7 +281,7 @@
     {
       "id": "31",
       "memory": "mram",
-      "offset": 7792,
+      "offset": 7808,
       "role": "constant",
       "size": 3072,
       "source_memory": "mram"
@@ -287,15 +289,31 @@
     {
       "id": "32",
       "memory": "mram",
-      "offset": 10992,
+      "offset": 11008,
       "role": "constant",
       "size": 896,
       "source_memory": "mram"
     },
     {
+      "id": "33",
+      "memory": "mram",
+      "offset": 11920,
+      "role": "constant",
+      "size": 12,
+      "source_memory": "mram"
+    },
+    {
+      "id": "34",
+      "memory": "mram",
+      "offset": 0,
+      "role": "constant",
+      "size": 16,
+      "source_memory": "mram"
+    },
+    {
       "id": "35",
       "memory": "mram",
-      "offset": 720,
+      "offset": 736,
       "role": "constant",
       "size": 4,
       "source_memory": "mram"

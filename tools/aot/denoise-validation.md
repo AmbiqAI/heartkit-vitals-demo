@@ -1,4 +1,4 @@
-# Denoise AOT parity, issue #37
+# Historical Denoise AOT parity, issue #37
 
 ## Verified on AP510B
 
@@ -60,13 +60,13 @@ Production evidence: `/tmp/hkv-prod-usb-{lp,hp}.log` and matching `.usb`
 files, `/tmp/hkv-prod-build-ap{510b,510,330}.log`, and
 `/tmp/hkv-prod-tests-final.log`.
 
-## Local generator workaround
+## Historical generator workaround
 
 [helia-aot #407](https://github.com/AmbiqAI/helia-aot/issues/407) tracks unprefixed
 parameter globals that collide when models are linked together.
-`denoise-private-params.patch` makes the 16 denoise parameter objects file-local.
-`convert.sh` applies it after denoise conversion with zero fuzz. Segmentation and
-arrhythmia remain pinned to 0.19.0; denoise is pinned to 0.21.0.
+The former `denoise-private-params.patch` made the 16 denoise parameter objects file-local.
+`convert.sh` applied it after denoise conversion with zero fuzz. Segmentation and
+arrhythmia were pinned to 0.19.0; denoise was pinned to 0.21.0.
 `bash tools/aot/convert.sh --check` passed against all three module trees.
 
 ## Evidence and reproduction
@@ -83,3 +83,7 @@ single report is `/tmp/hkv-den-finite-single.log`, with report output at
 
 The finite-value check inspects FP32 exponent bits so it remains effective
 under the firmware build flags, including `-ffast-math`.
+
+## Current regeneration
+
+All three modules now regenerate with AOT 0.23.0/core 7.36.0; see [the current module guide](README.md). The measurements above remain historical and are not evidence of a new sensor-connected run.

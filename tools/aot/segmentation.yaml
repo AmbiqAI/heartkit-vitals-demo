@@ -4,7 +4,7 @@
 # heliaAOT conversion of the ECG segmentation model. Regenerate with
 # tools/aot/convert.sh; paths are relative to the repo root.
 #
-#   helia-aot 0.19.0
+#   helia-aot 0.23.0
 #   assets/segmentation.tflite
 #     sha256 93c4493a1d09e1818abaffd74973d807b9e6830e5a03217b2c777abe1032e6fe
 #     (matches model_sha256 in tools/aot/golden/golden-seg.json)

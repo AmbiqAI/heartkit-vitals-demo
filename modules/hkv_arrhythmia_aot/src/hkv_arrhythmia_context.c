@@ -6,8 +6,8 @@
  *              - Registers callback & user_data
  *              - Populates tensor pointer arrays
  *              - Performs context-level validation
- * @date        2026-09-06
- * @version     0.19.0
+ * @date        2026-09-26
+ * @version     0.23.0
  *
  * @copyright
  *   © 2026 Ambiq. All rights reserved.
@@ -48,12 +48,15 @@ int32_t hkv_arrhythmia_context_init(
         ctx->tensor_ptrs[i] = (int8_t *)ctx->arena_buffers[desc->region] + desc->offset;
     }
 
-    // Wire up inputs and outputs
+    // Wire up inputs and outputs. ``hkv_arrhythmia_inputs_len`` /
+    // ``hkv_arrhythmia_outputs_len`` stay public as element counts, while
+    // ``size`` here is bytes, so it comes from the tensor descriptor
+    // (the two coincide only for one-byte element types).
     for (int i = 0; i < hkv_arrhythmia_num_inputs; ++i) {
         hkv_arrhythmia_tensor_ident_t id = hkv_arrhythmia_inputs_id[i];
         ctx->inputs[i].id         = id;
         ctx->inputs[i].data       = ctx->tensor_ptrs[id];
-        ctx->inputs[i].size       = (size_t)hkv_arrhythmia_inputs_len[i];
+        ctx->inputs[i].size       = hkv_arrhythmia_tensor_descriptors[id].size;
         ctx->inputs[i].zero_point = hkv_arrhythmia_inputs_zero_point[i];
         ctx->inputs[i].scale      = hkv_arrhythmia_inputs_scale[i];
     }
@@ -62,7 +65,7 @@ int32_t hkv_arrhythmia_context_init(
         hkv_arrhythmia_tensor_ident_t id = hkv_arrhythmia_outputs_id[i];
         ctx->outputs[i].id         = id;
         ctx->outputs[i].data       = ctx->tensor_ptrs[id];
-        ctx->outputs[i].size       = (size_t)hkv_arrhythmia_outputs_len[i];
+        ctx->outputs[i].size       = hkv_arrhythmia_tensor_descriptors[id].size;
         ctx->outputs[i].zero_point = hkv_arrhythmia_outputs_zero_point[i];
         ctx->outputs[i].scale      = hkv_arrhythmia_outputs_scale[i];
     }
