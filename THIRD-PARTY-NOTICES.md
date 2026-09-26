@@ -18,7 +18,7 @@ LVGL is not built into this firmware, so the GPL-3.0 text carried in the AmbiqSu
 | `modules/hkv_arrhythmia_aot` | committed in this repository (`hkv_arrhythmia_aot`) | n/a |
 | `modules/hkv_denoise_aot` | committed in this repository (`hkv_denoise_aot`) | n/a |
 | `modules/hkv_segmentation_aot` | committed in this repository (`hkv_segmentation_aot`) | n/a |
-| `modules/ns-cmsis-nn` | https://github.com/AmbiqAI/ns-cmsis-nn.git | `v7.32.0 (aaeb145a67c3)` |
+| `modules/ns-cmsis-nn` | https://github.com/AmbiqAI/ns-cmsis-nn.git | `v7.36.0 (8d34472eaf49)` |
 | `modules/nsx-ambiq-sdk` | https://github.com/AmbiqAI/nsx-ambiq-sdk.git | `v5.2.24 (a9f4ec25a162)` |
 | `modules/nsx-as7058` | https://github.com/AmbiqAI/nsx-as7058.git | `c70db89ae561` |
 | `modules/nsx-physiokit` | https://github.com/AmbiqAI/nsx-physiokit.git | `17ac957fab6f` |
@@ -463,7 +463,7 @@ Copyright (c) 2026 Ambiq AI. All rights reserved.
 ### `modules/ns-cmsis-nn`
 
 - Component path: `modules/ns-cmsis-nn`
-- Vendored from: https://github.com/AmbiqAI/ns-cmsis-nn.git at `v7.32.0 (aaeb145a67c3)` (`modules/ns-cmsis-nn`)
+- Vendored from: https://github.com/AmbiqAI/ns-cmsis-nn.git at `v7.36.0 (8d34472eaf49)` (`modules/ns-cmsis-nn`)
 - Declared license: not declared in an `nsx-module.yaml`; see the text below.
 
 #### `modules/ns-cmsis-nn/LICENSE`
@@ -590,7 +590,7 @@ section 4(b).
 ### `modules/ns-cmsis-nn/LICENSES`
 
 - Component path: `modules/ns-cmsis-nn/LICENSES`
-- Vendored from: https://github.com/AmbiqAI/ns-cmsis-nn.git at `v7.32.0 (aaeb145a67c3)` (`modules/ns-cmsis-nn`)
+- Vendored from: https://github.com/AmbiqAI/ns-cmsis-nn.git at `v7.36.0 (8d34472eaf49)` (`modules/ns-cmsis-nn`)
 - Declared license: not declared in an `nsx-module.yaml`; see the text below.
 
 #### `modules/ns-cmsis-nn/LICENSES/Apache-2.0.txt`

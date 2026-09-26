@@ -3,12 +3,12 @@
 schema_version: 4
 targets:
   apollo510b_evb:
-    generated_at: '2026-09-08T15:07:25+00:00'
+    generated_at: '2026-09-26T19:43:13+00:00'
     nsx_tool:
       version: 0.1.0
     manifest:
       path: nsx.yml
-      hash: sha256:3275201391221b04424c973e051580be529433182f9e2b0001656d682dd25e79
+      hash: sha256:d2f9899e9fb1351f76891cc55ac1c20f64ddace94acaa8d24a90e4bb77c9f08d
     target:
       board: apollo510b_evb
       soc: apollo510b
@@ -262,14 +262,14 @@ targets:
       nsx-cmsis-nn:
         project: ns-cmsis-nn
         kind: git
-        constraint: v7.32.0
+        constraint: v7.36.0
         resolved:
           url: https://github.com/AmbiqAI/ns-cmsis-nn.git
-          tag: v7.32.0
-          commit: aaeb145a67c3decd9869f96474e36e7dbdc2030c
+          tag: v7.36.0
+          commit: 8d34472eaf494589515d1463b8a427564ee83947
           vendored_at: modules/ns-cmsis-nn
-          content_hash: sha256:a02935baf255b4bd2c03cab27a58f289155d0972103413f274e23c687261ac10
-          acquired_at: '2026-09-08T14:57:11+00:00'
+          content_hash: sha256:dee87d1d2d72928d7dc1e46fcfa2db71c7da31babcce10ccda5b3bb758e39c73
+          acquired_at: '2026-09-26T19:43:21+00:00'
       nsx-tileio-usb:
         project: nsx-tileio
         kind: git
@@ -318,31 +318,31 @@ targets:
         constraint: vendored
         resolved:
           vendored_at: modules/hkv_segmentation_aot
-          content_hash: sha256:9fcb3e743947ebb43a0ffe10f72b50e742e59a54accdf65ec5e3cbefb6d532dd
-          acquired_at: '2026-09-06T18:43:07+00:00'
+          content_hash: sha256:8fd43a90a295d7a4014afcbdeeea3d7a48bed0862a56242869eafeba20278499
+          acquired_at: '2026-09-26T19:43:21+00:00'
       hkv_arrhythmia_aot:
         project: hkv_arrhythmia_aot
         kind: vendored
         constraint: vendored
         resolved:
           vendored_at: modules/hkv_arrhythmia_aot
-          content_hash: sha256:fd9d4e0588d1f451989b9baeca98227476c624a22ba59b158ce8f3711c7599f0
-          acquired_at: '2026-09-06T18:43:07+00:00'
+          content_hash: sha256:c1275ef729bdf930baecfd05ff4c5a1800e1dde12c356bbabb53ceb8d5f8a002
+          acquired_at: '2026-09-26T19:43:21+00:00'
       hkv_denoise_aot:
         project: hkv_denoise_aot
         kind: vendored
         constraint: vendored
         resolved:
           vendored_at: modules/hkv_denoise_aot
-          content_hash: sha256:1a2cc32c4ad036975494acbed32de171364680ace964f2c02440ae33070bf218
-          acquired_at: '2026-09-08T15:07:25+00:00'
+          content_hash: sha256:d2dfbfa8cbc6916492ba5c6901c4361965a8b075684fa72cbb86062fe70ad7a6
+          acquired_at: '2026-09-26T19:43:21+00:00'
   apollo510_evb:
-    generated_at: '2026-09-08T15:07:25+00:00'
+    generated_at: '2026-09-26T19:43:22+00:00'
     nsx_tool:
       version: 0.1.0
     manifest:
       path: nsx.yml
-      hash: sha256:3275201391221b04424c973e051580be529433182f9e2b0001656d682dd25e79
+      hash: sha256:d2f9899e9fb1351f76891cc55ac1c20f64ddace94acaa8d24a90e4bb77c9f08d
     target:
       board: apollo510_evb
       soc: apollo510
@@ -596,14 +596,14 @@ targets:
       nsx-cmsis-nn:
         project: ns-cmsis-nn
         kind: git
-        constraint: v7.32.0
+        constraint: v7.36.0
         resolved:
           url: https://github.com/AmbiqAI/ns-cmsis-nn.git
-          tag: v7.32.0
-          commit: aaeb145a67c3decd9869f96474e36e7dbdc2030c
+          tag: v7.36.0
+          commit: 8d34472eaf494589515d1463b8a427564ee83947
           vendored_at: modules/ns-cmsis-nn
-          content_hash: sha256:a02935baf255b4bd2c03cab27a58f289155d0972103413f274e23c687261ac10
-          acquired_at: '2026-09-08T14:57:11+00:00'
+          content_hash: sha256:dee87d1d2d72928d7dc1e46fcfa2db71c7da31babcce10ccda5b3bb758e39c73
+          acquired_at: '2026-09-26T19:43:22+00:00'
       nsx-tileio-usb:
         project: nsx-tileio
         kind: git
@@ -620,31 +620,31 @@ targets:
         constraint: vendored
         resolved:
           vendored_at: modules/hkv_segmentation_aot
-          content_hash: sha256:9fcb3e743947ebb43a0ffe10f72b50e742e59a54accdf65ec5e3cbefb6d532dd
-          acquired_at: '2026-09-06T18:43:07+00:00'
+          content_hash: sha256:8fd43a90a295d7a4014afcbdeeea3d7a48bed0862a56242869eafeba20278499
+          acquired_at: '2026-09-26T19:43:22+00:00'
       hkv_arrhythmia_aot:
         project: hkv_arrhythmia_aot
         kind: vendored
         constraint: vendored
         resolved:
           vendored_at: modules/hkv_arrhythmia_aot
-          content_hash: sha256:fd9d4e0588d1f451989b9baeca98227476c624a22ba59b158ce8f3711c7599f0
-          acquired_at: '2026-09-06T18:43:07+00:00'
+          content_hash: sha256:c1275ef729bdf930baecfd05ff4c5a1800e1dde12c356bbabb53ceb8d5f8a002
+          acquired_at: '2026-09-26T19:43:22+00:00'
       hkv_denoise_aot:
         project: hkv_denoise_aot
         kind: vendored
         constraint: vendored
         resolved:
           vendored_at: modules/hkv_denoise_aot
-          content_hash: sha256:1a2cc32c4ad036975494acbed32de171364680ace964f2c02440ae33070bf218
-          acquired_at: '2026-09-08T15:07:25+00:00'
+          content_hash: sha256:d2dfbfa8cbc6916492ba5c6901c4361965a8b075684fa72cbb86062fe70ad7a6
+          acquired_at: '2026-09-26T19:43:22+00:00'
   apollo330mP_evb:
-    generated_at: '2026-09-08T15:07:25+00:00'
+    generated_at: '2026-09-26T19:43:22+00:00'
     nsx_tool:
       version: 0.1.0
     manifest:
       path: nsx.yml
-      hash: sha256:3275201391221b04424c973e051580be529433182f9e2b0001656d682dd25e79
+      hash: sha256:d2f9899e9fb1351f76891cc55ac1c20f64ddace94acaa8d24a90e4bb77c9f08d
     target:
       board: apollo330mP_evb
       soc: apollo330P
@@ -898,14 +898,14 @@ targets:
       nsx-cmsis-nn:
         project: ns-cmsis-nn
         kind: git
-        constraint: v7.32.0
+        constraint: v7.36.0
         resolved:
           url: https://github.com/AmbiqAI/ns-cmsis-nn.git
-          tag: v7.32.0
-          commit: aaeb145a67c3decd9869f96474e36e7dbdc2030c
+          tag: v7.36.0
+          commit: 8d34472eaf494589515d1463b8a427564ee83947
           vendored_at: modules/ns-cmsis-nn
-          content_hash: sha256:a02935baf255b4bd2c03cab27a58f289155d0972103413f274e23c687261ac10
-          acquired_at: '2026-09-08T14:57:11+00:00'
+          content_hash: sha256:dee87d1d2d72928d7dc1e46fcfa2db71c7da31babcce10ccda5b3bb758e39c73
+          acquired_at: '2026-09-26T19:43:22+00:00'
       nsx-tileio-usb:
         project: nsx-tileio
         kind: git
@@ -922,21 +922,21 @@ targets:
         constraint: vendored
         resolved:
           vendored_at: modules/hkv_segmentation_aot
-          content_hash: sha256:9fcb3e743947ebb43a0ffe10f72b50e742e59a54accdf65ec5e3cbefb6d532dd
-          acquired_at: '2026-09-06T18:43:07+00:00'
+          content_hash: sha256:8fd43a90a295d7a4014afcbdeeea3d7a48bed0862a56242869eafeba20278499
+          acquired_at: '2026-09-26T19:43:22+00:00'
       hkv_arrhythmia_aot:
         project: hkv_arrhythmia_aot
         kind: vendored
         constraint: vendored
         resolved:
           vendored_at: modules/hkv_arrhythmia_aot
-          content_hash: sha256:fd9d4e0588d1f451989b9baeca98227476c624a22ba59b158ce8f3711c7599f0
-          acquired_at: '2026-09-06T18:43:07+00:00'
+          content_hash: sha256:c1275ef729bdf930baecfd05ff4c5a1800e1dde12c356bbabb53ceb8d5f8a002
+          acquired_at: '2026-09-26T19:43:22+00:00'
       hkv_denoise_aot:
         project: hkv_denoise_aot
         kind: vendored
         constraint: vendored
         resolved:
           vendored_at: modules/hkv_denoise_aot
-          content_hash: sha256:1a2cc32c4ad036975494acbed32de171364680ace964f2c02440ae33070bf218
-          acquired_at: '2026-09-08T15:07:25+00:00'
+          content_hash: sha256:d2dfbfa8cbc6916492ba5c6901c4361965a8b075684fa72cbb86062fe70ad7a6
+          acquired_at: '2026-09-26T19:43:22+00:00'

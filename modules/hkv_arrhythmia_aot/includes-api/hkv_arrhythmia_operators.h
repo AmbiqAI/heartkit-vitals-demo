@@ -2,8 +2,8 @@
  * @file        hkv_arrhythmia_operators.h
  * @brief       heliaAOT operators API
  * @details     Helper to pull in all operator headers
- * @date        2026-09-06
- * @version     0.19.0
+ * @date        2026-09-26
+ * @version     0.23.0
  *
  * @copyright
  *   © 2026 Ambiq. All rights reserved.
@@ -20,9 +20,6 @@
 #pragma once
 
 #include "hkv_arrhythmia_quantize_0.h"
-#include "hkv_arrhythmia_shape_1.h"
-#include "hkv_arrhythmia_strided_slice_2.h"
-#include "hkv_arrhythmia_pack_3.h"
 #include "hkv_arrhythmia_reshape_4.h"
 #include "hkv_arrhythmia_conv_2d_5.h"
 #include "hkv_arrhythmia_depthwise_conv_2d_6.h"

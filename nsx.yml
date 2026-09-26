@@ -81,7 +81,7 @@ module_registry:
     ns-cmsis-nn:
       name: ns-cmsis-nn
       url: https://github.com/AmbiqAI/ns-cmsis-nn.git
-      revision: v7.32.0
+      revision: v7.36.0
       path: modules/ns-cmsis-nn
     nsx-tileio:
       name: nsx-tileio
@@ -107,7 +107,7 @@ module_registry:
       metadata: modules/helia-dsp/nsx-module.yaml
     nsx-cmsis-nn:
       project: ns-cmsis-nn
-      revision: v7.32.0
+      revision: v7.36.0
       metadata: modules/ns-cmsis-nn/nsx/nsx-module.yaml
     nsx-tileio-usb:
       project: nsx-tileio

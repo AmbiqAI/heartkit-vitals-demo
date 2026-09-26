@@ -2,8 +2,8 @@
  * @file        hkv_segmentation_operators.h
  * @brief       heliaAOT operators API
  * @details     Helper to pull in all operator headers
- * @date        2026-09-06
- * @version     0.19.0
+ * @date        2026-09-26
+ * @version     0.23.0
  *
  * @copyright
  *   © 2026 Ambiq. All rights reserved.

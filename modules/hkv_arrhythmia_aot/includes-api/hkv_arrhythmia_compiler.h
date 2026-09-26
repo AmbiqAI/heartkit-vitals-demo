@@ -2,8 +2,8 @@
  * @file        hkv_arrhythmia_compiler.h
  * @brief       heliaAOT compiler API
  * @details     Define compiler-specific attributes and helpers.
- * @date        2026-09-06
- * @version     0.19.0
+ * @date        2026-09-26
+ * @version     0.23.0
  *
  * @copyright
  *   © 2026 Ambiq. All rights reserved.

@@ -7,16 +7,18 @@
         "memory": "mram",
         "region_id": 1,
         "source_memory": "mram",
-        "tensor_count": 92,
-        "total_size": 25380,
-        "used": 25380
+        "tensor_count": 89,
+        "total_size": 25360,
+        "used": 25360
       }
     ],
     "persistent": [],
     "scratch": [
       {
         "alignment": 16,
+        "fragmentation": 2512,
         "memory": "sram",
+        "peak_live": 12464,
         "region_id": 0,
         "total_size": 3145728,
         "used": 14976
@@ -24,9 +26,9 @@
     ]
   },
   "module_prefix": "hkv_arrhythmia",
-  "plan_hash": "563bf5650a57e7bb",
-  "schema_version": 3,
-  "tensor_layout_hash": "b4b27d9e9f9ca109",
+  "plan_hash": "91257b127023a7ea",
+  "schema_version": 4,
+  "tensor_layout_hash": "af99c9d7e612c422",
   "tensors": [
     {
       "id": "0",
@@ -37,33 +39,9 @@
       "source_memory": "sram"
     },
     {
-      "id": "2",
-      "memory": "mram",
-      "offset": 25376,
-      "role": "constant",
-      "size": 4,
-      "source_memory": "mram"
-    },
-    {
-      "id": "3",
-      "memory": "mram",
-      "offset": 25376,
-      "role": "constant",
-      "size": 4,
-      "source_memory": "mram"
-    },
-    {
-      "id": "4",
-      "memory": "mram",
-      "offset": 0,
-      "role": "constant",
-      "size": 4,
-      "source_memory": "mram"
-    },
-    {
       "id": "7",
       "memory": "mram",
-      "offset": 25008,
+      "offset": 24992,
       "role": "constant",
       "size": 320,
       "source_memory": "mram"
@@ -71,7 +49,7 @@
     {
       "id": "9",
       "memory": "mram",
-      "offset": 18928,
+      "offset": 18912,
       "role": "constant",
       "size": 5120,
       "source_memory": "mram"
@@ -79,7 +57,7 @@
     {
       "id": "11",
       "memory": "mram",
-      "offset": 17136,
+      "offset": 17120,
       "role": "constant",
       "size": 1024,
       "source_memory": "mram"
@@ -87,7 +65,7 @@
     {
       "id": "13",
       "memory": "mram",
-      "offset": 15920,
+      "offset": 15904,
       "role": "constant",
       "size": 1024,
       "source_memory": "mram"
@@ -95,7 +73,7 @@
     {
       "id": "15",
       "memory": "mram",
-      "offset": 14576,
+      "offset": 14560,
       "role": "constant",
       "size": 576,
       "source_memory": "mram"
@@ -103,7 +81,7 @@
     {
       "id": "17",
       "memory": "mram",
-      "offset": 10736,
+      "offset": 10720,
       "role": "constant",
       "size": 3072,
       "source_memory": "mram"
@@ -111,7 +89,7 @@
     {
       "id": "19",
       "memory": "mram",
-      "offset": 9584,
+      "offset": 9568,
       "role": "constant",
       "size": 576,
       "source_memory": "mram"
@@ -119,7 +97,7 @@
     {
       "id": "21",
       "memory": "mram",
-      "offset": 8864,
+      "offset": 8848,
       "role": "constant",
       "size": 576,
       "source_memory": "mram"
@@ -127,7 +105,7 @@
     {
       "id": "23",
       "memory": "mram",
-      "offset": 7856,
+      "offset": 7840,
       "role": "constant",
       "size": 432,
       "source_memory": "mram"
@@ -135,7 +113,7 @@
     {
       "id": "25",
       "memory": "mram",
-      "offset": 5744,
+      "offset": 5728,
       "role": "constant",
       "size": 1536,
       "source_memory": "mram"
@@ -143,7 +121,7 @@
     {
       "id": "27",
       "memory": "mram",
-      "offset": 5104,
+      "offset": 5088,
       "role": "constant",
       "size": 256,
       "source_memory": "mram"
@@ -151,7 +129,7 @@
     {
       "id": "29",
       "memory": "mram",
-      "offset": 4752,
+      "offset": 4736,
       "role": "constant",
       "size": 256,
       "source_memory": "mram"
@@ -159,7 +137,7 @@
     {
       "id": "31",
       "memory": "mram",
-      "offset": 4080,
+      "offset": 4064,
       "role": "constant",
       "size": 288,
       "source_memory": "mram"
@@ -167,7 +145,7 @@
     {
       "id": "33",
       "memory": "mram",
-      "offset": 2928,
+      "offset": 2912,
       "role": "constant",
       "size": 768,
       "source_memory": "mram"
@@ -175,7 +153,7 @@
     {
       "id": "35",
       "memory": "mram",
-      "offset": 2496,
+      "offset": 2480,
       "role": "constant",
       "size": 144,
       "source_memory": "mram"
@@ -183,7 +161,7 @@
     {
       "id": "37",
       "memory": "mram",
-      "offset": 2256,
+      "offset": 2240,
       "role": "constant",
       "size": 144,
       "source_memory": "mram"
@@ -191,7 +169,7 @@
     {
       "id": "39",
       "memory": "mram",
-      "offset": 1744,
+      "offset": 1728,
       "role": "constant",
       "size": 216,
       "source_memory": "mram"
@@ -199,7 +177,7 @@
     {
       "id": "41",
       "memory": "mram",
-      "offset": 1072,
+      "offset": 1056,
       "role": "constant",
       "size": 384,
       "source_memory": "mram"
@@ -207,7 +185,7 @@
     {
       "id": "42",
       "memory": "mram",
-      "offset": 1056,
+      "offset": 1040,
       "role": "constant",
       "size": 1,
       "source_memory": "mram"
@@ -215,7 +193,7 @@
     {
       "id": "44",
       "memory": "mram",
-      "offset": 800,
+      "offset": 784,
       "role": "constant",
       "size": 64,
       "source_memory": "mram"
@@ -223,7 +201,7 @@
     {
       "id": "46",
       "memory": "mram",
-      "offset": 688,
+      "offset": 672,
       "role": "constant",
       "size": 64,
       "source_memory": "mram"
@@ -231,7 +209,7 @@
     {
       "id": "48",
       "memory": "mram",
-      "offset": 352,
+      "offset": 336,
       "role": "constant",
       "size": 144,
       "source_memory": "mram"
@@ -239,7 +217,7 @@
     {
       "id": "50",
       "memory": "mram",
-      "offset": 16,
+      "offset": 0,
       "role": "constant",
       "size": 144,
       "source_memory": "mram"
@@ -250,30 +228,6 @@
       "offset": 2000,
       "role": "scratch",
       "size": 500,
-      "source_memory": "sram"
-    },
-    {
-      "id": "52",
-      "memory": "sram",
-      "offset": 0,
-      "role": "scratch",
-      "size": 12,
-      "source_memory": "sram"
-    },
-    {
-      "id": "53",
-      "memory": "sram",
-      "offset": 16,
-      "role": "scratch",
-      "size": 4,
-      "source_memory": "sram"
-    },
-    {
-      "id": "54",
-      "memory": "sram",
-      "offset": 0,
-      "role": "scratch",
-      "size": 16,
       "source_memory": "sram"
     },
     {
@@ -647,7 +601,7 @@
     {
       "id": "conv_2d_10_multiplier",
       "memory": "mram",
-      "offset": 928,
+      "offset": 912,
       "role": "constant",
       "size": 64,
       "source_memory": "mram"
@@ -655,7 +609,7 @@
     {
       "id": "conv_2d_10_shift",
       "memory": "mram",
-      "offset": 992,
+      "offset": 976,
       "role": "constant",
       "size": 64,
       "source_memory": "mram"
@@ -663,7 +617,7 @@
     {
       "id": "conv_2d_10_weight_sum",
       "memory": "mram",
-      "offset": 864,
+      "offset": 848,
       "role": "constant",
       "size": 64,
       "source_memory": "mram"
@@ -671,7 +625,7 @@
     {
       "id": "conv_2d_13_multiplier",
       "memory": "mram",
-      "offset": 1552,
+      "offset": 1536,
       "role": "constant",
       "size": 96,
       "source_memory": "mram"
@@ -679,7 +633,7 @@
     {
       "id": "conv_2d_13_shift",
       "memory": "mram",
-      "offset": 1648,
+      "offset": 1632,
       "role": "constant",
       "size": 96,
       "source_memory": "mram"
@@ -687,7 +641,7 @@
     {
       "id": "conv_2d_13_weight_sum",
       "memory": "mram",
-      "offset": 1456,
+      "offset": 1440,
       "role": "constant",
       "size": 96,
       "source_memory": "mram"
@@ -695,7 +649,7 @@
     {
       "id": "conv_2d_17_multiplier",
       "memory": "mram",
-      "offset": 2432,
+      "offset": 2416,
       "role": "constant",
       "size": 24,
       "source_memory": "mram"
@@ -703,7 +657,7 @@
     {
       "id": "conv_2d_17_shift",
       "memory": "mram",
-      "offset": 2464,
+      "offset": 2448,
       "role": "constant",
       "size": 24,
       "source_memory": "mram"
@@ -711,7 +665,7 @@
     {
       "id": "conv_2d_17_weight_sum",
       "memory": "mram",
-      "offset": 2400,
+      "offset": 2384,
       "role": "constant",
       "size": 24,
       "source_memory": "mram"
@@ -719,7 +673,7 @@
     {
       "id": "conv_2d_18_multiplier",
       "memory": "mram",
-      "offset": 2736,
+      "offset": 2720,
       "role": "constant",
       "size": 96,
       "source_memory": "mram"
@@ -727,7 +681,7 @@
     {
       "id": "conv_2d_18_shift",
       "memory": "mram",
-      "offset": 2832,
+      "offset": 2816,
       "role": "constant",
       "size": 96,
       "source_memory": "mram"
@@ -735,7 +689,7 @@
     {
       "id": "conv_2d_18_weight_sum",
       "memory": "mram",
-      "offset": 2640,
+      "offset": 2624,
       "role": "constant",
       "size": 96,
       "source_memory": "mram"
@@ -743,7 +697,7 @@
     {
       "id": "conv_2d_21_multiplier",
       "memory": "mram",
-      "offset": 3824,
+      "offset": 3808,
       "role": "constant",
       "size": 128,
       "source_memory": "mram"
@@ -751,7 +705,7 @@
     {
       "id": "conv_2d_21_shift",
       "memory": "mram",
-      "offset": 3952,
+      "offset": 3936,
       "role": "constant",
       "size": 128,
       "source_memory": "mram"
@@ -759,7 +713,7 @@
     {
       "id": "conv_2d_21_weight_sum",
       "memory": "mram",
-      "offset": 3696,
+      "offset": 3680,
       "role": "constant",
       "size": 128,
       "source_memory": "mram"
@@ -767,7 +721,7 @@
     {
       "id": "conv_2d_25_multiplier",
       "memory": "mram",
-      "offset": 5040,
+      "offset": 5024,
       "role": "constant",
       "size": 32,
       "source_memory": "mram"
@@ -775,7 +729,7 @@
     {
       "id": "conv_2d_25_shift",
       "memory": "mram",
-      "offset": 5072,
+      "offset": 5056,
       "role": "constant",
       "size": 32,
       "source_memory": "mram"
@@ -783,7 +737,7 @@
     {
       "id": "conv_2d_25_weight_sum",
       "memory": "mram",
-      "offset": 5008,
+      "offset": 4992,
       "role": "constant",
       "size": 32,
       "source_memory": "mram"
@@ -791,7 +745,7 @@
     {
       "id": "conv_2d_26_multiplier",
       "memory": "mram",
-      "offset": 5488,
+      "offset": 5472,
       "role": "constant",
       "size": 128,
       "source_memory": "mram"
@@ -799,7 +753,7 @@
     {
       "id": "conv_2d_26_shift",
       "memory": "mram",
-      "offset": 5616,
+      "offset": 5600,
       "role": "constant",
       "size": 128,
       "source_memory": "mram"
@@ -807,7 +761,7 @@
     {
       "id": "conv_2d_26_weight_sum",
       "memory": "mram",
-      "offset": 5360,
+      "offset": 5344,
       "role": "constant",
       "size": 128,
       "source_memory": "mram"
@@ -815,7 +769,7 @@
     {
       "id": "conv_2d_29_multiplier",
       "memory": "mram",
-      "offset": 7472,
+      "offset": 7456,
       "role": "constant",
       "size": 192,
       "source_memory": "mram"
@@ -823,7 +777,7 @@
     {
       "id": "conv_2d_29_shift",
       "memory": "mram",
-      "offset": 7664,
+      "offset": 7648,
       "role": "constant",
       "size": 192,
       "source_memory": "mram"
@@ -831,7 +785,7 @@
     {
       "id": "conv_2d_29_weight_sum",
       "memory": "mram",
-      "offset": 7280,
+      "offset": 7264,
       "role": "constant",
       "size": 192,
       "source_memory": "mram"
@@ -839,7 +793,7 @@
     {
       "id": "conv_2d_33_multiplier",
       "memory": "mram",
-      "offset": 9488,
+      "offset": 9472,
       "role": "constant",
       "size": 48,
       "source_memory": "mram"
@@ -847,7 +801,7 @@
     {
       "id": "conv_2d_33_shift",
       "memory": "mram",
-      "offset": 9536,
+      "offset": 9520,
       "role": "constant",
       "size": 48,
       "source_memory": "mram"
@@ -855,7 +809,7 @@
     {
       "id": "conv_2d_33_weight_sum",
       "memory": "mram",
-      "offset": 9440,
+      "offset": 9424,
       "role": "constant",
       "size": 48,
       "source_memory": "mram"
@@ -863,7 +817,7 @@
     {
       "id": "conv_2d_34_multiplier",
       "memory": "mram",
-      "offset": 10352,
+      "offset": 10336,
       "role": "constant",
       "size": 192,
       "source_memory": "mram"
@@ -871,7 +825,7 @@
     {
       "id": "conv_2d_34_shift",
       "memory": "mram",
-      "offset": 10544,
+      "offset": 10528,
       "role": "constant",
       "size": 192,
       "source_memory": "mram"
@@ -879,7 +833,7 @@
     {
       "id": "conv_2d_34_weight_sum",
       "memory": "mram",
-      "offset": 10160,
+      "offset": 10144,
       "role": "constant",
       "size": 192,
       "source_memory": "mram"
@@ -887,7 +841,7 @@
     {
       "id": "conv_2d_37_multiplier",
       "memory": "mram",
-      "offset": 14064,
+      "offset": 14048,
       "role": "constant",
       "size": 256,
       "source_memory": "mram"
@@ -895,7 +849,7 @@
     {
       "id": "conv_2d_37_shift",
       "memory": "mram",
-      "offset": 14320,
+      "offset": 14304,
       "role": "constant",
       "size": 256,
       "source_memory": "mram"
@@ -903,7 +857,7 @@
     {
       "id": "conv_2d_37_weight_sum",
       "memory": "mram",
-      "offset": 13808,
+      "offset": 13792,
       "role": "constant",
       "size": 256,
       "source_memory": "mram"
@@ -911,7 +865,7 @@
     {
       "id": "conv_2d_41_multiplier",
       "memory": "mram",
-      "offset": 17008,
+      "offset": 16992,
       "role": "constant",
       "size": 64,
       "source_memory": "mram"
@@ -919,7 +873,7 @@
     {
       "id": "conv_2d_41_shift",
       "memory": "mram",
-      "offset": 17072,
+      "offset": 17056,
       "role": "constant",
       "size": 64,
       "source_memory": "mram"
@@ -927,7 +881,7 @@
     {
       "id": "conv_2d_41_weight_sum",
       "memory": "mram",
-      "offset": 16944,
+      "offset": 16928,
       "role": "constant",
       "size": 64,
       "source_memory": "mram"
@@ -935,7 +889,7 @@
     {
       "id": "conv_2d_42_multiplier",
       "memory": "mram",
-      "offset": 18416,
+      "offset": 18400,
       "role": "constant",
       "size": 256,
       "source_memory": "mram"
@@ -943,7 +897,7 @@
     {
       "id": "conv_2d_42_shift",
       "memory": "mram",
-      "offset": 18672,
+      "offset": 18656,
       "role": "constant",
       "size": 256,
       "source_memory": "mram"
@@ -951,7 +905,7 @@
     {
       "id": "conv_2d_42_weight_sum",
       "memory": "mram",
-      "offset": 18160,
+      "offset": 18144,
       "role": "constant",
       "size": 256,
       "source_memory": "mram"
@@ -959,7 +913,7 @@
     {
       "id": "conv_2d_45_multiplier",
       "memory": "mram",
-      "offset": 24368,
+      "offset": 24352,
       "role": "constant",
       "size": 320,
       "source_memory": "mram"
@@ -967,7 +921,7 @@
     {
       "id": "conv_2d_45_shift",
       "memory": "mram",
-      "offset": 24688,
+      "offset": 24672,
       "role": "constant",
       "size": 320,
       "source_memory": "mram"
@@ -975,7 +929,7 @@
     {
       "id": "conv_2d_45_weight_sum",
       "memory": "mram",
-      "offset": 24048,
+      "offset": 24032,
       "role": "constant",
       "size": 320,
       "source_memory": "mram"
@@ -983,7 +937,7 @@
     {
       "id": "conv_2d_5_multiplier",
       "memory": "mram",
-      "offset": 224,
+      "offset": 208,
       "role": "constant",
       "size": 64,
       "source_memory": "mram"
@@ -999,7 +953,7 @@
     {
       "id": "conv_2d_5_shift",
       "memory": "mram",
-      "offset": 288,
+      "offset": 272,
       "role": "constant",
       "size": 64,
       "source_memory": "mram"
@@ -1007,7 +961,7 @@
     {
       "id": "conv_2d_5_weight_sum",
       "memory": "mram",
-      "offset": 160,
+      "offset": 144,
       "role": "constant",
       "size": 64,
       "source_memory": "mram"
@@ -1015,7 +969,7 @@
     {
       "id": "conv_2d_9_multiplier",
       "memory": "mram",
-      "offset": 768,
+      "offset": 752,
       "role": "constant",
       "size": 16,
       "source_memory": "mram"
@@ -1023,7 +977,7 @@
     {
       "id": "conv_2d_9_shift",
       "memory": "mram",
-      "offset": 784,
+      "offset": 768,
       "role": "constant",
       "size": 16,
       "source_memory": "mram"
@@ -1031,7 +985,7 @@
     {
       "id": "conv_2d_9_weight_sum",
       "memory": "mram",
-      "offset": 752,
+      "offset": 736,
       "role": "constant",
       "size": 16,
       "source_memory": "mram"
@@ -1039,7 +993,7 @@
     {
       "id": "depthwise_conv_2d_14_multiplier",
       "memory": "mram",
-      "offset": 2064,
+      "offset": 2048,
       "role": "constant",
       "size": 96,
       "source_memory": "mram"
@@ -1055,7 +1009,7 @@
     {
       "id": "depthwise_conv_2d_14_shift",
       "memory": "mram",
-      "offset": 2160,
+      "offset": 2144,
       "role": "constant",
       "size": 96,
       "source_memory": "mram"
@@ -1063,7 +1017,7 @@
     {
       "id": "depthwise_conv_2d_14_weight_sum",
       "memory": "mram",
-      "offset": 1968,
+      "offset": 1952,
       "role": "constant",
       "size": 96,
       "source_memory": "mram"
@@ -1071,7 +1025,7 @@
     {
       "id": "depthwise_conv_2d_22_multiplier",
       "memory": "mram",
-      "offset": 4496,
+      "offset": 4480,
       "role": "constant",
       "size": 128,
       "source_memory": "mram"
@@ -1087,7 +1041,7 @@
     {
       "id": "depthwise_conv_2d_22_shift",
       "memory": "mram",
-      "offset": 4624,
+      "offset": 4608,
       "role": "constant",
       "size": 128,
       "source_memory": "mram"
@@ -1095,7 +1049,7 @@
     {
       "id": "depthwise_conv_2d_22_weight_sum",
       "memory": "mram",
-      "offset": 4368,
+      "offset": 4352,
       "role": "constant",
       "size": 128,
       "source_memory": "mram"
@@ -1103,7 +1057,7 @@
     {
       "id": "depthwise_conv_2d_30_multiplier",
       "memory": "mram",
-      "offset": 8480,
+      "offset": 8464,
       "role": "constant",
       "size": 192,
       "source_memory": "mram"
@@ -1119,7 +1073,7 @@
     {
       "id": "depthwise_conv_2d_30_shift",
       "memory": "mram",
-      "offset": 8672,
+      "offset": 8656,
       "role": "constant",
       "size": 192,
       "source_memory": "mram"
@@ -1127,7 +1081,7 @@
     {
       "id": "depthwise_conv_2d_30_weight_sum",
       "memory": "mram",
-      "offset": 8288,
+      "offset": 8272,
       "role": "constant",
       "size": 192,
       "source_memory": "mram"
@@ -1135,7 +1089,7 @@
     {
       "id": "depthwise_conv_2d_38_multiplier",
       "memory": "mram",
-      "offset": 15408,
+      "offset": 15392,
       "role": "constant",
       "size": 256,
       "source_memory": "mram"
@@ -1151,7 +1105,7 @@
     {
       "id": "depthwise_conv_2d_38_shift",
       "memory": "mram",
-      "offset": 15664,
+      "offset": 15648,
       "role": "constant",
       "size": 256,
       "source_memory": "mram"
@@ -1159,7 +1113,7 @@
     {
       "id": "depthwise_conv_2d_38_weight_sum",
       "memory": "mram",
-      "offset": 15152,
+      "offset": 15136,
       "role": "constant",
       "size": 256,
       "source_memory": "mram"
@@ -1167,7 +1121,7 @@
     {
       "id": "depthwise_conv_2d_6_multiplier",
       "memory": "mram",
-      "offset": 560,
+      "offset": 544,
       "role": "constant",
       "size": 64,
       "source_memory": "mram"
@@ -1183,7 +1137,7 @@
     {
       "id": "depthwise_conv_2d_6_shift",
       "memory": "mram",
-      "offset": 624,
+      "offset": 608,
       "role": "constant",
       "size": 64,
       "source_memory": "mram"
@@ -1191,7 +1145,7 @@
     {
       "id": "depthwise_conv_2d_6_weight_sum",
       "memory": "mram",
-      "offset": 496,
+      "offset": 480,
       "role": "constant",
       "size": 64,
       "source_memory": "mram"
@@ -1199,7 +1153,7 @@
     {
       "id": "fully_connected_47_multiplier",
       "memory": "mram",
-      "offset": 25344,
+      "offset": 25328,
       "role": "constant",
       "size": 16,
       "source_memory": "mram"
@@ -1207,7 +1161,7 @@
     {
       "id": "fully_connected_47_shift",
       "memory": "mram",
-      "offset": 25360,
+      "offset": 25344,
       "role": "constant",
       "size": 16,
       "source_memory": "mram"
@@ -1215,7 +1169,7 @@
     {
       "id": "fully_connected_47_weight_sum",
       "memory": "mram",
-      "offset": 25328,
+      "offset": 25312,
       "role": "constant",
       "size": 16,
       "source_memory": "mram"

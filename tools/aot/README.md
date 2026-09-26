@@ -28,12 +28,27 @@ Moving the arenas to TCM is a later optimization.
 tools/aot/convert.sh
 ```
 
-Converts `assets/segmentation.tflite` and `assets/arrhythmia.tflite` with
-helia-aot 0.19.0 using `segmentation.yaml` / `arrhythmia.yaml`, and
-`assets/denoise.tflite` with 0.21.0 using `denoise.yaml`, then re-runs
-`nsx lock`. Denoise conversion applies `denoise-private-params.patch` for
-[helia-aot#407](https://github.com/AmbiqAI/helia-aot/issues/407).
-Commit the module trees and `nsx.lock`.
+Converts all three models with helia-aot 0.23.0 and re-runs `nsx lock`,
+which pins ns-cmsis-nn 7.36.0. Denoise and segmentation assets are unchanged.
+Arrhythmia has FP32 input/output with INT8 weights and internal compute.
+Its original `assets/arrhythmia.tflite` is preserved; `specialize_arrhythmia.py`
+reproduces `arrhythmia-batch1.tflite` and its JSON provenance before conversion.
+Only 48 existing `shape_signature[0]` fields change from -1 to 1. Concrete
+shapes, operators, reduction axes, weights, quantization and every other byte
+remain unchanged. The helper checks the exact source/derived SHA-256 and all
+eight full-output cases against the original interpreter resized to batch one.
+The MEAN reductions retain axes [1, 2]; the input reshape derives [1, 1, 500, 1]
+from the input batch. No strict shape check is disabled.
+
+The converter now emits private `static const` denoise parameters, so the
+previous private-parameter patch is no longer applied. Commit the generated
+module trees, specialization/provenance and `nsx.lock` together.
+
+Standalone eight-case stock-TFLM comparisons and SRAM/MRAM measurements are
+recorded in [the benchmark checkpoint](https://github.com/AmbiqAI/helia-benchmark/issues/1#issuecomment-5849029328).
+They do not replace integrated firmware or sensor-connected validation;
+[issue 99](https://github.com/AmbiqAI/heartkit-vitals-demo/issues/99) retains
+sustained streaming, actual successful-call rates and other-board acceptance.
 
 ## Check
 
@@ -97,7 +112,7 @@ differ by several LSB. `--delegate` opts back in for comparison only.
 Feed a file to the converter with `--test.golden-data`:
 
 ```sh
-uv tool run --from helia-aot==0.19.0 --python 3.12 helia-aot convert \
+uv tool run --from helia-aot==0.23.0 --python 3.12 helia-aot convert \
   --model.path assets/segmentation.tflite \
   --module.path out/segmentation --module.type nsx \
   --module.prefix hkv_segmentation --platform.name apollo510b_evb \

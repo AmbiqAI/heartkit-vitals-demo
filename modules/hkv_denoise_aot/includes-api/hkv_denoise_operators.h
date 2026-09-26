@@ -2,8 +2,8 @@
  * @file        hkv_denoise_operators.h
  * @brief       heliaAOT operators API
  * @details     Helper to pull in all operator headers
- * @date        2026-09-08
- * @version     0.21.0
+ * @date        2026-09-26
+ * @version     0.23.0
  *
  * @copyright
  *   © 2026 Ambiq. All rights reserved.

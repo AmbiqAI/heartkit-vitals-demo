@@ -5,8 +5,8 @@
  *              These macros shall be overridden by the application as needed.
  *              Default values are provided for known platforms like neuralSPOT.
  *              If no overrides are defined, these macros become no-ops.
- * @date        2026-09-08
- * @version     0.21.0
+ * @date        2026-09-26
+ * @version     0.23.0
  *
  * @copyright
  *   © 2026 Ambiq. All rights reserved.
@@ -84,4 +84,21 @@
 
 #ifndef HKV_DENOISE_PUT_IN_ITCM_INIT
 #define HKV_DENOISE_PUT_IN_ITCM_INIT
+#endif
+
+//── Code placement hooks ──────────────────────────────────────────────────────
+//
+// Marks generated functions whose operator sets code_placement: ITCM. Unlike
+// the PUT_IN_* data hooks, NSX gets a real default: its linker scripts already
+// collect .itcm_text into ITCM. GCC and armclang reject code and data sharing
+// one section in a translation unit (armclang even for a declaration), so no
+// generated file both defines PUT_IN_ITCM data and sees this macro.
+//
+
+#ifndef HKV_DENOISE_PUT_CODE_IN_ITCM
+  #if defined(__GNUC__) || defined(__clang__) || defined(__ARMCC_VERSION)
+    #define HKV_DENOISE_PUT_CODE_IN_ITCM __attribute__((section(".itcm_text")))
+  #else
+    #define HKV_DENOISE_PUT_CODE_IN_ITCM
+  #endif
 #endif

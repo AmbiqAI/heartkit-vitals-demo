@@ -2,8 +2,8 @@
  * @file        hkv_segmentation_common.h
  * @brief       HeliaT common API
  * @details     Helper to pull in all common headers
- * @date        2026-09-06
- * @version     0.19.0
+ * @date        2026-09-26
+ * @version     0.23.0
  *
  * @copyright
  *   © 2026 Ambiq. All rights reserved.
@@ -58,11 +58,11 @@
 // release the floor exists to exclude.
 #if (NS_CMSIS_NN_VERSION_MAJOR < 7) || \
     (NS_CMSIS_NN_VERSION_MAJOR == 7 && \
-     NS_CMSIS_NN_VERSION_MINOR < 31) || \
+     NS_CMSIS_NN_VERSION_MINOR < 36) || \
     (NS_CMSIS_NN_VERSION_MAJOR == 7 && \
-     NS_CMSIS_NN_VERSION_MINOR == 31 && \
+     NS_CMSIS_NN_VERSION_MINOR == 36 && \
      NS_CMSIS_NN_VERSION_PATCH < 0)
-  #error "CMSIS-NN version too old; need at least v7.31.0"
+  #error "CMSIS-NN version too old; need at least v7.36.0"
 #endif
 
 //── 5) AOT core definitions ───────────────────────────────────────────────────

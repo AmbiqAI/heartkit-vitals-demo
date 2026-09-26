@@ -17,20 +17,14 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO_ROOT"
 
-HELIA_AOT_VERSION="0.19.0"
+HELIA_AOT_VERSION="0.23.0"
 PYTHON_VERSION="3.12"
 MODELS="segmentation arrhythmia denoise"
 
 aot_convert() {
     # $1 = yaml config, $2 = output parent directory
-    local version="${HELIA_AOT_VERSION}"
-    if [[ "$1" == */denoise.yaml ]]; then version="0.21.0"; fi
-    uv tool run --from "helia-aot==${version}" --python "${PYTHON_VERSION}" \
+    uv tool run --from "helia-aot==${HELIA_AOT_VERSION}" --python "${PYTHON_VERSION}" \
         helia-aot convert --path "$1" --module.path "$2"
-    if [[ "$1" == */denoise.yaml ]]; then
-        # Private parameters otherwise collide across models; see AmbiqAI/helia-aot#407.
-        patch --batch --fuzz=0 -p1 -d "$2/hkv_denoise_aot" < tools/aot/denoise-private-params.patch
-    fi
 }
 
 module_name() {
@@ -43,6 +37,7 @@ module_name() {
 }
 
 regenerate() {
+    uv run --group aot python tools/aot/specialize_arrhythmia.py
     for model in $MODELS; do
         name="$(module_name "$model")"
         rm -rf "modules/${name}"
@@ -52,6 +47,8 @@ regenerate() {
 }
 
 check() {
+    uv run --group aot python tools/aot/specialize_arrhythmia.py --check
+    uv run --group aot python tools/aot/check_batch_one.py
     tmp="$(mktemp -d "${TMPDIR:-/tmp}/hkv-aot-check.XXXXXX")"
     trap 'rm -rf "$tmp"' EXIT
     status=0
