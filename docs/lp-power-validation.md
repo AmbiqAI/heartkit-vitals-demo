@@ -11,7 +11,6 @@ of this experiment. The simplified first pass is implemented and hardware-tested
 see ../tools/bench/results/lp-power-20260909/RESULTS.md. Extended tests below
 remain deferred unless covered by a later report. Subsequent sleep-bank results
 are linked from [minimal sleep validation](minimal-sleep-validation.md).
-For the installed image and ongoing measurements, consult ../HANDOFF.md.
 
 Battery budget corrected locally to 2 x 225 mAh x 3.0 V = 1350 mWh. The cell
 charge capacity remains a demo assumption. The manufacturer's nominal voltage
