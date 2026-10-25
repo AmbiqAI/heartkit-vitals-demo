@@ -42,7 +42,7 @@ jobs:
     permissions:
       contents: write
     env:
-      UV_VERSION: "0.11.26"
+      UV_VERSION: "0.13.5"
       # SHA-256 as published by Arm next to the archive at
       # https://developer.arm.com/-/media/Files/downloads/gnu/15.2.Rel1/binrel/
       # <archive>.sha256asc

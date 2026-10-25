@@ -37,7 +37,7 @@ concurrency:
 
 env:
   # uv is pinned so the resolver behaviour matches the developer environment.
-  UV_VERSION: "0.11.26"
+  UV_VERSION: "0.13.5"
   # scripts/ci-local.sh skips checks it cannot run. On a hosted runner a skip
   # is a failure: a gate step that ran nothing must not report success.
   CI_STRICT: "1"
