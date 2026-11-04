@@ -40,6 +40,7 @@
 #include "am_mcu_apollo.h"
 
 #include "nsx_core.h"
+#include "nsx_system.h"
 #include "nsx_freertos.h"
 #include "nsx_i2c.h"
 #include "nsx_power.h"
@@ -2510,20 +2511,21 @@ main(void)
 
     sensorCtx.inputSource = appState.inputSource;
     appState.speedMode = hkv_supported_speed_mode(appState.speedMode);
-    nsxPwrCfg.perf_mode = appState.speedMode ? NSX_POWER_PERF_HIGH : NSX_POWER_PERF_LOW;
+    nsxPwrCfg.perf_mode = NSX_POWER_PERF_LOW;
 
-    /* Enable ITM/SWO BEFORE nsx_power_configure()/perf-mode switch -- see
-     * phase-3 note in git history: enabling SWO requires briefly powering
-     * up Crypto to unlock the DCU, and that handshake requests HFRC from
-     * the clock manager, which hangs on Apollo5-family secure parts if the
-     * CPU has already moved to a SYSPLL-sourced high-performance clock. */
-    nsx_itm_printf_enable();
+    const nsx_debug_config_t debugCfg = {.transport = NSX_DEBUG_ITM};
+    NSX_TRY(nsx_debug_init(&debugCfg), "Debug Init failed.\n");
 
-    NSX_TRY(nsx_power_configure(&nsxPwrCfg) != NSX_STATUS_SUCCESS, "Power Init failed.\n");
-    /* nsx_power_configure() applied perf_mode, so the core may now be at the
-     * high-performance clock while SystemCoreClock still reads the boot value.
-     * Fix it here, before vTaskStartScheduler() programs SysTick from it.
-     * Issue #25. */
+    const uint32_t powerStatus = nsx_power_configure(&nsxPwrCfg);
+    // Power configuration suspends debug; restore it before reporting failures.
+    const uint32_t debugStatus = nsx_debug_init(&debugCfg);
+    NSX_TRY(powerStatus, "Power Init failed.\n");
+    NSX_TRY(debugStatus, "Debug Restore failed.\n");
+
+    // Apollo5 debug must be initialized before switching to the high clock.
+    NSX_TRY(nsx_power_set_performance_mode(
+                appState.speedMode ? NSX_POWER_PERF_HIGH : NSX_POWER_PERF_LOW),
+            "Performance mode failed.\n");
     timebase_sync_to_core_clock();
     nsx_delay_us(200000);
 
