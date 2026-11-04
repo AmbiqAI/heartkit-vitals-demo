@@ -31,9 +31,9 @@
 #include "tio_usb.h" /* TIO_USB_PACKET_LEN + frame layout constants (cited below) */
 
 /* WSF buffers cover both ATT traffic and GATT database hashing. The complete
- * database, including TileIO's nine characteristics, needs a 429-byte hash input, independent
- * of the 247-byte packet MTU. Reserve one 512-byte buffer until hashing completes;
- * the existing 280-byte buffers remain available for notification traffic. */
+ * database, including TileIO's nine characteristics, needs a 429-byte hash input.
+ * Add one 512-byte buffer for this allocation, independent of the 247-byte MTU;
+ * keep the existing 280-byte buffers for notification traffic. */
 #define BLE_BRINGUP_WSF_BUFFER_POOLS 5
 #define BLE_BRINGUP_WSF_BUFFER_SIZE                                            \
     (BLE_BRINGUP_WSF_BUFFER_POOLS * 16 + 16 * 8 + 32 * 8 + 64 * 8 + 280 * 20 + 512) / \
