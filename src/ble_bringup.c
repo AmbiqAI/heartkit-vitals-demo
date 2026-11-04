@@ -30,25 +30,18 @@
 #include "tio_ble.h"
 #include "tio_usb.h" /* TIO_USB_PACKET_LEN + frame layout constants (cited below) */
 
-/* ---- WSF buffer pool (app-owned policy) -------------------------------
- * Pattern copied from neuralspotx/examples/ble_webble/src/main.c
- * (WEBBLE_WSF_BUFFER_POOLS/WEBBLE_WSF_BUFFER_SIZE/webbleWsfBuffers), scaled
- * up: TileIO's slot signal/metric characteristics are up to
- * TIO_BLE_SLOT_SIG_BUF_LEN/TIO_BLE_SLOT_MET_BUF_LEN (242) bytes, vs.
- * ble_webble's 1-3 byte characteristics, and there are TIO_BLE_SLOT_COUNT*2+1
- * (9) characteristics that may all have pending ATT buffers concurrently.
- * The largest tier is sized to comfortably hold a 242-byte notification (plus
- * ATT/L2CAP header overhead) with headroom for the 247-byte negotiated MTU,
- * with enough buffer count for all 9 characteristics to be in flight.
- */
-#define BLE_BRINGUP_WSF_BUFFER_POOLS 4
+/* WSF buffers cover both ATT traffic and GATT database hashing. The complete
+ * database, including TileIO's nine characteristics, needs a 429-byte hash input.
+ * Add one 512-byte buffer for this allocation, independent of the 247-byte MTU;
+ * keep the existing 280-byte buffers for notification traffic. */
+#define BLE_BRINGUP_WSF_BUFFER_POOLS 5
 #define BLE_BRINGUP_WSF_BUFFER_SIZE                                            \
-    (BLE_BRINGUP_WSF_BUFFER_POOLS * 16 + 16 * 8 + 32 * 8 + 64 * 8 + 280 * 20) / \
+    (BLE_BRINGUP_WSF_BUFFER_POOLS * 16 + 16 * 8 + 32 * 8 + 64 * 8 + 280 * 20 + 512) / \
         sizeof(uint32_t)
 
 static uint32_t g_bleBringupWsfBufferPool[BLE_BRINGUP_WSF_BUFFER_SIZE];
 static wsfBufPoolDesc_t g_bleBringupBufferDescriptors[BLE_BRINGUP_WSF_BUFFER_POOLS] = {
-    {16, 8}, {32, 8}, {64, 8}, {280, 20}};
+    {16, 8}, {32, 8}, {64, 8}, {280, 20}, {512, 1}};
 static ns_ble_pool_config_t g_bleBringupWsfBuffers = {
     .pool = g_bleBringupWsfBufferPool,
     .poolSize = sizeof(g_bleBringupWsfBufferPool),
@@ -121,72 +114,7 @@ ble_bringup_event_handler(const ns_ble_event_t *event, void *context)
     }
 }
 
-/* ---- The TileIO notify timer is a dead poll; park it (issue #19) --------
- *
- * READ THIS BEFORE "FIXING" THE NUMBER BELOW BACK TO 200.
- *
- * `tio_ble_context_t::notify_period_ms` is NOT this app's telemetry rate. It
- * is plumbed straight through tio_ble_notify_period_ms() into the `periodMs`
- * argument of ns_ble_create_characteristic() for all TIO_BLE_SLOT_COUNT*2+1
- * (9) characteristics, and every one of those calls also passes `async` =
- * true (tio_ble.c:131, :193, :204). In ns_ble.c's timer handler:
- *
- *     if (c->notifyHandlerCb != NULL) { status = c->notifyHandlerCb(...); }
- *     if (status == NS_STATUS_SUCCESS && c->indicationIsAsynchronous == false)
- *         ns_ble_send_value(c, (attEvt_t *)pMsg);
- *     WsfTimerStartMs(&c->indicationTimer, c->indicationPeriod);
- *                                              -- ns_ble.c:1054-1064
- *
- * With async == true the send is skipped unconditionally, and TileIO's
- * notify handler (tio_ble.c:76) is `return NS_STATUS_SUCCESS;` with an empty
- * body. So a timer expiry calls a no-op, sends nothing, and rearms. It is a
- * poll that can never produce a packet.
- *
- * The actual telemetry path is already data-driven and does not involve this
- * timer at all: TioProcessTask -> ble_bringup_send_slot_packet() ->
- * tio_ble_send_slot_data()/tio_ble_send_uio_state() -> ns_ble_send_value(),
- * which pushes a notification the moment a packet exists. Raising the period
- * therefore does NOT slow telemetry, drop a notification, or change the
- * dashboard's update rate -- there is no telemetry on this path to slow. It
- * removes 9 characteristics x 5 expiries/s = ~45 dispatcher wakes/s that
- * carried no data.
- *
- * Neither does it touch the control path. CCCD subscribe/unsubscribe still
- * starts and stops the timer (ns_ble.c:1088/:1092), UIO reads still go
- * through tio_ble_read_handler() -> uio_read_cb (so a freshly connected host
- * still gets its UIO state on read), UIO writes still go through
- * tio_ble_uio_write_handler() -> uio_update_cb, and UIO state pushes still go
- * through tio_ble_send_uio_state(). None of those four read indicationPeriod.
- *
- * WHY 65535 AND NOT 0. ns_ble_create_characteristic()'s `periodMs` is a
- * uint16_t, so 65535 ms is the maximum expressible period: ~0.14 expiries/s
- * across all 9 characteristics, i.e. the poll is gone rather than merely
- * slower. It is also safe -- WsfTimerStartMs takes a uint32_t and divides by
- * WSF_MS_PER_TICK (10), giving 6553 ticks with nothing near an overflow
- * (wsf_timer.h:37/45, wsf_timer.c:39).
- *
- * 0 is NOT the disable value and must not be used here, but the trap is
- * quieter than it looks. tio_ble_notify_period_ms() (nsx-tileio-ble
- * src/tio_ble.c:100-104) maps a 0 in this context field to
- * TIO_BLE_DEFAULT_NOTIFY_PERIOD_MS before it ever reaches ns_ble, so writing
- * 0 here does not reach WSF as 0 ticks -- it silently restores TileIO's
- * default poll period and puts the ~45 dead wakes/s back, with nothing in
- * this file changing to show it. A zero that reads as "off" and behaves as
- * "default" is the failure mode to watch for here.
- *
- * (The 0-tick behaviour one layer down -- WSF_TIMER_MS_TO_TICKS yielding 0
- * and WsfTimerUpdate() expiring a 0-tick timer on the very next tick,
- * wsf_timer.c:254-264 -- is real, but it is the module-level rationale for
- * why tio_ble.c does that clamping at all, not something reachable from this
- * file. See AmbiqAI/nsx-ambiq-sdk#71.)
- *
- * THIS IS A WORKAROUND, NOT THE FIX. The fix is for ns_ble.c to not arm the
- * timer at all when async == true (a characteristic that has declared its
- * sends asynchronous has said the timer has no job), or failing that for
- * nsx-tileio to stop passing a poll period it structurally cannot use. Both
- * live outside this repo: ns_ble.c is vendored, and modules/nsx-tileio is
- * generated from nsx.lock and gitignored here. See the issue #19 report. */
-#define BLE_BRINGUP_DEAD_POLL_PERIOD_MS 65535u
+/* Async TileIO sends are application-driven; the SDK does not arm periodic timers. */
 
 static tio_ble_context_t g_bleBringupCtx = {
     .uio_update_cb = &ble_bringup_uio_update_cb,
@@ -195,7 +123,7 @@ static tio_ble_context_t g_bleBringupCtx = {
     .pool_config = NULL, /* set in ble_bringup_init(): needs &g_bleBringupWsfBuffers */
     .service_name = BLE_BRINGUP_ADV_NAME,
     .base_handle = TIO_BLE_DEFAULT_BASE_HANDLE,
-    .notify_period_ms = BLE_BRINGUP_DEAD_POLL_PERIOD_MS,
+    .notify_period_ms = TIO_BLE_DEFAULT_NOTIFY_PERIOD_MS,
     .device_info = &g_bleBringupDeviceInfo,
     .connection_config = &g_bleBringupConnectionConfig,
     .event_handler = &ble_bringup_event_handler,
