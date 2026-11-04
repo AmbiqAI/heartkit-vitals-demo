@@ -30,25 +30,18 @@
 #include "tio_ble.h"
 #include "tio_usb.h" /* TIO_USB_PACKET_LEN + frame layout constants (cited below) */
 
-/* ---- WSF buffer pool (app-owned policy) -------------------------------
- * Pattern copied from neuralspotx/examples/ble_webble/src/main.c
- * (WEBBLE_WSF_BUFFER_POOLS/WEBBLE_WSF_BUFFER_SIZE/webbleWsfBuffers), scaled
- * up: TileIO's slot signal/metric characteristics are up to
- * TIO_BLE_SLOT_SIG_BUF_LEN/TIO_BLE_SLOT_MET_BUF_LEN (242) bytes, vs.
- * ble_webble's 1-3 byte characteristics, and there are TIO_BLE_SLOT_COUNT*2+1
- * (9) characteristics that may all have pending ATT buffers concurrently.
- * The largest tier is sized to comfortably hold a 242-byte notification (plus
- * ATT/L2CAP header overhead) with headroom for the 247-byte negotiated MTU,
- * with enough buffer count for all 9 characteristics to be in flight.
- */
-#define BLE_BRINGUP_WSF_BUFFER_POOLS 4
+/* WSF buffers cover both ATT traffic and GATT database hashing. The complete
+ * database, including TileIO's nine characteristics, needs a 429-byte hash input.
+ * Add one 512-byte buffer for this allocation, independent of the 247-byte MTU;
+ * keep the existing 280-byte buffers for notification traffic. */
+#define BLE_BRINGUP_WSF_BUFFER_POOLS 5
 #define BLE_BRINGUP_WSF_BUFFER_SIZE                                            \
-    (BLE_BRINGUP_WSF_BUFFER_POOLS * 16 + 16 * 8 + 32 * 8 + 64 * 8 + 280 * 20) / \
+    (BLE_BRINGUP_WSF_BUFFER_POOLS * 16 + 16 * 8 + 32 * 8 + 64 * 8 + 280 * 20 + 512) / \
         sizeof(uint32_t)
 
 static uint32_t g_bleBringupWsfBufferPool[BLE_BRINGUP_WSF_BUFFER_SIZE];
 static wsfBufPoolDesc_t g_bleBringupBufferDescriptors[BLE_BRINGUP_WSF_BUFFER_POOLS] = {
-    {16, 8}, {32, 8}, {64, 8}, {280, 20}};
+    {16, 8}, {32, 8}, {64, 8}, {280, 20}, {512, 1}};
 static ns_ble_pool_config_t g_bleBringupWsfBuffers = {
     .pool = g_bleBringupWsfBufferPool,
     .poolSize = sizeof(g_bleBringupWsfBufferPool),
