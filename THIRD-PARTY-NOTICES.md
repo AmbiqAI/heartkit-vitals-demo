@@ -19,7 +19,7 @@ LVGL is not built into this firmware, so the GPL-3.0 text carried in the AmbiqSu
 | `modules/hkv_denoise_aot` | committed in this repository (`hkv_denoise_aot`) | n/a |
 | `modules/hkv_segmentation_aot` | committed in this repository (`hkv_segmentation_aot`) | n/a |
 | `modules/ns-cmsis-nn` | https://github.com/AmbiqAI/ns-cmsis-nn.git | `v7.32.0 (aaeb145a67c3)` |
-| `modules/nsx-ambiq-sdk` | https://github.com/AmbiqAI/nsx-ambiq-sdk.git | `v5.2.24 (a9f4ec25a162)` |
+| `modules/nsx-ambiq-sdk` | https://github.com/AmbiqAI/nsx-ambiq-sdk.git | `ebceb1141fe9` |
 | `modules/nsx-as7058` | https://github.com/AmbiqAI/nsx-as7058.git | `c70db89ae561` |
 | `modules/nsx-physiokit` | https://github.com/AmbiqAI/nsx-physiokit.git | `17ac957fab6f` |
 | `modules/nsx-pmu-armv8m` | https://github.com/AmbiqAI/nsx-pmu-armv8m.git | `v0.2.0 (5725c065a0c3)` |
@@ -874,7 +874,7 @@ POSSIBILITY OF SUCH DAMAGE.
 ### `modules/nsx-ambiq-sdk/modules/nsx-ambiq-bsp`
 
 - Component path: `modules/nsx-ambiq-sdk/modules/nsx-ambiq-bsp`
-- Vendored from: https://github.com/AmbiqAI/nsx-ambiq-sdk.git at `v5.2.24 (a9f4ec25a162)` (`modules/nsx-ambiq-sdk`)
+- Vendored from: https://github.com/AmbiqAI/nsx-ambiq-sdk.git at `ebceb1141fe9` (`modules/nsx-ambiq-sdk`)
 - Declared license: not declared in an `nsx-module.yaml`; see the text below.
 
 #### `modules/nsx-ambiq-sdk/modules/nsx-ambiq-bsp/LICENSE`
@@ -914,7 +914,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ### `modules/nsx-ambiq-sdk/modules/nsx-ambiq-hal`
 
 - Component path: `modules/nsx-ambiq-sdk/modules/nsx-ambiq-hal`
-- Vendored from: https://github.com/AmbiqAI/nsx-ambiq-sdk.git at `v5.2.24 (a9f4ec25a162)` (`modules/nsx-ambiq-sdk`)
+- Vendored from: https://github.com/AmbiqAI/nsx-ambiq-sdk.git at `ebceb1141fe9` (`modules/nsx-ambiq-sdk`)
 - Declared license: not declared in an `nsx-module.yaml`; see the text below.
 
 #### `modules/nsx-ambiq-sdk/modules/nsx-ambiq-hal/LICENSE`
@@ -954,7 +954,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ### `modules/nsx-ambiq-sdk/modules/nsx-ambiq-usb`
 
 - Component path: `modules/nsx-ambiq-sdk/modules/nsx-ambiq-usb`
-- Vendored from: https://github.com/AmbiqAI/nsx-ambiq-sdk.git at `v5.2.24 (a9f4ec25a162)` (`modules/nsx-ambiq-sdk`)
+- Vendored from: https://github.com/AmbiqAI/nsx-ambiq-sdk.git at `ebceb1141fe9` (`modules/nsx-ambiq-sdk`)
 - Declared license: not declared in an `nsx-module.yaml`; see the text below.
 
 #### `modules/nsx-ambiq-sdk/modules/nsx-ambiq-usb/LICENSE`
@@ -994,7 +994,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ### `modules/nsx-ambiq-sdk/modules/nsx-ambiq-usb/sdk/third_party/tinyusb/source`
 
 - Component path: `modules/nsx-ambiq-sdk/modules/nsx-ambiq-usb/sdk/third_party/tinyusb/source`
-- Vendored from: https://github.com/AmbiqAI/nsx-ambiq-sdk.git at `v5.2.24 (a9f4ec25a162)` (`modules/nsx-ambiq-sdk`)
+- Vendored from: https://github.com/AmbiqAI/nsx-ambiq-sdk.git at `ebceb1141fe9` (`modules/nsx-ambiq-sdk`)
 - Declared license: not declared in an `nsx-module.yaml`; see the text below.
 
 #### `modules/nsx-ambiq-sdk/modules/nsx-ambiq-usb/sdk/third_party/tinyusb/source/LICENSE`
@@ -1026,7 +1026,7 @@ THE SOFTWARE.
 ### `modules/nsx-ambiq-sdk/modules/nsx-ambiqsuite`
 
 - Component path: `modules/nsx-ambiq-sdk/modules/nsx-ambiqsuite`
-- Vendored from: https://github.com/AmbiqAI/nsx-ambiq-sdk.git at `v5.2.24 (a9f4ec25a162)` (`modules/nsx-ambiq-sdk`)
+- Vendored from: https://github.com/AmbiqAI/nsx-ambiq-sdk.git at `ebceb1141fe9` (`modules/nsx-ambiq-sdk`)
 - Declared license: not declared in an `nsx-module.yaml`; see the text below.
 
 #### `modules/nsx-ambiq-sdk/modules/nsx-ambiqsuite/THIRD-PARTY-PAYLOAD.md`
@@ -1079,7 +1079,7 @@ TinyUSB is bundled under the optional `nsx-ambiq-usb` module, not the core
 ### `modules/nsx-ambiq-sdk/modules/nsx-ambiqsuite/sdk/docs/licenses`
 
 - Component path: `modules/nsx-ambiq-sdk/modules/nsx-ambiqsuite/sdk/docs/licenses`
-- Vendored from: https://github.com/AmbiqAI/nsx-ambiq-sdk.git at `v5.2.24 (a9f4ec25a162)` (`modules/nsx-ambiq-sdk`)
+- Vendored from: https://github.com/AmbiqAI/nsx-ambiq-sdk.git at `ebceb1141fe9` (`modules/nsx-ambiq-sdk`)
 - Declared license: not declared in an `nsx-module.yaml`; see the text below.
 
 #### `modules/nsx-ambiq-sdk/modules/nsx-ambiqsuite/sdk/docs/licenses/Ambiq-Software-License-Terms.pdf`
@@ -2115,7 +2115,7 @@ the following restrictions:
 ### `modules/nsx-ambiq-sdk/modules/nsx-cmsis-core`
 
 - Component path: `modules/nsx-ambiq-sdk/modules/nsx-cmsis-core`
-- Vendored from: https://github.com/AmbiqAI/nsx-ambiq-sdk.git at `v5.2.24 (a9f4ec25a162)` (`modules/nsx-ambiq-sdk`)
+- Vendored from: https://github.com/AmbiqAI/nsx-ambiq-sdk.git at `ebceb1141fe9` (`modules/nsx-ambiq-sdk`)
 - Declared license: not declared in an `nsx-module.yaml`; see the text below.
 
 #### `modules/nsx-ambiq-sdk/modules/nsx-cmsis-core/LICENSE`
@@ -2327,7 +2327,7 @@ the following restrictions:
 ### `modules/nsx-ambiq-sdk/modules/nsx-cmsis-startup`
 
 - Component path: `modules/nsx-ambiq-sdk/modules/nsx-cmsis-startup`
-- Vendored from: https://github.com/AmbiqAI/nsx-ambiq-sdk.git at `v5.2.24 (a9f4ec25a162)` (`modules/nsx-ambiq-sdk`)
+- Vendored from: https://github.com/AmbiqAI/nsx-ambiq-sdk.git at `ebceb1141fe9` (`modules/nsx-ambiq-sdk`)
 - Declared license: not declared in an `nsx-module.yaml`; see the text below.
 
 #### `modules/nsx-ambiq-sdk/modules/nsx-cmsis-startup/LICENSE`
@@ -2367,7 +2367,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ### `modules/nsx-ambiq-sdk/modules/nsx-cordio/sdk/third_party/uecc`
 
 - Component path: `modules/nsx-ambiq-sdk/modules/nsx-cordio/sdk/third_party/uecc`
-- Vendored from: https://github.com/AmbiqAI/nsx-ambiq-sdk.git at `v5.2.24 (a9f4ec25a162)` (`modules/nsx-ambiq-sdk`)
+- Vendored from: https://github.com/AmbiqAI/nsx-ambiq-sdk.git at `ebceb1141fe9` (`modules/nsx-ambiq-sdk`)
 - Declared license: not declared in an `nsx-module.yaml`; see the text below.
 
 #### `modules/nsx-ambiq-sdk/modules/nsx-cordio/sdk/third_party/uecc/license.txt`
@@ -2399,7 +2399,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ### `modules/nsx-ambiq-sdk/modules/nsx-core`
 
 - Component path: `modules/nsx-ambiq-sdk/modules/nsx-core`
-- Vendored from: https://github.com/AmbiqAI/nsx-ambiq-sdk.git at `v5.2.24 (a9f4ec25a162)` (`modules/nsx-ambiq-sdk`)
+- Vendored from: https://github.com/AmbiqAI/nsx-ambiq-sdk.git at `ebceb1141fe9` (`modules/nsx-ambiq-sdk`)
 - Declared license: not declared in an `nsx-module.yaml`; see the text below.
 
 #### `modules/nsx-ambiq-sdk/modules/nsx-core/LICENSE`
@@ -2439,7 +2439,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ### `modules/nsx-ambiq-sdk/modules/nsx-freertos`
 
 - Component path: `modules/nsx-ambiq-sdk/modules/nsx-freertos`
-- Vendored from: https://github.com/AmbiqAI/nsx-ambiq-sdk.git at `v5.2.24 (a9f4ec25a162)` (`modules/nsx-ambiq-sdk`)
+- Vendored from: https://github.com/AmbiqAI/nsx-ambiq-sdk.git at `ebceb1141fe9` (`modules/nsx-ambiq-sdk`)
 - Declared license: not declared in an `nsx-module.yaml`; see the text below.
 
 #### `modules/nsx-ambiq-sdk/modules/nsx-freertos/LICENSE`
@@ -2486,7 +2486,7 @@ Amazon.com, Inc. or its affiliates.
 ### `modules/nsx-ambiq-sdk/modules/nsx-freertos/sdk/third_party/FreeRTOS-Kernel`
 
 - Component path: `modules/nsx-ambiq-sdk/modules/nsx-freertos/sdk/third_party/FreeRTOS-Kernel`
-- Vendored from: https://github.com/AmbiqAI/nsx-ambiq-sdk.git at `v5.2.24 (a9f4ec25a162)` (`modules/nsx-ambiq-sdk`)
+- Vendored from: https://github.com/AmbiqAI/nsx-ambiq-sdk.git at `ebceb1141fe9` (`modules/nsx-ambiq-sdk`)
 - Declared license: not declared in an `nsx-module.yaml`; see the text below.
 
 #### `modules/nsx-ambiq-sdk/modules/nsx-freertos/sdk/third_party/FreeRTOS-Kernel/LICENSE.md`
@@ -2516,7 +2516,7 @@ SOFTWARE.
 ### `modules/nsx-ambiq-sdk/modules/nsx-gpio`
 
 - Component path: `modules/nsx-ambiq-sdk/modules/nsx-gpio`
-- Vendored from: https://github.com/AmbiqAI/nsx-ambiq-sdk.git at `v5.2.24 (a9f4ec25a162)` (`modules/nsx-ambiq-sdk`)
+- Vendored from: https://github.com/AmbiqAI/nsx-ambiq-sdk.git at `ebceb1141fe9` (`modules/nsx-ambiq-sdk`)
 - Declared license: not declared in an `nsx-module.yaml`; see the text below.
 
 #### `modules/nsx-ambiq-sdk/modules/nsx-gpio/LICENSE`
@@ -2556,7 +2556,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ### `modules/nsx-ambiq-sdk/modules/nsx-i2c`
 
 - Component path: `modules/nsx-ambiq-sdk/modules/nsx-i2c`
-- Vendored from: https://github.com/AmbiqAI/nsx-ambiq-sdk.git at `v5.2.24 (a9f4ec25a162)` (`modules/nsx-ambiq-sdk`)
+- Vendored from: https://github.com/AmbiqAI/nsx-ambiq-sdk.git at `ebceb1141fe9` (`modules/nsx-ambiq-sdk`)
 - Declared license: not declared in an `nsx-module.yaml`; see the text below.
 
 #### `modules/nsx-ambiq-sdk/modules/nsx-i2c/LICENSE`
@@ -2596,7 +2596,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ### `modules/nsx-ambiq-sdk/modules/nsx-interrupt`
 
 - Component path: `modules/nsx-ambiq-sdk/modules/nsx-interrupt`
-- Vendored from: https://github.com/AmbiqAI/nsx-ambiq-sdk.git at `v5.2.24 (a9f4ec25a162)` (`modules/nsx-ambiq-sdk`)
+- Vendored from: https://github.com/AmbiqAI/nsx-ambiq-sdk.git at `ebceb1141fe9` (`modules/nsx-ambiq-sdk`)
 - Declared license: not declared in an `nsx-module.yaml`; see the text below.
 
 #### `modules/nsx-ambiq-sdk/modules/nsx-interrupt/LICENSE`
@@ -2633,10 +2633,50 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
+### `modules/nsx-ambiq-sdk/modules/nsx-npu`
+
+- Component path: `modules/nsx-ambiq-sdk/modules/nsx-npu`
+- Vendored from: https://github.com/AmbiqAI/nsx-ambiq-sdk.git at `ebceb1141fe9` (`modules/nsx-ambiq-sdk`)
+- Declared license: not declared in an `nsx-module.yaml`; see the text below.
+
+#### `modules/nsx-ambiq-sdk/modules/nsx-npu/LICENSE`
+
+```
+BSD 3-Clause License
+
+Copyright (c) 2026, Ambiq
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its
+   contributors may be used to endorse or promote products derived from
+   this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
 ### `modules/nsx-ambiq-sdk/modules/nsx-perf`
 
 - Component path: `modules/nsx-ambiq-sdk/modules/nsx-perf`
-- Vendored from: https://github.com/AmbiqAI/nsx-ambiq-sdk.git at `v5.2.24 (a9f4ec25a162)` (`modules/nsx-ambiq-sdk`)
+- Vendored from: https://github.com/AmbiqAI/nsx-ambiq-sdk.git at `ebceb1141fe9` (`modules/nsx-ambiq-sdk`)
 - Declared license: not declared in an `nsx-module.yaml`; see the text below.
 
 #### `modules/nsx-ambiq-sdk/modules/nsx-perf/LICENSE`
@@ -2676,7 +2716,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ### `modules/nsx-ambiq-sdk/modules/nsx-power`
 
 - Component path: `modules/nsx-ambiq-sdk/modules/nsx-power`
-- Vendored from: https://github.com/AmbiqAI/nsx-ambiq-sdk.git at `v5.2.24 (a9f4ec25a162)` (`modules/nsx-ambiq-sdk`)
+- Vendored from: https://github.com/AmbiqAI/nsx-ambiq-sdk.git at `ebceb1141fe9` (`modules/nsx-ambiq-sdk`)
 - Declared license: not declared in an `nsx-module.yaml`; see the text below.
 
 #### `modules/nsx-ambiq-sdk/modules/nsx-power/LICENSE`
@@ -2716,7 +2756,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ### `modules/nsx-ambiq-sdk/modules/nsx-soc-hal`
 
 - Component path: `modules/nsx-ambiq-sdk/modules/nsx-soc-hal`
-- Vendored from: https://github.com/AmbiqAI/nsx-ambiq-sdk.git at `v5.2.24 (a9f4ec25a162)` (`modules/nsx-ambiq-sdk`)
+- Vendored from: https://github.com/AmbiqAI/nsx-ambiq-sdk.git at `ebceb1141fe9` (`modules/nsx-ambiq-sdk`)
 - Declared license: not declared in an `nsx-module.yaml`; see the text below.
 
 #### `modules/nsx-ambiq-sdk/modules/nsx-soc-hal/LICENSE`
@@ -2756,7 +2796,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ### `modules/nsx-ambiq-sdk/modules/nsx-spi`
 
 - Component path: `modules/nsx-ambiq-sdk/modules/nsx-spi`
-- Vendored from: https://github.com/AmbiqAI/nsx-ambiq-sdk.git at `v5.2.24 (a9f4ec25a162)` (`modules/nsx-ambiq-sdk`)
+- Vendored from: https://github.com/AmbiqAI/nsx-ambiq-sdk.git at `ebceb1141fe9` (`modules/nsx-ambiq-sdk`)
 - Declared license: not declared in an `nsx-module.yaml`; see the text below.
 
 #### `modules/nsx-ambiq-sdk/modules/nsx-spi/LICENSE`
@@ -2796,7 +2836,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ### `modules/nsx-ambiq-sdk/modules/nsx-timer`
 
 - Component path: `modules/nsx-ambiq-sdk/modules/nsx-timer`
-- Vendored from: https://github.com/AmbiqAI/nsx-ambiq-sdk.git at `v5.2.24 (a9f4ec25a162)` (`modules/nsx-ambiq-sdk`)
+- Vendored from: https://github.com/AmbiqAI/nsx-ambiq-sdk.git at `ebceb1141fe9` (`modules/nsx-ambiq-sdk`)
 - Declared license: not declared in an `nsx-module.yaml`; see the text below.
 
 #### `modules/nsx-ambiq-sdk/modules/nsx-timer/LICENSE`
@@ -2836,7 +2876,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ### `modules/nsx-ambiq-sdk/modules/nsx-uart`
 
 - Component path: `modules/nsx-ambiq-sdk/modules/nsx-uart`
-- Vendored from: https://github.com/AmbiqAI/nsx-ambiq-sdk.git at `v5.2.24 (a9f4ec25a162)` (`modules/nsx-ambiq-sdk`)
+- Vendored from: https://github.com/AmbiqAI/nsx-ambiq-sdk.git at `ebceb1141fe9` (`modules/nsx-ambiq-sdk`)
 - Declared license: not declared in an `nsx-module.yaml`; see the text below.
 
 #### `modules/nsx-ambiq-sdk/modules/nsx-uart/LICENSE`
@@ -2876,7 +2916,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ### `modules/nsx-ambiq-sdk/modules/nsx-usb`
 
 - Component path: `modules/nsx-ambiq-sdk/modules/nsx-usb`
-- Vendored from: https://github.com/AmbiqAI/nsx-ambiq-sdk.git at `v5.2.24 (a9f4ec25a162)` (`modules/nsx-ambiq-sdk`)
+- Vendored from: https://github.com/AmbiqAI/nsx-ambiq-sdk.git at `ebceb1141fe9` (`modules/nsx-ambiq-sdk`)
 - Declared license: not declared in an `nsx-module.yaml`; see the text below.
 
 #### `modules/nsx-ambiq-sdk/modules/nsx-usb/LICENSE`
@@ -2911,6 +2951,38 @@ SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
 CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
+### `modules/nsx-ambiq-sdk/tests/hardware/vendor/unity`
+
+- Component path: `modules/nsx-ambiq-sdk/tests/hardware/vendor/unity`
+- Vendored from: https://github.com/AmbiqAI/nsx-ambiq-sdk.git at `ebceb1141fe9` (`modules/nsx-ambiq-sdk`)
+- Declared license: not declared in an `nsx-module.yaml`; see the text below.
+
+#### `modules/nsx-ambiq-sdk/tests/hardware/vendor/unity/LICENSE.txt`
+
+```
+The MIT License (MIT)
+
+Copyright (c) 2007-25 Mike Karlesky, Mark VanderVoord, & Greg Williams
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
 ```
 
 ### `modules/nsx-as7058`
