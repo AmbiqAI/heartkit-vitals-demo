@@ -29,13 +29,16 @@ set(HKV_FW_VERSION "dev" CACHE STRING "Firmware version reported in the HKV boot
 # which spins in the sensor task. See src/sensor_bus.c and #65.
 option(HKV_SENSOR_ASYNC "Read the AS7058 over the IOM command queue" ON)
 
-if(NSX_BOARD STREQUAL "apollo510b_evb" AND CMAKE_C_COMPILER_ID STREQUAL "GNU"
-   AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm" AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.31
-   AND CMAKE_GENERATOR STREQUAL "Ninja")
-    option(NSX_DEBUG_CONTEXT "Prepare configured debug handoff" ON)
+include(CMakeDependentOption)
+set(_hkv_debug_supported OFF)
+if(NSX_BOARD MATCHES "^(apollo510_evb|apollo510b_evb|apollo330mP_evb)$"
+   AND CMAKE_C_COMPILER_ID STREQUAL "GNU" AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm"
+   AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.31 AND CMAKE_GENERATOR STREQUAL "Ninja")
+    set(_hkv_debug_supported ON)
+endif()
+cmake_dependent_option(NSX_DEBUG_CONTEXT "Prepare configured debug handoff" ON "_hkv_debug_supported" OFF)
+if(NSX_DEBUG_CONTEXT)
     set(NSX_DEBUG_INPUT_CONTRACT 1)
-else()
-    include(${CMAKE_CURRENT_LIST_DIR}/cmake/nsx/nsx_debug_template.cmake)
 endif()
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/nsx/modules.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/nsx/nsx_app_bootstrap.cmake)

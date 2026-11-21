@@ -8,7 +8,7 @@ The demo uses ECG models developed with
 
 - Python 3.11 or later with `uv`.
 - Arm GNU Toolchain (`arm-none-eabi-gcc`).
-- SEGGER J-Link software, CMake 3.31 or newer, and Ninja for the Apollo510 and Apollo510B GCC flash and SWO workflows.
+- SEGGER J-Link software, CMake 3.31 or newer, and Ninja for the GCC flash and SWO workflows. Apollo330 Plus also needs the Apollo330P J-Link device pack.
 
 Install the Python environment once:
 
