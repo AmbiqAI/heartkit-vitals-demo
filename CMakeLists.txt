@@ -29,15 +29,22 @@ set(HKV_FW_VERSION "dev" CACHE STRING "Firmware version reported in the HKV boot
 # which spins in the sensor task. See src/sensor_bus.c and #65.
 option(HKV_SENSOR_ASYNC "Read the AS7058 over the IOM command queue" ON)
 
-include(CMakeDependentOption)
 set(_hkv_debug_supported OFF)
 if(NSX_BOARD MATCHES "^(apollo510_evb|apollo510b_evb|apollo330mP_evb)$"
    AND CMAKE_C_COMPILER_ID STREQUAL "GNU" AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm"
    AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.31 AND CMAKE_GENERATOR STREQUAL "Ninja")
     set(_hkv_debug_supported ON)
 endif()
-cmake_dependent_option(NSX_DEBUG_CONTEXT "Prepare configured debug handoff" ON "_hkv_debug_supported" OFF)
-if(NSX_DEBUG_CONTEXT)
+# NSX reads the effective value from CMakeCache.txt before using the probe.
+# Recompute an automatic choice on reconfigure; retain a user's cache override.
+if(NOT DEFINED NSX_DEBUG_CONTEXT OR
+   (DEFINED _HKV_LAST_AUTO_DEBUG AND NSX_DEBUG_CONTEXT STREQUAL _HKV_LAST_AUTO_DEBUG))
+    set(NSX_DEBUG_CONTEXT "${_hkv_debug_supported}" CACHE BOOL "Prepare configured debug handoff" FORCE)
+    set(_HKV_LAST_AUTO_DEBUG "${NSX_DEBUG_CONTEXT}" CACHE INTERNAL "Last automatic debug setting")
+else()
+    unset(_HKV_LAST_AUTO_DEBUG CACHE)
+endif()
+if(_hkv_debug_supported)
     set(NSX_DEBUG_INPUT_CONTRACT 1)
 endif()
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/nsx/modules.cmake)
