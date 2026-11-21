@@ -29,6 +29,14 @@ set(HKV_FW_VERSION "dev" CACHE STRING "Firmware version reported in the HKV boot
 # which spins in the sensor task. See src/sensor_bus.c and #65.
 option(HKV_SENSOR_ASYNC "Read the AS7058 over the IOM command queue" ON)
 
+if(NSX_BOARD STREQUAL "apollo510b_evb" AND CMAKE_C_COMPILER_ID STREQUAL "GNU"
+   AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm" AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.31
+   AND CMAKE_GENERATOR STREQUAL "Ninja")
+    option(NSX_DEBUG_CONTEXT "Prepare configured debug handoff" ON)
+    set(NSX_DEBUG_INPUT_CONTRACT 1)
+else()
+    include(${CMAKE_CURRENT_LIST_DIR}/cmake/nsx/nsx_debug_template.cmake)
+endif()
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/nsx/modules.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/nsx/nsx_app_bootstrap.cmake)
 
@@ -146,6 +154,9 @@ if(NSX_BOARD STREQUAL "apollo510b_evb")
 endif()
 
 nsx_finalize_app(heartkit-vitals-demo)
+if(NSX_DEBUG_CONTEXT)
+    nsx_debug_set_primary_target(heartkit-vitals-demo)
+endif()
 
 option(HKV_BUILD_LP_POWER_TEST "Build the GPIO-gated LP power test" OFF)
 if(HKV_BUILD_LP_POWER_TEST)

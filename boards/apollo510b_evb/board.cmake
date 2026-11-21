@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, Ambiq
 # apollo510b_evb board aggregator (issue #154a).
 #
 # Stable include entry point (nsx_app_bootstrap.cmake includes
@@ -42,7 +44,7 @@ target_compile_definitions(${NSX_BOARD_FLAGS_TARGET} INTERFACE
     # AM_PACKAGE_BGA: AmbiqSuite chip-package selector (ball-grid-array
     # variant); gates package-specific pin/peripheral config in the SDK.
     AM_PACKAGE_BGA
-    # STACK_SIZE: startup C-runtime stack size in bytes (used by SDK startup).
+    # STACK_SIZE: uint32_t word count for SDK startup (4096 words = 16 KiB).
     STACK_SIZE=4096
 )
 

@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.14'",
@@ -83,7 +83,7 @@ aot = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "neuralspotx", specifier = ">=0.7.17" }]
+requires-dist = [{ name = "neuralspotx", git = "https://github.com/AmbiqAI/neuralspotx.git?rev=81f603fc32ee16f3445553aa1b760ad2ccb5e1a6" }]
 
 [package.metadata.requires-dev]
 aot = [
@@ -226,15 +226,13 @@ wheels = [
 
 [[package]]
 name = "neuralspotx"
-version = "0.7.17"
-source = { registry = "https://pypi.org/simple" }
+version = "1.0.0"
+source = { git = "https://github.com/AmbiqAI/neuralspotx.git?rev=81f603fc32ee16f3445553aa1b760ad2ccb5e1a6#81f603fc32ee16f3445553aa1b760ad2ccb5e1a6" }
 dependencies = [
     { name = "jinja2" },
+    { name = "packaging" },
+    { name = "pyelftools" },
     { name = "pyyaml" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/5a/f0/ac15ae6736e4662300de6e5522c060c7c493fbb62f24a147ca19a9128de3/neuralspotx-0.7.17.tar.gz", hash = "sha256:662b895d57c6693d0afd4b26104119499e9da137d9664d50eb01770fca5889e6", size = 319108, upload-time = "2026-08-15T19:19:49.498Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/95/7d/3fa2702ac56cf74e5e60c842a4253a3290d0184c6791ebef128181384bb3/neuralspotx-0.7.17-py3-none-any.whl", hash = "sha256:1289cd67eb27475159a4f9083338ee81648fcc115783db4f467ec96c9ca0fbdb", size = 311680, upload-time = "2026-08-15T19:19:48.144Z" },
 ]
 
 [[package]]
@@ -398,6 +396,15 @@ wheels = [
 ]
 
 [[package]]
+name = "packaging"
+version = "26.3"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/7d/fa/3944b40b07da9ce895c0e6303a5ab7d53da063554f534556b134a54d6093/packaging-26.3.tar.gz", hash = "sha256:94edc256424af38762eb31306eed28beb9f0efc50a8837492c9d6fd6004aed79", size = 313412, upload-time = "2026-08-04T18:15:28.737Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/63/34/ba1c580383c9eada3711951fef0795c80b829a078d72188184bcab9dd527/packaging-26.3-py3-none-any.whl", hash = "sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c", size = 129956, upload-time = "2026-08-04T18:15:27.159Z" },
+]
+
+[[package]]
 name = "protobuf"
 version = "7.36.1"
 source = { registry = "https://pypi.org/simple" }
@@ -410,6 +417,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/3d/33/d4724ec5d86d496fe4108e220618aa0837ad3423a7af7ccdd9684ccc77c8/protobuf-7.36.1-cp310-abi3-win32.whl", hash = "sha256:0b53ce95272aad50ad25d7ff03373743209822e8ba42ea7fad27d2bee1547d00", size = 443002, upload-time = "2026-08-31T22:40:01.32Z" },
     { url = "https://files.pythonhosted.org/packages/db/37/155788a0d8daded960375af604202805308169f9b859419ea0aa370946e2/protobuf-7.36.1-cp310-abi3-win_amd64.whl", hash = "sha256:51139351435d9b43d88a55eaa49fb6f737fbb478fb0cbf2cf694d1a04a9d3363", size = 456518, upload-time = "2026-08-31T22:40:02.494Z" },
     { url = "https://files.pythonhosted.org/packages/39/ca/c47f91d3cab175b01fd8c4f0d80fdf8613be876cc616e66ad281a59c5ddf/protobuf-7.36.1-py3-none-any.whl", hash = "sha256:7d951e46b3f963d6c264c367c437921de9d5aedd9c3f9612b9077736b4e3ad5c", size = 179813, upload-time = "2026-08-31T22:40:03.54Z" },
+]
+
+[[package]]
+name = "pyelftools"
+version = "0.33"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/a3/11/767522582afab1b884d277de0e6e011640cb9d7292a38694b4b1a1df1ae8/pyelftools-0.33.tar.gz", hash = "sha256:660d82dcbeb8e83d1702bd97f223f761625da06111c0cc988eac6b8ab0c1b61f", size = 15068655, upload-time = "2026-05-29T12:56:22.553Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/46/2a/f9697576603dae937727827505a6126a066affb227034e77e6f9068910da/pyelftools-0.33-py3-none-any.whl", hash = "sha256:f215ad5f47d3f1373a21496a6c9e0707c622840d0622f23ff7ce08678b020036", size = 201178, upload-time = "2026-05-29T12:56:20.587Z" },
 ]
 
 [[package]]
