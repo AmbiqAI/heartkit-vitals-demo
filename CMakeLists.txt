@@ -45,7 +45,7 @@ if(NOT DEFINED NSX_DEBUG_CONTEXT OR
 else()
     unset(_HKV_LAST_AUTO_DEBUG CACHE)
 endif()
-if(_hkv_debug_supported)
+if(_hkv_debug_supported AND NOT DEFINED NSX_DEBUG_INPUT_CONTRACT)
     set(NSX_DEBUG_INPUT_CONTRACT 1)
 endif()
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/nsx/modules.cmake)
