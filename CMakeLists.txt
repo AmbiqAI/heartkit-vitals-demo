@@ -38,7 +38,8 @@ endif()
 # NSX reads the effective value from CMakeCache.txt before using the probe.
 # Recompute an automatic choice on reconfigure; retain a user's cache override.
 if(NOT DEFINED NSX_DEBUG_CONTEXT OR
-   (DEFINED _HKV_LAST_AUTO_DEBUG AND NSX_DEBUG_CONTEXT STREQUAL _HKV_LAST_AUTO_DEBUG))
+   (DEFINED _HKV_LAST_AUTO_DEBUG AND NSX_DEBUG_CONTEXT STREQUAL _HKV_LAST_AUTO_DEBUG
+    AND NOT DEFINED NSX_DEBUG_INPUT_CONTRACT))
     set(NSX_DEBUG_CONTEXT "${_hkv_debug_supported}" CACHE BOOL "Prepare configured debug handoff" FORCE)
     set(_HKV_LAST_AUTO_DEBUG "${NSX_DEBUG_CONTEXT}" CACHE INTERNAL "Last automatic debug setting")
 else()
