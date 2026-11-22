@@ -447,7 +447,14 @@ sensor_init(sensor_context_t *ctx)
 
     result = as7058_initialize(sensor_as7058_callback, NULL, NULL, NULL);
     if (result != ERR_SUCCESS) {
-        nsx_printf("as7058_initialize returned error code %d.\n", result);
+#if AS7058_USE_SPI
+        nsx_printf("AS7058 init failed on %s: SPI IOM%u CS%u, status=%d.\n", HKV_BOARD_NAME,
+                   (unsigned)nsxSpiCfg.iom, (unsigned)s_as7058_transport.cs_channel, result);
+#else
+        nsx_printf("AS7058 init failed on %s: I2C IOM%u addr=0x%02x, status=%d (%s).\n", HKV_BOARD_NAME,
+                   (unsigned)nsxI2cCfg.iom, (unsigned)s_as7058_transport.i2c_addr, result,
+                   result == ERR_DATA_TRANSFER ? "transfer failed" : "sensor initialization failed");
+#endif
         return result;
     }
 

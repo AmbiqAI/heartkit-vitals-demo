@@ -1,9 +1,14 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026, Ambiq
 schema_version: 1
 
 module:
   name: nsx-board-apollo330mp-evb
   type: board
   version: "0.1.0"
+
+licenses:
+  .: BSD-3-Clause
 
 support:
   ambiqsuite: true
