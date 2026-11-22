@@ -83,7 +83,7 @@ aot = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "neuralspotx", git = "https://github.com/AmbiqAI/neuralspotx.git?rev=81f603fc32ee16f3445553aa1b760ad2ccb5e1a6" }]
+requires-dist = [{ name = "neuralspotx", specifier = ">=1.0.1,<2" }]
 
 [package.metadata.requires-dev]
 aot = [
@@ -226,13 +226,17 @@ wheels = [
 
 [[package]]
 name = "neuralspotx"
-version = "1.0.0"
-source = { git = "https://github.com/AmbiqAI/neuralspotx.git?rev=81f603fc32ee16f3445553aa1b760ad2ccb5e1a6#81f603fc32ee16f3445553aa1b760ad2ccb5e1a6" }
+version = "1.0.1"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "jinja2" },
     { name = "packaging" },
     { name = "pyelftools" },
     { name = "pyyaml" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/3b/7e/aaa64ffdebc37ddb627083a11291e06ed0b2d67410408dc01669324772e1/neuralspotx-1.0.1.tar.gz", hash = "sha256:327b84f48491417e662ba2a88aea3d903897c36f7a74a0ebd3d237cdf3c8b87b", size = 489303, upload-time = "2026-11-22T00:05:40.256Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b1/a4/6155f9263d9bb83c9262ac11c3d46707c6c3bfc9bce4fdfce23f1a5b4fba/neuralspotx-1.0.1-py3-none-any.whl", hash = "sha256:858fd45c218b6e8e7cbd2c018a0ee1ba48a17e2e7fb1b908abe42dfe254ca850", size = 447071, upload-time = "2026-11-22T00:05:38.451Z" },
 ]
 
 [[package]]

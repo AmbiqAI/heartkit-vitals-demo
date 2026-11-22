@@ -196,5 +196,5 @@ module_registry:
       metadata: modules/nsx-tileio/modules/nsx-tileio-ble/nsx-module.yaml
 tooling:
   nsx:
-    version: 1.0.0
+    version: 1.0.1
     major: 1

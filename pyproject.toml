@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Tooling environment for the HeartKit vitals demo (neuralSPOT-X build/flash/view)"
 requires-python = ">=3.11"
 dependencies = [
-    "neuralspotx>=1.0.0,<2",
+    "neuralspotx>=1.0.1,<2",
 ]
 
 [dependency-groups]
@@ -18,7 +18,3 @@ aot = [
 
 [tool.uv]
 package = false
-
-# Use the app-venv version fix until it ships on PyPI.
-[tool.uv.sources]
-neuralspotx = { git = "https://github.com/AmbiqAI/neuralspotx.git", rev = "81f603fc32ee16f3445553aa1b760ad2ccb5e1a6" }
